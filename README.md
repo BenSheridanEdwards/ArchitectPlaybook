@@ -112,6 +112,31 @@ audits/
 
 A skill marked **stub** has valid YAML frontmatter and a clear "not yet implemented" notice. It will not run an audit. The implementation pass for each stub is added one at a time.
 
+## Implemented skills in detail
+
+A short summary of every skill currently marked **ready**. Each new skill commit adds its own entry here in the same change as the SKILL.md.
+
+### `/install-skills-locally`
+Copies every skill folder from this playbook into `<current-project>/.claude/skills/`. Self-contained `cp -R` — no symlinks, no submodules, no network. Idempotent: re-running only updates files when the source is newer (override with `--force`). Excludes the two installer skills themselves (they belong to the playbook, not its targets). Use this when you want the playbook pinned per project; use the global installer when you want one canonical copy on the machine.
+
+### `/install-skills-globally`
+Same mechanics as the local installer, but the destination is `~/.claude/skills/`. Asks for confirmation before overwriting, and never touches skills that are not part of the playbook (graphify is the canonical example). Use this when you audit lots of different codebases and do not want to re-install per project.
+
+### `/pre-audit-setup`
+One-time, idempotent project preparation that every audit assumes has been run. Verifies graphify is present at `~/.claude/skills/graphify` (does not install it), runs `/graphify .` to build `graphify-out/`, merges the graphify-aware PreToolUse hook into the project's `.claude/settings.json`, and creates the `audits/` directory. Refuses to run unless graphify is present; never touches global Claude Code settings.
+
+### `/quality-gates-audit`
+Compares the project against an opinionated three-stage baseline — pre-commit, pre-push, continuous integration — and reports which gates are present, misconfigured, or missing. Two-phase flow: report findings, then ask whether to generate an implementation plan for the gaps. Fully static (never executes a gate) and Node.js-only in v1. The baseline is opinionated by design — drift from it is the audit's signal. Findings land in `audits/quality-gates-audit/`.
+
+### `/accessibility-audit`
+Audits a TypeScript and React frontend against an opinionated WCAG 2.2 AA baseline organised in three layers — tooling and automation, component patterns, application shell. Targets WCAG 2.2 AA specifically (AAA is out of scope by design). Fully static: never starts the dev server, never runs a live axe scan. Screen-reader behaviour and focus-order verification are explicitly deferred to humans. Framework-aware across Next.js (App Router and Pages Router), Remix, Vite-React, and plain React. Status taxonomy is `present | partial | missing | violation`.
+
+### `/architecture-audit`
+The most graphify-aligned audit. Compares the codebase against opinionated invariants across four layers — module boundaries, coupling and complexity, state and data flow, convention adherence — preceded by a Layer 0 diagnostic snapshot (god nodes, communities, framework, inferred pattern). Hard requirement on the Graphify knowledge graph: refuses to run if `graphify-out/graph.json` is missing, because half the checks are unimplementable without it. Architectural pattern is inferred (feature folders, layered, atomic design, monorepo workspaces, no clear pattern) with a `--pattern=` override. Thresholds for god modules, god components, file size, and component fan-out are baked-in defaults overridable via flags.
+
+### `/bundle-build-audit`
+Audits the build pipeline and bundle output across four layers — build configuration, bundle composition and size, asset and dependency hygiene, build performance — plus a Layer 0 snapshot. **Static-first by design**: by default, the skill reads only configuration files, `package.json`, lockfiles, and continuous-integration workflows. Pass `--with-stats` to additionally read any existing `dist/stats.json`, `.next/analyze/*`, or webpack/rollup analyser artefact for real bundle numbers. The skill never runs the build itself — running builds is a separate concern from auditing them, and keeping the audit fully read-only is what makes it safe to run in any working tree at any time. Soft Graphify dependency: when present, community structure informs the implementation plan's split-plane suggestions. Supports Vite, Next.js (both routers), Remix, Create React App, plain Webpack, plain Rollup, and Turbopack.
+
 ## Conventions
 
 - **Conventional Commits** for every commit.
