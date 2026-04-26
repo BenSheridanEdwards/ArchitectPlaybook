@@ -19,22 +19,20 @@ This is the headline feature — the playbook is designed around one specific wa
    /pre-audit-setup
    ```
    Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into `.claude/settings.json`.
-3. **Open one Claude Code chat per audit and run the audit slash command.** Each audit writes its findings to `audits/<audit-name>/findings.md` (and `findings.json`, and `metadata.json`).
+3. **Spin up a worktree per audit and run them in parallel.** Use `/worktree <name>` to create the worktree, then open a fresh Claude Code chat in it and run the audit. Each audit writes its findings to `audits/<audit-name>/findings.md` (and `findings.json`, and `metadata.json`).
    ```
-   /security-audit
-   /performance-audit
-   /accessibility-audit
-   ...
+   /worktree security        # then in a new chat in ../wt-security:        /security-audit
+   /worktree performance     # then in a new chat in ../wt-performance:     /performance-audit
+   /worktree accessibility   # then in a new chat in ../wt-accessibility:   /accessibility-audit
    ```
    Run as many as you want in parallel — they are independent chat windows.
-4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit-name>/findings.md` and implement the fixes. Stay in that chat.
-5. **Open a new chat against a Git worktree** containing the fix branch and run the matching review.
+4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit-name>/findings.md` and implement the fixes. Stay in that chat — it has the most context about what the audit surfaced.
+5. **Run the review in a fresh chat against the same worktree.** Re-running the originating audit *is* the review pass.
    ```
-   git worktree add ../security-review security-review
-   cd ../security-review
-   # open a fresh Claude Code chat here
-   /security-audit              # re-run as a review pass
+   # In a fresh Claude Code chat opened in the worktree (e.g. ../wt-security):
+   /security-audit              # the audit re-run sees the fix and reports anything still outstanding
    ```
+   The review picks up anything the original audit flagged that the fix didn't address, plus anything new that emerged from the fix itself.
 6. **If the review surfaces something the audit missed, evolve the audit.**
    ```
    /system-self-improve
@@ -56,7 +54,11 @@ cd ~/architect-playbook
 cd ~/Coding/some-project
 # in a fresh Claude Code chat:
 /pre-audit-setup
-/security-audit
+
+# 4. Spin up a worktree for the first audit
+/worktree security
+# then open a new Claude Code chat in ../wt-security and run:
+#   /security-audit
 ```
 
 ## Running audits in parallel with Git worktrees
