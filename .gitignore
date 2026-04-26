@@ -1,0 +1,24 @@
+# Editor and operating-system noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local Claude Code state created when this playbook is itself audited
+.claude/settings.local.json
+graphify-out/
+audits/
+
+# Node and package-manager output (in case a future skill produces any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and coverage output
+dist/
+build/
+coverage/
