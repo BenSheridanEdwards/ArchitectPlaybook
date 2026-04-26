@@ -1,6 +1,6 @@
 # Project rules for the architect-playbook
 
-These rules apply to every Claude Code session that opens this repository, and to every skill authored inside it. They are intentionally short. If a rule and a skill body disagree, the rule wins and the skill body should be patched (run `/self-system-heal` if appropriate).
+These rules apply to every Claude Code session that opens this repository, and to every skill authored inside it. They are intentionally short. If a rule and a skill body disagree, the rule wins and the skill body should be patched (run `/system-self-improve` if appropriate).
 
 ## Commits
 
@@ -54,12 +54,12 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 
 - A fix skill reads `audits/<skill-name>/findings.json` from the same project.
 - A review skill reads the audit's findings plus the diff produced by the fix.
-- `/self-system-heal` reads the review's gap report and rewrites the originating audit's `SKILL.md` so the same gap is caught next time.
+- `/system-self-improve` reads the review's gap report and rewrites the originating audit's `SKILL.md` so the same gap is caught next time.
 
 ## Self-improvement
 
-- Never silently rewrite a skill body. The only path to evolving a skill is `/self-system-heal`, invoked by the user, with a review gap report as input.
-- When a skill's `SKILL.md` is edited (by hand or by `/self-system-heal`), the README skill index must be updated in the same commit.
+- Never silently rewrite a skill body. The only path to evolving a skill is `/system-self-improve`, invoked by the user, with a review gap report as input.
+- When a skill's `SKILL.md` is edited (by hand or by `/system-self-improve`), the README skill index must be updated in the same commit.
 
 ## Paths
 
@@ -69,4 +69,4 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 
 ## Stubs
 
-A stub `SKILL.md` is recognized by the literal string `**Status:** stub` in its body. A stub must refuse to perform any audit work. It either no-ops with a clear message, or routes the user to `/self-system-heal` for evolution.
+A stub `SKILL.md` is recognized by the literal string `**Status:** stub` in its body. A stub must refuse to perform any audit work. It either no-ops with a clear message, or routes the user to `/system-self-improve` for evolution.

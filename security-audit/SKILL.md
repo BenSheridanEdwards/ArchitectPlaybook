@@ -55,7 +55,7 @@ The skill never invokes any tool with `--fix` or any other mutating flag.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (any open redirect, any `eval`, any unsandboxed third-party iframe is a finding); soft checks report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/self-system-heal`.
+This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (any open redirect, any `eval`, any unsandboxed third-party iframe is a finding); soft checks report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
 ## The opinionated baseline
 

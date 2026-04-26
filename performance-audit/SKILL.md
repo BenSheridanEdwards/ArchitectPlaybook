@@ -53,7 +53,7 @@ The skill **never runs Lighthouse itself**. Spinning up a server and running an 
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-The defaults baked into the skill are the recommended baseline. The list-virtualization threshold is tunable via flag; all other checks are zero-tolerance or qualitative. The canonical path to evolving the baseline itself is `/self-system-heal`.
+The defaults baked into the skill are the recommended baseline. The list-virtualization threshold is tunable via flag; all other checks are zero-tolerance or qualitative. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
 ## The opinionated baseline
 

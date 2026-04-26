@@ -32,7 +32,7 @@ The actual errors happening in production belong to **observability**, not to an
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (an empty catch is an empty catch); the rest report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/self-system-heal`.
+This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (an empty catch is an empty catch); the rest report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
 ## The opinionated baseline
 

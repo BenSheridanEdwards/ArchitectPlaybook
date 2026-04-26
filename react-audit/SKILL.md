@@ -53,7 +53,7 @@ If the user wants a fresh real-run capture of hook violations, `/linting-audit -
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/self-system-heal`.
+This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
 ## The opinionated baseline
 

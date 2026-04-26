@@ -1,6 +1,6 @@
 # Architect Playbook
 
-A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions, fix what they find, review the fixes in a Git worktree, and let `/self-system-heal` patch the audits themselves whenever a review surfaces a gap.
+A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions, fix what they find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
 
 ## The workflow
 
@@ -37,7 +37,7 @@ This is the headline feature — the playbook is designed around one specific wa
    ```
 6. **If the review surfaces something the audit missed, evolve the audit.**
    ```
-   /self-system-heal
+   /system-self-improve
    ```
    This patches the originating audit's own `SKILL.md` so the same class of issue is caught next time. The playbook gets sharper every time you use it.
 
@@ -86,7 +86,7 @@ audits/
 
 - A **fix** skill reads `findings.json` and produces code changes.
 - A **review** skill reads the audit findings plus the resulting diff and produces its own gap report.
-- `/self-system-heal` reads the review's gap report and rewrites the originating audit's `SKILL.md`.
+- `/system-self-improve` reads the review's gap report and rewrites the originating audit's `SKILL.md`.
 
 ## The full skill list
 
@@ -108,7 +108,7 @@ audits/
 | [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | ready | Audit a TypeScript frontend's build pipeline and bundle output across configuration, composition and size, asset hygiene, and build performance; static-first with optional `--with-stats` enrichment from existing bundle stats artefacts; optionally generates an implementation plan. |
 | [`/error-handling-audit`](error-handling-audit/SKILL.md)       | ready | Audit a TypeScript codebase's error-handling discipline across throw and catch hygiene, async and network error handling, React error boundaries, and logging and observability; static-only by design with no opt-in modes; React layer auto-skipped when not detected; optionally generates an implementation plan. |
 | [`/documentation-audit`](documentation-audit/SKILL.md)         | ready | Audit a TypeScript project's documentation across project entry and onboarding, architectural and decision documentation, code-level documentation, and operational documentation and drift; static-first with optional `--with-link-check` for external URLs (internal/relative links always checked); operational checks auto-skip for library-only projects, drift checks always run; tunable thresholds for README size, ADR staleness, feature-doc coverage, public-API TSDoc coverage, TODO staleness, and doc freshness; optionally generates an implementation plan. |
-| [`/self-system-heal`](self-system-heal/SKILL.md)               | stub  | Read a review gap report and patch the originating audit's `SKILL.md`. |
+| [`/system-self-improve`](system-self-improve/SKILL.md)         | ready | The meta-improvement layer of the playbook. Reads a review gap report (or a user-supplied gap, or audit-history patterns), locates the affected `SKILL.md` and adjacent files, and proposes a minimal reversible edit so the same class of gap is more likely to be caught next time. Dry-run by default; `--apply` always prompts for explicit confirmation; the only skill that mutates files outside its own `audits/` directory; supports recursive self-edits with a stronger confirmation. |
 
 A skill marked **stub** has valid YAML frontmatter and a clear "not yet implemented" notice. It will not run an audit. The implementation pass for each stub is added one at a time.
 
@@ -164,6 +164,9 @@ Audits a TypeScript project's type discipline across four layers — compiler co
 ### `/documentation-audit`
 Audits a TypeScript project's documentation across four layers — project entry and onboarding, architectural and decision documentation, code-level documentation, operational documentation and drift — plus a Layer 0 snapshot. Layer 1 grades the README family (presence, substance, onboarding essentials, script accuracy, LICENSE, CONTRIBUTING, tool-version pin, `.env.example`); Layer 2 grades architectural and decision documentation (ARCHITECTURE.md, ADR infrastructure, ADR recency and templating, per-feature READMEs, diagrams); Layer 3 grades code-level documentation (TSDoc/JSDoc coverage on public APIs, comment-explains-why heuristic, no commented-out code, TODO ownership and staleness, Storybook coverage when applicable); Layer 4 grades operational documentation (deployment, rollback, monitoring, feature flags) and drift (README script drift, doc freshness, internal links, optional external links). **Operational checks auto-skip for library-only projects; drift checks always run.** TSDoc and JSDoc are treated as equivalent. Static-first with opt-in `--with-link-check` that HEAD-requests external URLs only — internal and relative links are always checked against the file system. Soft Graphify dependency: when present, per-feature documentation gaps are prioritised by graph centrality. Tunable thresholds for README minimum lines, ADR staleness, feature-doc coverage, public-API TSDoc coverage, TODO staleness, and documentation freshness. Implementation plan ordered by audience (onboarding first — newcomer experience matters most — then architectural and operational, then code-level, then drift cleanup).
 
+### `/system-self-improve`
+The meta-improvement layer of the playbook and **the only skill that mutates files outside its own `audits/` directory**. When a review surfaces a gap that one of the audits missed — or when running an audit reveals a weakness in the audit itself — this skill reads the gap, locates the affected `SKILL.md` (and any adjacent files: README, CLAUDE.md, `pre-audit-setup` hook, MEMORY.md), proposes a minimal reversible edit, asks for confirmation, and on approval mutates the playbook so the same gap is more likely to be caught next time. Three input modes in priority order: review-gap-report, user-supplied `--gap` plus `--target-skill`, or `--from-audit-history` pattern detection. **Dry-run by default**; `--apply` enables mutation but **always prompts** for explicit confirmation (no `--yes` escape hatch — accidental autonomous self-modification is foreclosed by design). Four sequential stages — weakness diagnosis, locate and analyse impact, propose the edit, apply and verify — each with `outcome: advanced | blocked | skipped` instead of the audits' status taxonomy. Soft Graphify dependency for ripple-effect prioritisation against the playbook's own knowledge graph. **Hard prohibitions baked in**: never deletes a check or skill, never changes the four-layer structural convention, never changes the established two-phase flow or Testing Philosophy across audits, never edits any target-project file, never commits on its own. Recursive self-edits are supported with a stronger confirmation prompt and a recommendation to commit immediately so the change is bisectable. Append-only `system-self-improve-log.md` records every applied improvement.
+
 ## Conventions
 
 - **Conventional Commits** for every commit.
@@ -187,7 +190,7 @@ To add a new skill:
    feat: add new <skill-name> skill
    ```
 
-To improve an existing skill, the preferred path is the playbook's own self-improvement loop: run the audit, run a review against the resulting fix, then run `/self-system-heal` so the patch to the audit body is grounded in a real gap rather than speculation.
+To improve an existing skill, the preferred path is the playbook's own self-improvement loop: run the audit, run a review against the resulting fix, then run `/system-self-improve` so the patch to the audit body is grounded in a real gap rather than speculation.
 
 ## Related
 

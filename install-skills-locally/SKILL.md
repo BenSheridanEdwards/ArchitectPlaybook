@@ -92,7 +92,7 @@ done
 
 ```
 installed:                  pre-audit-setup
-installed:                  self-system-heal
+installed:                  system-self-improve
 installed (stub):           security-audit
 installed (stub):           performance-audit
 ...

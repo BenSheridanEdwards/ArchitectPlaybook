@@ -41,7 +41,7 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 
 Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interpreted as base-2 kilobytes, etc.); `s`, `ms`, `m` for time. The skill never accepts `--apply`.
 
-The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/self-system-heal`.
+The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
 ## The opinionated baseline
 

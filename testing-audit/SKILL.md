@@ -363,7 +363,7 @@ The plan is descriptive, not executable. It does not edit tests, install package
 | Test files exist but match no recognised pattern | Custom test file naming. | Run with the patterns declared in the runner configuration. When that fails, fall back to scanning files that import `@testing-library/react`. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The components-without-tests check falls back to per-folder heuristics; the implementation plan loses centrality-based prioritisation. |
 | Snapshot files exceed the threshold but were intentionally bounded by the author | False positive on the heuristic. | The implementation plan recommends the user document a per-snapshot rationale (a comment near the snapshot reference, or moving the snapshot to a separately-named file) before deciding to keep or replace. |
-| Class assertion uses a custom design token that the heuristic does not recognise | Project-specific token naming. | The check reports `partial` rather than `violation` when the heuristic is unsure. The user can extend the recognised-token pattern in a future iteration via `/self-system-heal`. |
+| Class assertion uses a custom design token that the heuristic does not recognise | Project-specific token naming. | The check reports `partial` rather than `violation` when the heuristic is unsure. The user can extend the recognised-token pattern in a future iteration via `/system-self-improve`. |
 
 ## What this skill explicitly does NOT do
 

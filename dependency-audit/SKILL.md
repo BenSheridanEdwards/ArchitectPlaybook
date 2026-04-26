@@ -51,7 +51,7 @@ The skill detects which tier is available and records it in the diagnostic snaps
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/self-system-heal`.
+The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
 ## The opinionated baseline
 

@@ -43,7 +43,7 @@ There is no graceful degradation. A misleading half-audit is worse than no audit
 
 This skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/self-system-heal`.
+The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
 ## The opinionated baseline
 
