@@ -116,6 +116,8 @@ audits/
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix. Whatever the audit still flags is what the fix didn't address. There is no dedicated review skill — the audit *is* the review.
 - **`/system-self-improve`** reads a review's gap report (or a user-supplied gap, or audit-history patterns) and proposes an edit to the originating audit's `SKILL.md` so the same class of gap is more likely to be caught next time.
 
+A worked example of this contract — `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` produced by running `/documentation-audit` against the playbook itself — is committed at [`audits/documentation-audit/`](audits/documentation-audit/).
+
 ## Status taxonomy
 
 Every audit grades each check with one of four statuses, plus an informational Layer 0 diagnostic snapshot that has no status.
@@ -236,18 +238,16 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
 
-To add a new skill:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. The short version:
 
-1. Create a folder named after the slash command. Use full words.
-2. Add a `SKILL.md` with the standard frontmatter.
-3. Follow the body structure described in [CLAUDE.md](CLAUDE.md): purpose, usage, what-it-does, implementation steps, what-it-does-NOT-do.
-4. Add a row to the skill table above.
-5. Commit with a Conventional Commits subject:
-   ```
-   feat: add new <skill-name> skill
-   ```
+- **Add a new skill:** create a folder named after the slash command (full words, no abbreviations), write a `SKILL.md` following the canonical body structure, add the table row and the per-skill summary in the same commit. Audits also get the worktree Pro Tip block.
+- **Improve an existing skill:** prefer the self-improvement loop. Run the audit, fix the findings, review the fix in a worktree, then run `/system-self-improve` so the patch to the audit body is grounded in a real gap rather than speculation.
 
-To improve an existing skill, the preferred path is the playbook's own self-improvement loop: run the audit, run a review against the resulting fix, then run `/system-self-improve` so the patch to the audit body is grounded in a real gap rather than speculation.
+The architectural intent behind the playbook's conventions lives in [ARCHITECTURE.md](ARCHITECTURE.md). Foundational decisions are recorded as ADRs in [docs/decisions/](docs/decisions/).
+
+## License
+
+[MIT](LICENSE).
 
 ## Related
 

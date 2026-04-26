@@ -1,0 +1,146 @@
+{
+  "skillVersion": "1.0.0",
+  "runStartedAt": "2026-04-26T15:00:00Z",
+  "runFinishedAt": "2026-04-26T15:00:08Z",
+  "projectShape": "library",
+  "observabilityStack": [],
+  "featureFlagStack": [],
+  "withLinkCheck": false,
+  "thresholds": {
+    "readmeMinLines": 30,
+    "adrStalenessDays": 180,
+    "featureDocCoverage": 50,
+    "publicApiDocCoverage": 60,
+    "todoStalenessDays": 90,
+    "docStalenessDays": 180
+  },
+  "noGraphify": true,
+  "snapshot": {
+    "documentationFileCount": 26,
+    "docToCodeLineRatio": null,
+    "readme": { "present": true, "lines": 235 },
+    "license": { "present": true, "spdx": "MIT" },
+    "adrs": { "count": 1, "mostRecentDate": "2026-04-26" },
+    "todos": { "total": 0, "lessThan30Days": 0, "thirtyToNinetyDays": 0, "moreThan90Days": 0 },
+    "storybookDetected": false,
+    "docSiteFramework": null,
+    "perFeatureReadmeCoverage": 1.0,
+    "externalLinkCount": 1,
+    "externalLinkUnreachableCount": null
+  },
+  "summary": {
+    "projectEntryAndOnboarding":            { "present": 5, "partial": 0, "missing": 2, "violation": 0 },
+    "architecturalAndDecisionDocumentation":{ "present": 5, "partial": 1, "missing": 0, "violation": 0 },
+    "codeLevelDocumentation":               { "skipped": "no-source-code-detected" },
+    "operationalDocumentationAndDrift":     { "present": 2, "partial": 0, "missing": 0, "violation": 0, "skipped": 6 }
+  },
+  "checks": [
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "readme-present",
+      "status": "present",
+      "evidence": ["README.md"]
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "readme-is-substantive",
+      "status": "present",
+      "evidence": ["README.md (235 lines)"]
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "readme-covers-onboarding-essentials",
+      "status": "present",
+      "evidence": ["README.md sections: The workflow, Quick start, Running audits in parallel"]
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "readme-setup-instructions-match-package-json-scripts",
+      "status": "missing",
+      "evidence": [],
+      "expectation": "Commands shown in the README install/run/test sections reference scripts that exist in package.json.",
+      "gap": "No package.json present — the check is N/A for documentation-only libraries.",
+      "remediation": "Either pass --exclude=readme-script-drift-detection on future runs, or evolve the check via /system-self-improve to skip silently when no package.json is present."
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "license-present",
+      "status": "present",
+      "evidence": ["LICENSE (MIT)"]
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "contributing-md-present",
+      "status": "present",
+      "evidence": ["CONTRIBUTING.md"]
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "required-tool-versions-documented",
+      "status": "missing",
+      "evidence": [],
+      "expectation": "One or more of .nvmrc, .tool-versions, package.json engines, package.json volta, or mise.toml is present.",
+      "gap": "None of these is present — the check is N/A for documentation-only libraries with no runtime.",
+      "remediation": "Either pass --exclude=required-tool-versions-documented on future runs, or evolve the check via /system-self-improve to skip silently when no package.json or runtime is detected."
+    },
+    {
+      "layer": "project-entry-and-onboarding",
+      "check": "env-example-present",
+      "status": "present",
+      "evidence": [],
+      "gap": null,
+      "remediation": "The playbook reads no environment variables; the check is trivially satisfied."
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "architecture-overview-present",
+      "status": "present",
+      "evidence": ["ARCHITECTURE.md"]
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "adr-directory-present",
+      "status": "present",
+      "evidence": ["docs/decisions/", "docs/decisions/0001-four-layer-baseline-with-layer-zero-snapshot.md"]
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "recent-adr-activity",
+      "status": "present",
+      "evidence": ["docs/decisions/0001-four-layer-baseline-with-layer-zero-snapshot.md (2026-04-26)"]
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "adrs-follow-recognisable-template",
+      "status": "present",
+      "evidence": ["ADR 0001 includes Status, Date, Context, Decision, Consequences, Alternatives"]
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "per-feature-documentation",
+      "status": "present",
+      "evidence": ["18/18 skill folders carry a SKILL.md (100% coverage)"]
+    },
+    {
+      "layer": "architectural-and-decision-documentation",
+      "check": "diagrams-for-non-trivial-architecture",
+      "status": "partial",
+      "evidence": ["ARCHITECTURE.md (no diagrams)"],
+      "expectation": "Architecture documentation includes at least one diagram.",
+      "gap": "ARCHITECTURE.md prose-only; the playbook has multiple top-level skill domains (Setup utilities, Audits, Meta).",
+      "remediation": "Add a Mermaid diagram showing the Setup → Audits → Meta flow plus the findings-file contract."
+    },
+    {
+      "layer": "operational-documentation-and-drift",
+      "check": "documentation-freshness",
+      "status": "present",
+      "evidence": ["all docs modified within the 180-day threshold"]
+    },
+    {
+      "layer": "operational-documentation-and-drift",
+      "check": "internal-links-resolve",
+      "status": "present",
+      "evidence": ["all README.md, CLAUDE.md, ARCHITECTURE.md, CONTRIBUTING.md, and SKILL.md internal links resolve"]
+    }
+  ]
+}
