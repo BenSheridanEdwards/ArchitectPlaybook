@@ -95,7 +95,7 @@ audits/
 | [`/install-skills-locally`](install-skills-locally/SKILL.md)   | ready | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-skills-globally`](install-skills-globally/SKILL.md) | ready | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | ready | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
-| [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | stub  | Audit the project's quality gates: formatting, linting, type checking, tests, build. |
+| [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | ready | Audit the project against an opinionated baseline of pre-commit, pre-push, and continuous integration gates; optionally generate an implementation plan for the gaps. |
 | [`/security-audit`](security-audit/SKILL.md)                   | stub  | Audit authentication, authorization, input validation, secrets, dependencies. |
 | [`/accessibility-audit`](accessibility-audit/SKILL.md)         | stub  | Audit semantic HTML, ARIA, keyboard navigation, focus, contrast, screen-reader support. |
 | [`/dependency-audit`](dependency-audit/SKILL.md)               | stub  | Audit dependencies for vulnerabilities, outdated versions, license risk, abandonment. |
