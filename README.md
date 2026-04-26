@@ -106,7 +106,7 @@ audits/
 | [`/linting-audit`](linting-audit/SKILL.md)                     | stub  | Audit lint configuration, ignored files, suppressed warnings, conflicting plugins. |
 | [`/typescript-audit`](typescript-audit/SKILL.md)               | stub  | Audit TypeScript configuration and code: unsafe casts, weak types, strictness. |
 | [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | ready | Audit a TypeScript frontend's build pipeline and bundle output across configuration, composition and size, asset hygiene, and build performance; static-first with optional `--with-stats` enrichment from existing bundle stats artefacts; optionally generates an implementation plan. |
-| [`/error-handling-audit`](error-handling-audit/SKILL.md)       | stub  | Audit swallowed exceptions, missing context, inconsistent logging. |
+| [`/error-handling-audit`](error-handling-audit/SKILL.md)       | ready | Audit a TypeScript codebase's error-handling discipline across throw and catch hygiene, async and network error handling, React error boundaries, and logging and observability; static-only by design with no opt-in modes; React layer auto-skipped when not detected; optionally generates an implementation plan. |
 | [`/documentation-audit`](documentation-audit/SKILL.md)         | stub  | Audit project documentation for accuracy, drift, missing onboarding paths. |
 | [`/self-system-heal`](self-system-heal/SKILL.md)               | stub  | Read a review gap report and patch the originating audit's `SKILL.md`. |
 
@@ -139,6 +139,9 @@ Audits the build pipeline and bundle output across four layers — build configu
 
 ### `/dependency-audit`
 Audits a Node.js project's dependency tree across four layers — security, health, compliance, hygiene — plus a Layer 0 snapshot. **Static-first by design** with three explicit input tiers: lockfile only, lockfile plus `node_modules`, and lockfile plus `node_modules` plus network. Pass `--with-network` to enrich with vulnerability, outdated, and abandonment data via the package manager's own read-only audit and outdated commands — no install, no update, no lockfile rewrite. The skill **never enforces a license policy**: copyleft and source-available licenses surface as `partial` for human review (with optional allowlist via `.architect-playbook/licenses.json`), never as automatic violations. Soft Graphify dependency: when present, the unused-dependency and misplaced-dependency checks use the import graph as truth (high confidence); without it they fall back to a regex/AST sweep (low confidence). Supports npm, pnpm, yarn (Berry), and bun.
+
+### `/error-handling-audit`
+Audits a TypeScript codebase's error-handling discipline across four layers — throw and catch hygiene, async and network error handling, React error boundaries, logging and observability — plus a Layer 0 snapshot. **Static-only by design**, with no opt-in modes: error handling is a pure code-shape concern, and runtime error data belongs to a separate observability tool (Sentry, Datadog, etc.), not to this audit. Layer 3 is automatically skipped when React is not detected, so the skill is equally useful on plain TypeScript backends. Most checks are zero-tolerance (empty catches, string throws, swallowed errors); soft checks like custom-error-class adoption and structured logging report `partial` based on qualitative pattern detection — there are no numeric threshold flags here. Soft Graphify dependency: when present, the graph sharpens analysis of error propagation through async chains. Detects a wide range of error-reporting services (Sentry, Bugsnag, Rollbar, Datadog RUM, Honeybadger, Highlight) and loggers (`pino`, `winston`, `loglevel`, framework-provided).
 
 ## Conventions
 
