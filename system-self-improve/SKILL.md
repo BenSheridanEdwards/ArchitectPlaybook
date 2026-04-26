@@ -58,6 +58,8 @@ This is the only skill in the playbook with a meaningful `--apply` mode. Two mod
 
 The skill never accepts any flag that bypasses the confirmation prompt under `--apply`. It also never operates on a target project's source files; it only reads gap reports and edits the playbook clone.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree system-self-improve` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The four stages plus Layer 0
 
 The other audits use four layers organised by concern. This skill's layers are **stages of the meta-improvement workflow**, walked sequentially. Each stage either advances or surfaces a blocker. The status taxonomy differs from the audits accordingly: every stage records an `outcome` of `advanced`, `blocked`, or `skipped`, plus a `blockerReason` when relevant. There is no `present | partial | missing | violation` here — those concepts apply when grading a target codebase, not when diagnosing the playbook itself.

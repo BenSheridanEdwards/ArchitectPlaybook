@@ -25,6 +25,8 @@ The default mental model is a TypeScript and React frontend project. The detecti
 
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree quality-gates` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 The skill audits against this exact list. A gate is **present** if every detection signal listed for it resolves; **misconfigured** if some but not all signals resolve; **missing** if none resolve.

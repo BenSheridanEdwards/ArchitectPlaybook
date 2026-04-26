@@ -53,6 +53,8 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree dependency` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

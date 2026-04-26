@@ -63,14 +63,27 @@ cd ~/Coding/some-project
 
 Audits do not modify the codebase, so you can run several at once against the main checkout. Reviews and fixes are easier to keep separate when each lives in its own worktree.
 
-```bash
-git worktree add ../security-audit       -b security-audit
-git worktree add ../performance-audit    -b performance-audit
-git worktree add ../accessibility-audit  -b accessibility-audit
-git worktree add ../dependency-audit     -b dependency-audit
+The fastest path is the [`/worktree`](worktree/SKILL.md) helper, which creates a worktree for the named audit and prints the next-step instructions:
+
+```
+/worktree security
+/worktree performance
+/worktree accessibility
+/worktree dependency
 ```
 
-Open one Claude Code chat per worktree, run the matching audit slash command in each, and let them work in parallel. When you are ready to apply fixes, do it in the same chat that produced the audit (each chat has the most context about its own findings). When the fixes are in, spin up a fresh chat against the worktree to run the review pass.
+The argument accepts the full skill name (`security-audit`), the short form (`security`), or any unambiguous prefix. Run `/worktree` with no argument to pick from a list of available audits.
+
+Or run the equivalent Git commands by hand:
+
+```bash
+git worktree add ../wt-security       -b wt-security
+git worktree add ../wt-performance    -b wt-performance
+git worktree add ../wt-accessibility  -b wt-accessibility
+git worktree add ../wt-dependency     -b wt-dependency
+```
+
+Either way: open one Claude Code chat per worktree, run the matching audit slash command in each, and let them work in parallel. When you are ready to apply fixes, do it in the same chat that produced the audit (each chat has the most context about its own findings). When the fixes are in, spin up a fresh chat against the worktree to run the review pass.
 
 ## The findings-file contract
 
@@ -95,6 +108,7 @@ audits/
 | [`/install-skills-locally`](install-skills-locally/SKILL.md)   | ready | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-skills-globally`](install-skills-globally/SKILL.md) | ready | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | ready | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
+| [`/worktree`](worktree/SKILL.md)                               | ready | One-shot helper that creates a Git worktree for running an audit in parallel. Accepts a skill name (with lenient prefix matching), or with no argument prints the available audits to pick from. |
 | [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | ready | Audit the project against an opinionated baseline of pre-commit, pre-push, and continuous integration gates; optionally generate an implementation plan for the gaps. |
 | [`/security-audit`](security-audit/SKILL.md)                   | ready | Audit a TypeScript and React frontend across authentication and sessions, input handling and XSS prevention, transport and headers and cookies, and secrets/data/third-party integrations; **frontend-only in v1**; static-first with optional `--with-scan` enrichment from installed security scanners; optionally generates an implementation plan ordered by severity. |
 | [`/accessibility-audit`](accessibility-audit/SKILL.md)         | ready | Audit a TypeScript and React frontend against an opinionated WCAG 2.2 AA baseline across tooling, component patterns, and application shell; optionally generate an implementation plan for the gaps. |
@@ -124,6 +138,9 @@ Same mechanics as the local installer, but the destination is `~/.claude/skills/
 
 ### `/pre-audit-setup`
 One-time, idempotent project preparation that every audit assumes has been run. Verifies graphify is present at `~/.claude/skills/graphify` (does not install it), runs `/graphify .` to build `graphify-out/`, merges the graphify-aware PreToolUse hook into the project's `.claude/settings.json`, and creates the `audits/` directory. Refuses to run unless graphify is present; never touches global Claude Code settings.
+
+### `/worktree`
+A small helper that removes the friction of spinning up a Git worktree for running an architect-playbook audit in parallel. Accepts a skill name (`/worktree security-audit`), the short form (`/worktree security`), or any unambiguous prefix (`/worktree sec`). Run with no argument to pick from a list of available audits. On ambiguity, lists candidates and asks. Creates `../wt-<short>` on a `wt-<short>` branch, then prints the next-step instructions: open a new Claude Code chat in the worktree and run the audit there. Excludes the install and setup skills from the picker because their effects need to land in the main checkout, not in a worktree. Does not run any audit, open a chat, change the current chat's working directory, or modify anything beyond creating the worktree itself.
 
 ### `/quality-gates-audit`
 Compares the project against an opinionated three-stage baseline — pre-commit, pre-push, continuous integration — and reports which gates are present, misconfigured, or missing. Two-phase flow: report findings, then ask whether to generate an implementation plan for the gaps. Fully static (never executes a gate) and Node.js-only in v1. The baseline is opinionated by design — drift from it is the audit's signal. Findings land in `audits/quality-gates-audit/`.

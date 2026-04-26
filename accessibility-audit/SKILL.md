@@ -26,6 +26,8 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 
 This skill never accepts `--apply`. Mutating the codebase is the responsibility of a separate fix step. The implementation plan is descriptive Markdown.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree accessibility` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

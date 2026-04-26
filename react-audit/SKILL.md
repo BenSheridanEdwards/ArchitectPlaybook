@@ -55,6 +55,8 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree react` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

@@ -43,6 +43,8 @@ Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interp
 
 The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree bundle-build` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

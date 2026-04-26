@@ -45,6 +45,8 @@ This skill never accepts `--apply`. The implementation plan is descriptive Markd
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
+**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree architecture` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses, with the same semantics as `/accessibility-audit`:
