@@ -97,7 +97,7 @@ audits/
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | ready | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
 | [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | ready | Audit the project against an opinionated baseline of pre-commit, pre-push, and continuous integration gates; optionally generate an implementation plan for the gaps. |
 | [`/security-audit`](security-audit/SKILL.md)                   | stub  | Audit authentication, authorization, input validation, secrets, dependencies. |
-| [`/accessibility-audit`](accessibility-audit/SKILL.md)         | stub  | Audit semantic HTML, ARIA, keyboard navigation, focus, contrast, screen-reader support. |
+| [`/accessibility-audit`](accessibility-audit/SKILL.md)         | ready | Audit a TypeScript and React frontend against an opinionated WCAG 2.2 AA baseline across tooling, component patterns, and application shell; optionally generate an implementation plan for the gaps. |
 | [`/dependency-audit`](dependency-audit/SKILL.md)               | stub  | Audit dependencies for vulnerabilities, outdated versions, license risk, abandonment. |
 | [`/performance-audit`](performance-audit/SKILL.md)             | stub  | Audit render hot paths, expensive computations, network waterfalls, caching gaps. |
 | [`/architecture-audit`](architecture-audit/SKILL.md)           | stub  | Audit boundary violations, hidden coupling, circular dependencies, missing abstractions. |
