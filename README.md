@@ -105,7 +105,7 @@ audits/
 | [`/react-audit`](react-audit/SKILL.md)                         | stub  | Audit React component anti-patterns, hook misuse, unnecessary re-renders. |
 | [`/linting-audit`](linting-audit/SKILL.md)                     | stub  | Audit lint configuration, ignored files, suppressed warnings, conflicting plugins. |
 | [`/typescript-audit`](typescript-audit/SKILL.md)               | stub  | Audit TypeScript configuration and code: unsafe casts, weak types, strictness. |
-| [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | stub  | Audit bundle size regressions, duplicate dependencies, missing code splitting. |
+| [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | ready | Audit a TypeScript frontend's build pipeline and bundle output across configuration, composition and size, asset hygiene, and build performance; static-first with optional `--with-stats` enrichment from existing bundle stats artefacts; optionally generates an implementation plan. |
 | [`/error-handling-audit`](error-handling-audit/SKILL.md)       | stub  | Audit swallowed exceptions, missing context, inconsistent logging. |
 | [`/documentation-audit`](documentation-audit/SKILL.md)         | stub  | Audit project documentation for accuracy, drift, missing onboarding paths. |
 | [`/self-system-heal`](self-system-heal/SKILL.md)               | stub  | Read a review gap report and patch the originating audit's `SKILL.md`. |
