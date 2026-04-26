@@ -100,7 +100,7 @@ audits/
 | [`/accessibility-audit`](accessibility-audit/SKILL.md)         | ready | Audit a TypeScript and React frontend against an opinionated WCAG 2.2 AA baseline across tooling, component patterns, and application shell; optionally generate an implementation plan for the gaps. |
 | [`/dependency-audit`](dependency-audit/SKILL.md)               | stub  | Audit dependencies for vulnerabilities, outdated versions, license risk, abandonment. |
 | [`/performance-audit`](performance-audit/SKILL.md)             | stub  | Audit render hot paths, expensive computations, network waterfalls, caching gaps. |
-| [`/architecture-audit`](architecture-audit/SKILL.md)           | stub  | Audit boundary violations, hidden coupling, circular dependencies, missing abstractions. |
+| [`/architecture-audit`](architecture-audit/SKILL.md)           | ready | Audit a TypeScript codebase against opinionated invariants for module boundaries, coupling, state and data flow, and convention adherence using the Graphify knowledge graph; produces a diagnostic snapshot and a violations report; optionally generates an implementation plan. |
 | [`/testing-audit`](testing-audit/SKILL.md)                     | stub  | Audit coverage gaps, weak assertions, flaky patterns, missing integration coverage. |
 | [`/react-audit`](react-audit/SKILL.md)                         | stub  | Audit React component anti-patterns, hook misuse, unnecessary re-renders. |
 | [`/linting-audit`](linting-audit/SKILL.md)                     | stub  | Audit lint configuration, ignored files, suppressed warnings, conflicting plugins. |
