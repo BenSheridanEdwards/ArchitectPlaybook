@@ -1,6 +1,6 @@
 ---
 name: accessibility-audit
-description: Audit a TypeScript and React frontend against an opinionated WCAG 2.2 AA baseline organised across tooling, component patterns, and application shell, then optionally generate an implementation plan for the gaps.
+description: Audit a TypeScript/React frontend against an opinionated WCAG 2.2 AA baseline (tooling, component patterns, application shell) with optional implementation plan.
 trigger: /accessibility-audit
 ---
 

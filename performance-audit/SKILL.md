@@ -1,6 +1,6 @@
 ---
 name: performance-audit
-description: Audit a TypeScript and React frontend's runtime performance patterns against an opinionated baseline spanning render performance, network and data, assets and media and Core Web Vitals, and main-thread work and measurement. Static-first with optional --with-lighthouse-results enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit runtime performance patterns in a TypeScript/React frontend (render, network/data, assets/CWV, main-thread). Static-first with optional --with-lighthouse-results enrichment and implementation plan.
 trigger: /performance-audit
 ---
 

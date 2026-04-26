@@ -1,6 +1,6 @@
 ---
 name: dependency-audit
-description: Audit a Node.js project's dependency tree against an opinionated baseline spanning security, health, compliance, and hygiene. Static-first with optional network enrichment for vulnerabilities, outdated versions, and abandonment data. Optionally generates an implementation plan for the gaps.
+description: Audit Node.js dependency tree (security, health, compliance, hygiene). Static-first with optional --with-network enrichment for vulnerabilities, outdated, and abandonment data. Optionally generates an implementation plan.
 trigger: /dependency-audit
 ---
 

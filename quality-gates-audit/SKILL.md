@@ -1,6 +1,6 @@
 ---
 name: quality-gates-audit
-description: Audit the project's quality gates against an opinionated baseline across pre-commit, pre-push, and continuous integration stages, then optionally generate an implementation plan for any missing or misconfigured gates.
+description: Audit pre-commit, pre-push, and CI/CD quality gates against an opinionated baseline. Reports present/missing/misconfigured gates and optionally generates an implementation plan.
 trigger: /quality-gates-audit
 ---
 

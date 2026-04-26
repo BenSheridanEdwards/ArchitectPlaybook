@@ -1,6 +1,6 @@
 ---
 name: architecture-audit
-description: Audit a TypeScript codebase against an opinionated set of architectural invariants spanning module boundaries, coupling, state and data flow, and convention adherence, using the Graphify knowledge graph as the primary data source. Produces a diagnostic snapshot plus a violations report, then optionally generates an implementation plan for the gaps.
+description: Graphify-powered architectural audit of a TypeScript codebase. Produces a diagnostic snapshot + checks module boundaries, coupling, state/data flow, and conventions, with optional implementation plan.
 trigger: /architecture-audit
 ---
 

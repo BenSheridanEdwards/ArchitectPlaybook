@@ -1,6 +1,6 @@
 ---
 name: testing-audit
-description: Audit a TypeScript and React project's tests against an opinionated baseline rooted in the Testing Library query priority hierarchy and well-known React Testing Library pitfalls, spanning test runner and tooling, query priority and selector hygiene, interaction and async patterns, and test design and coverage. Static-first with optional --with-run enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit React tests against Testing Library query priority and well-known React Testing Library pitfalls. Static-first with optional --with-run coverage enrichment and implementation plan.
 trigger: /testing-audit
 ---
 

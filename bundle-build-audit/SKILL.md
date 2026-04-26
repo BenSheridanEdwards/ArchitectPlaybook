@@ -1,6 +1,6 @@
 ---
 name: bundle-build-audit
-description: Audit a TypeScript frontend's build pipeline and bundle output against an opinionated baseline spanning build configuration, bundle composition and size, asset and dependency hygiene, and build performance. Static-first with optional stats enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit build pipeline and bundle output (static-first with optional --with-stats enrichment). Checks configuration, composition, hygiene, and performance with optional implementation plan.
 trigger: /bundle-build-audit
 ---
 

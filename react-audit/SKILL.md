@@ -1,6 +1,6 @@
 ---
 name: react-audit
-description: Audit a TypeScript and React project against an opinionated baseline of idiomatic React spanning hooks correctness, component design, state management, and React 18/19 idioms. Static-only by design. Optionally generates an implementation plan for the gaps.
+description: Audit idiomatic React (hooks correctness, component design, state management, React 18/19 idioms). Static-only by design with optional implementation plan.
 trigger: /react-audit
 ---
 

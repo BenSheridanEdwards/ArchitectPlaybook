@@ -1,6 +1,6 @@
 ---
 name: documentation-audit
-description: Audit a TypeScript project's documentation against an opinionated baseline spanning project entry and onboarding, architectural and decision documentation, code-level documentation, and operational documentation and drift. Static-first with optional --with-link-check enrichment for external URLs. Optionally generates an implementation plan for the gaps.
+description: Audit project documentation against an opinionated baseline spanning onboarding, architectural/decision docs, code-level docs, and operational documentation with drift detection. Static-first with optional --with-link-check. Optionally generates an implementation plan for the gaps.
 trigger: /documentation-audit
 ---
 
