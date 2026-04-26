@@ -1,6 +1,6 @@
 ---
 name: testing-audit
-description: Audit a TypeScript and React project's tests against an opinionated baseline rooted in the Testing Library query priority hierarchy and Kent C. Dodds' common-mistakes list, spanning test runner and tooling, query priority and selector hygiene, interaction and async patterns, and test design and coverage. Static-first with optional --with-run enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit a TypeScript and React project's tests against an opinionated baseline rooted in the Testing Library query priority hierarchy and well-known React Testing Library pitfalls, spanning test runner and tooling, query priority and selector hygiene, interaction and async patterns, and test design and coverage. Static-first with optional --with-run enrichment. Optionally generates an implementation plan for the gaps.
 trigger: /testing-audit
 ---
 
@@ -118,8 +118,8 @@ Layer 0 is informational only and has no status.
 | --- | --- | --- |
 | Single test runner installed | Exactly one of Vitest or Jest in `devDependencies`. | Both present, with no clear migration. |
 | `@testing-library/react` installed | When React is detected, the React Testing Library is in `devDependencies`. | Missing in a React project that ships tests. |
-| `@testing-library/user-event` installed | Available for interaction simulation; Kent recommends `userEvent` over `fireEvent`. | Missing. |
-| `@testing-library/jest-dom` installed | Provides DOM-aware matchers (`toBeInTheDocument`, `toBeDisabled`, `toHaveClass`). Kent: "Use Wrong Assertion" mistake — install jest-dom for better assertions. | Missing. |
+| `@testing-library/user-event` installed | Available for interaction simulation. The interaction-and-async layer prefers `userEvent` over `fireEvent`. | Missing. |
+| `@testing-library/jest-dom` installed | Provides DOM-aware matchers (`toBeInTheDocument`, `toBeDisabled`, `toHaveClass`) so assertions can describe user-visible state rather than DOM-property internals. | Missing. |
 | `eslint-plugin-testing-library` configured | The plugin is installed and enabled. (Overlap with `/linting-audit`; both surface so a single fix passes both.) | Plugin missing or not enabled. |
 | `eslint-plugin-jest-dom` configured | The plugin is installed and enabled. (Overlap with `/linting-audit`.) | Plugin missing or not enabled. |
 | jest-dom matchers loaded in setup file | The runner's setup file imports `@testing-library/jest-dom`. | No setup file, or setup file does not import jest-dom. |
@@ -128,33 +128,33 @@ Layer 0 is informational only and has no status.
 
 ### Layer 2 — Query priority and selector hygiene
 
-This layer encodes the priority ladder and Kent's selector-related mistakes.
+This layer encodes the priority ladder and the most common selector-related pitfalls.
 
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
 | Query distribution favours Priority 1 | At least the threshold percentage (default 70%; tunable via `--threshold-priority-one-ratio`) of all `*By*` queries are Priority 1 queries. | Distribution below the threshold. |
 | `getByTestId` usage is rare | At most the threshold percentage (default 10%; tunable via `--threshold-testid-ratio`) of all queries use `getByTestId`. | Distribution above the threshold. |
 | No `container.querySelector` for finding elements | Tests use Testing Library queries, not `container.querySelector` or `document.querySelector`. | `querySelector` calls in tests for element lookup. |
-| Queries via `screen`, not destructured | Queries come from `screen.getBy*`, not destructured from the `render` return value. (Kent: "use `screen` for querying and debugging".) | `const { getByRole } = render(...)` patterns. |
-| `render` return named `view`, not `wrapper` | When the render return is captured, it is named `view` (or destructured for what's needed). Kent's reasoning: the return is not wrapping anything. Soft check — reported as `partial`. | `const wrapper = render(...)`. |
+| Queries via `screen`, not destructured | Queries come from `screen.getBy*`, not destructured from the `render` return value. `screen` works everywhere and keeps debugging tools (`screen.debug()`) consistent. | `const { getByRole } = render(...)` patterns. |
+| `render` return named `view`, not `wrapper` | When the render return is captured, it is named `view` (or destructured for what's needed). The render return is not wrapping anything; the `wrapper` name is a holdover from older testing libraries. Soft check — reported as `partial`. | `const wrapper = render(...)`. |
 | `*ByRole` is the dominant Priority 1 query | Of the Priority 1 queries, at least the threshold percentage (default 50%; tunable via `--threshold-by-role-ratio`) are `getByRole` (with the `name` option). Soft check — reported as `partial`. | Priority 1 use without meaningful `getByRole` adoption. |
-| No redundant ARIA roles in test assertions | Tests do not assert on `role` attributes that are already implicit (`<button role="button">`). Kent: "Avoid adding unnecessary or incorrect accessibility attributes" — applies to tests too. | Test assertions matching `[role="button"]` on a `<button>`. |
+| No redundant ARIA roles in test assertions | Tests do not assert on `role` attributes that are already implicit (`<button role="button">`). The principle is the same one `/accessibility-audit` applies to source: do not pile on accessibility attributes that the semantic element already provides. | Test assertions matching `[role="button"]` on a `<button>`. |
 
 ### Layer 3 — Interaction and async patterns
 
-This layer encodes the bulk of Kent's common mistakes — interaction style, async handling, and `waitFor` discipline.
+This layer encodes the well-known pitfalls in interaction style, async handling, and `waitFor` discipline.
 
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
-| `userEvent` preferred over `fireEvent` | At least the threshold percentage (default 80%; tunable via `--threshold-user-event-ratio`) of interaction calls use `userEvent` rather than `fireEvent`. Kent: "Use `@testing-library/user-event` over `fireEvent`". | Ratio below the threshold. |
-| `find*` used for elements not yet present | When waiting for an element to appear, tests use `findBy*`, not `waitFor(() => getBy*())`. Kent's high-importance mistake. | `waitFor` callbacks containing only a `getBy*` lookup. |
-| `query*` only for absence assertions | `queryBy*` is used only with `not.toBeInTheDocument()` or analogous absence checks. Kent's high-importance mistake. | `queryBy*` used in a positive-presence assertion. |
-| `waitFor` callback contains a single assertion | Each `waitFor` call wraps exactly one `expect`. Kent: low-importance but easy to fix. | `waitFor` callbacks with multiple `expect` calls. |
-| `waitFor` callback is not empty | `waitFor(() => {})` followed by an assertion outside is wrong; the assertion belongs inside the callback. Kent's high-importance mistake. | Empty `waitFor` callbacks. |
-| No side effects in `waitFor` | The `waitFor` callback contains only assertions — no `fireEvent`, `userEvent`, or other state mutation. Kent's high-importance mistake. | `fireEvent` or `userEvent` calls inside `waitFor`. |
-| No unnecessary `act` wrapping | `render` and `fireEvent` calls are not wrapped in `act(...)`; both are already wrapped internally. Kent's medium-importance mistake. | `act(() => { render(...) })` or `act(() => { fireEvent.click(...) })` patterns. |
-| No manual `cleanup()` calls | Tests do not import or call `cleanup` from `@testing-library/react`. Modern test runners auto-cleanup. Kent's medium-importance mistake. | `cleanup` imported or called. |
-| Assertions are explicit | Tests do not rely on `getBy*` throwing as the assertion; they wrap with `expect(...).toBeInTheDocument()` (or analogous). Kent: low-importance but principle-relevant. | `getBy*` calls appearing on a line by themselves with no `expect`. |
+| `userEvent` preferred over `fireEvent` | At least the threshold percentage (default 80%; tunable via `--threshold-user-event-ratio`) of interaction calls use `userEvent` rather than `fireEvent`. `userEvent` simulates the full sequence of events a real user produces (focus, keydown, input, change), where `fireEvent` fires only one. | Ratio below the threshold. |
+| `find*` used for elements not yet present | When waiting for an element to appear, tests use `findBy*`, not `waitFor(() => getBy*())`. `findBy*` already retries until a timeout and produces clearer error messages. | `waitFor` callbacks containing only a `getBy*` lookup. |
+| `query*` only for absence assertions | `queryBy*` is used only with `not.toBeInTheDocument()` or analogous absence checks. `queryBy*` returns `null` instead of throwing, which is the only behaviour that makes "is this element absent?" assertable; using it for presence assertions silently skips the check. | `queryBy*` used in a positive-presence assertion. |
+| `waitFor` callback contains a single assertion | Each `waitFor` call wraps exactly one `expect`. With several assertions in one callback, the first failure causes a re-run of all of them, slowing the suite and obscuring which one actually failed. | `waitFor` callbacks with multiple `expect` calls. |
+| `waitFor` callback is not empty | `waitFor(() => {})` followed by an assertion outside is wrong; the assertion belongs inside the callback so `waitFor` knows what it is waiting for. | Empty `waitFor` callbacks. |
+| No side effects in `waitFor` | The `waitFor` callback contains only assertions — no `fireEvent`, `userEvent`, or other state mutation. `waitFor` re-runs its callback until it succeeds, so any side effect inside fires repeatedly. | `fireEvent` or `userEvent` calls inside `waitFor`. |
+| No unnecessary `act` wrapping | `render` and `fireEvent` calls are not wrapped in `act(...)`; both are already wrapped internally. Hand-rolled `act` only adds noise (and sometimes silences warnings that should have been visible). | `act(() => { render(...) })` or `act(() => { fireEvent.click(...) })` patterns. |
+| No manual `cleanup()` calls | Tests do not import or call `cleanup` from `@testing-library/react`. Modern test runners auto-cleanup after each test. | `cleanup` imported or called. |
+| Assertions are explicit | Tests do not rely on `getBy*` throwing as the assertion; they wrap with `expect(...).toBeInTheDocument()` (or analogous). The intent of the test should be readable at a glance. | `getBy*` calls appearing on a line by themselves with no `expect`. |
 
 ### Layer 4 — Test design and coverage
 
@@ -379,5 +379,4 @@ The plan is descriptive, not executable. It does not edit tests, install package
 
 ## References
 
-- Kent C. Dodds, [Common Mistakes with React Testing Library](https://kentcdodds.com/blog/common-mistakes-with-react-testing-library) — the canonical source for layers 2 and 3.
 - Testing Library, [About Queries — Priority](https://testing-library.com/docs/queries/about/#priority) — the canonical source for the priority ladder.
