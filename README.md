@@ -52,6 +52,20 @@ This is the headline feature — the playbook is designed around one specific wa
    ```
    This patches the originating audit's own `SKILL.md` so the same class of issue is caught next time. The playbook gets sharper every time you use it.
 
+### Single-audit shortcut
+
+The worktree-and-fresh-chat pattern is for the parallel case — multiple audits running at the same time, with reviews in independent chat sessions. **For a single audit, one chat is fine.** Open a Claude Code chat in your project, run `/pre-audit-setup` if you have not already, run the audit, ask Claude to fix the findings in the same chat, then re-run the audit to verify.
+
+```
+# In a chat opened in your project:
+/pre-audit-setup
+/security-audit
+# read findings, ask Claude to fix them in this chat
+/security-audit              # re-run to verify
+```
+
+You give up branch isolation (fixes land on the current branch — `git checkout -b` first if you want a clean branch) and a small amount of review independence (the same chat that fixed it reviews it). Worth the trade for a low-stakes pass.
+
 ## Quick start
 
 ```bash
