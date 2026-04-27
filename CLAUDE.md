@@ -66,7 +66,3 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 - Never hard-code absolute paths in skill bodies.
 - Derive from the current working directory or `$HOME`.
 - Never write to `~/.claude/settings.json` from any skill in this playbook. Project-local settings only.
-
-## Stubs
-
-A stub `SKILL.md` is recognized by the literal string `**Status:** stub` in its body. A stub must refuse to perform any audit work. It either no-ops with a clear message, or routes the user to `/system-self-improve` for evolution.
