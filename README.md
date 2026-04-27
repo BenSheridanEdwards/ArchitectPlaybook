@@ -161,38 +161,46 @@ The playbook's skills fall into three categories: setup utilities you run once p
 
 ### Setup utilities
 
-| Trigger | Status | Purpose |
+| Trigger | Flags | Purpose |
 | --- | --- | --- |
-| [`/install-skills-locally`](install-skills-locally/SKILL.md)   | ready | Copy every playbook skill into the current project's `.claude/skills/`. |
-| [`/install-skills-globally`](install-skills-globally/SKILL.md) | ready | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
-| [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | ready | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
-| [`/worktree`](worktree/SKILL.md)                               | ready | Creates a Git worktree for the named audit and runs the audit against it, all in this same chat. Lenient prefix matching; bare `/worktree` opens a picker. |
+| [`/install-skills-locally`](install-skills-locally/SKILL.md)   | `--dry-run` (print the plan without copying)<br>`--force` (overwrite destinations even if they appear newer)<br>`--include=<name>` / `--exclude=<name>` (narrow or skip skills, repeatable) | Copy every playbook skill into the current project's `.claude/skills/`. |
+| [`/install-skills-globally`](install-skills-globally/SKILL.md) | `--dry-run` (print the plan without copying)<br>`--force` (overwrite destinations even if they appear newer)<br>`--include=<name>` / `--exclude=<name>` (narrow or skip skills, repeatable) | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
+| [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | `--dry-run` (describe what would change without modifying anything)<br>`--force` (rebuild the knowledge graph and rewrite the hook even if both already exist) | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
+| [`/worktree`](worktree/SKILL.md)                               | `<skill-name>` — positional, lenient prefix matching (e.g. `sec` resolves to `security-audit`). Bare `/worktree` opens a picker. | Creates a Git worktree for the named audit and runs the audit against it, all in this same chat. |
 
 ### Audits
 
-| Trigger | Status | Purpose |
+Every audit accepts the same set of common flags, listed once here so the per-skill column below stays focused on what is unique:
+
+- `--report-only` — phase 1 only: write findings, do not offer a plan.
+- `--plan` — skip phase 1 if findings already exist; jump to plan generation.
+- `--layer=<name>` — restrict to a single layer (repeatable). `/quality-gates-audit` uses `--stage=<name>` instead.
+- `--include=<check>` / `--exclude=<check>` — narrow or skip individual checks (repeatable).
+- `--target=<path>` — operate on a different directory instead of the current working directory. This is what lets `/worktree` audit a worktree from a chat opened elsewhere.
+
+Many audits also expose `--threshold-*` flags as escape hatches for codebases with deliberately different defaults — see each `SKILL.md` for the full list. None of the audit skills accept `--apply`; mutation is reserved for `/system-self-improve`.
+
+| Trigger | Audit-specific flags | Purpose |
 | --- | --- | --- |
-| [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | ready | Pre-commit, pre-push, and CI/CD lifecycle gates against an opinionated baseline. |
-| [`/security-audit`](security-audit/SKILL.md)                   | ready | Frontend security: auth/sessions, XSS prevention, transport headers, secrets, third-party integrations. Server-side reserved for a future `/backend-security-audit`. |
-| [`/accessibility-audit`](accessibility-audit/SKILL.md)         | ready | WCAG 2.2 AA across tooling, component patterns, and application shell. Static-only — screen-reader and focus-order verification deferred to humans. |
-| [`/dependency-audit`](dependency-audit/SKILL.md)               | ready | Dependency tree across security, health, compliance, hygiene. Three input tiers (lockfile / + node_modules / + network). License signals are flagged for human review, never auto-enforced. |
-| [`/performance-audit`](performance-audit/SKILL.md)             | ready | Runtime performance: render, network/data, assets/CWV, main-thread. Implementation plan ordered by Core Web Vitals impact. |
-| [`/architecture-audit`](architecture-audit/SKILL.md)           | ready | Module boundaries, coupling, state/data flow, convention adherence. The most graphify-aligned audit — refuses to run without the knowledge graph. |
-| [`/testing-audit`](testing-audit/SKILL.md)                     | ready | Tests against the Testing Library priority ladder and the well-known RTL pitfalls. Carries the playbook's Testing Philosophy. |
-| [`/react-audit`](react-audit/SKILL.md)                         | ready | Idiomatic React: hook correctness, component design, state management, React 18/19 idioms. Layer 4 auto-skipped on React below 18. |
-| [`/linting-audit`](linting-audit/SKILL.md)                     | ready | Lint configuration shape, rule coverage, strictness, suppressions hygiene. Auto-detects ESLint or Biome; dual-install is itself a violation. |
-| [`/typescript-audit`](typescript-audit/SKILL.md)               | ready | Compiler flags, source-level type quality, type-system idioms, runtime validation at IO boundaries. Tunable per-file thresholds for `any`/`as`/`!`. |
-| [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | ready | Build pipeline and bundle output. Static-first; `--with-stats` reads existing analyser artefacts but never runs the build. |
-| [`/error-handling-audit`](error-handling-audit/SKILL.md)       | ready | Throw/catch hygiene, async/network paths, React error boundaries, logging and observability. React layer auto-skipped when not detected. |
-| [`/documentation-audit`](documentation-audit/SKILL.md)         | ready | Onboarding, architectural/decision docs, code-level docs, operational + drift. Operational checks auto-skip for library-only projects. |
+| [`/quality-gates-audit`](quality-gates-audit/SKILL.md)         | (common only — uses `--stage=<pre-commit\|pre-push\|continuous-integration>` in place of `--layer=`) | Pre-commit, pre-push, and CI/CD lifecycle gates against an opinionated baseline. |
+| [`/security-audit`](security-audit/SKILL.md)                   | `--with-scan` (enrich findings with output from installed scanners) | Frontend security: auth/sessions, XSS prevention, transport headers, secrets, third-party integrations. Server-side reserved for a future `/backend-security-audit`. |
+| [`/accessibility-audit`](accessibility-audit/SKILL.md)         | `--severity=error` (report only violations and missing-required checks; suppress warnings) | WCAG 2.2 AA across tooling, component patterns, and application shell. Static-only — screen-reader and focus-order verification deferred to humans. |
+| [`/dependency-audit`](dependency-audit/SKILL.md)               | `--with-network` (tier 3: enrich with `npm audit` and `npm outdated` registry data)<br>`--security-critical-packages=<list>` (override the default list of packages whose CVEs are treated as critical) | Dependency tree across security, health, compliance, hygiene. Three input tiers (lockfile / + node_modules / + network). License signals are flagged for human review, never auto-enforced. |
+| [`/performance-audit`](performance-audit/SKILL.md)             | `--with-lighthouse-results` (enrich from existing Lighthouse JSON in the repo)<br>`--lighthouse-results-path=<path>` (override the default `lighthouse-results.json` location) | Runtime performance: render, network/data, assets/CWV, main-thread. Implementation plan ordered by Core Web Vitals impact. |
+| [`/architecture-audit`](architecture-audit/SKILL.md)           | `--pattern=<feature-folders\|layered\|atomic-design\|monorepo-workspaces\|infer>` (override the architectural pattern that would otherwise be inferred from the project layout) | Module boundaries, coupling, state/data flow, convention adherence. The most graphify-aligned audit — refuses to run without the knowledge graph. |
+| [`/testing-audit`](testing-audit/SKILL.md)                     | `--with-run` (enrich with a real Vitest/Jest coverage run) | Tests against the Testing Library priority ladder and the well-known RTL pitfalls. Carries the playbook's Testing Philosophy. |
+| [`/react-audit`](react-audit/SKILL.md)                         | (common only) | Idiomatic React: hook correctness, component design, state management, React 18/19 idioms. Layer 4 auto-skipped on React below 18. |
+| [`/linting-audit`](linting-audit/SKILL.md)                     | `--with-run` (enrich with a real `eslint . --format json` or `biome lint --reporter json` run) | Lint configuration shape, rule coverage, strictness, suppressions hygiene. Auto-detects ESLint or Biome; dual-install is itself a violation. |
+| [`/typescript-audit`](typescript-audit/SKILL.md)               | `--with-run` (enrich with a real `tsc --noEmit` run) | Compiler flags, source-level type quality, type-system idioms, runtime validation at IO boundaries. Tunable per-file thresholds for `any`/`as`/`!`. |
+| [`/bundle-build-audit`](bundle-build-audit/SKILL.md)           | `--with-stats` (enrich from an existing bundle-analyser stats artefact; never runs the build itself)<br>`--stats-path=<path>` (override the auto-detected stats artefact location) | Build pipeline and bundle output. Static-first; `--with-stats` reads existing analyser artefacts but never runs the build. |
+| [`/error-handling-audit`](error-handling-audit/SKILL.md)       | (common only) | Throw/catch hygiene, async/network paths, React error boundaries, logging and observability. React layer auto-skipped when not detected. |
+| [`/documentation-audit`](documentation-audit/SKILL.md)         | `--with-link-check` (HEAD-check external URLs in Markdown to detect broken links) | Onboarding, architectural/decision docs, code-level docs, operational + drift. Operational checks auto-skip for library-only projects. |
 
 ### Meta
 
-| Trigger | Status | Purpose |
+| Trigger | Flags | Purpose |
 | --- | --- | --- |
-| [`/system-self-improve`](system-self-improve/SKILL.md)         | ready | The meta-improvement layer of the playbook. Reads a review gap report and proposes a minimal reversible edit to the affected SKILL.md so the same class of gap is more likely to be caught next time. The only skill that mutates files outside its own `audits/` directory. |
-
-A skill marked **stub** has valid YAML frontmatter and a clear "not yet implemented" notice. It will not run an audit. The implementation pass for each stub is added one at a time.
+| [`/system-self-improve`](system-self-improve/SKILL.md)         | `--apply` (perform the proposed edit; always prompts for explicit confirmation first — there is no `--yes` escape hatch)<br>`--gap=<description>` + `--target-skill=<name>` (user-supplied gap mode: describe the gap and which skill should absorb the lesson)<br>`--from-audit-history` (scan `audits/*/findings.json` for systematic patterns instead of a single review report)<br>`--gap-report=<path>` (explicit path to a review gap report, overriding the default scan)<br>`--playbook-path=<path>` (operate on a playbook clone at a different location, e.g. a worktree)<br>`--plan` (regenerate `improvement-plan.md` for an existing run without re-scanning) | The meta-improvement layer of the playbook. Reads a review gap report and proposes a minimal reversible edit to the affected SKILL.md so the same class of gap is more likely to be caught next time. The only skill that mutates files outside its own `audits/` directory. |
 
 ## Why each skill exists
 
