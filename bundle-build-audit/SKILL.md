@@ -172,7 +172,7 @@ For each known build tool, check the conventional path:
 
 Honour `--stats-path` over the conventional locations.
 
-If `--with-stats` is set but no artefact is found, continue running with stats-required checks degrading to `partial` and add a clear "no stats artefact found at <searched paths>" line to the snapshot.
+If `--with-stats` is set but no artefact is found, continue running with stats-required checks degrading to `partial` and add a clear "no stats artefact found at <searched paths>" line to the snapshot. Also print to the chat and prepend to `findings.md`: "`--with-stats` was requested but no bundle-stats artefact is available. If you have not installed a bundle analyser, run `/preflight --audit=bundle-build --install` to install one matching your build tool. Otherwise run `npm run build` (or your project's equivalent with the analyser enabled) to produce the artefact, then re-run with `--with-stats`." Record `recoveryHint: "/preflight --audit=bundle-build --install"` on each stats-required check that degraded to `partial` in `findings.json`.
 
 ### Step 3 — Build the diagnostic snapshot
 
@@ -274,7 +274,7 @@ The plan is descriptive, not executable. It does not install packages and it doe
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
 | No supported build tool detected | The project uses Parcel, esbuild directly, or a custom build script. | Stop. Inform the user that v1 supports Vite, Next.js, Remix, Create React App, Webpack, Rollup, and Turbopack only. |
-| `--with-stats` set but no stats artefact found | The user has not run `npm run build` (or equivalent with the bundle analyser enabled) recently. | Continue running. Mark stats-required checks as `partial` with the gap "stats artefact not present at <searched paths>". Recommend running the build analyser before re-running with `--with-stats`. |
+| `--with-stats` set but no stats artefact found | The user has not installed a bundle analyser, or has not run `npm run build` (or equivalent with the bundle analyser enabled) recently. | Continue running. Mark stats-required checks as `partial` with the gap "stats artefact not present at <searched paths>". **Recovery:** run `/preflight --audit=bundle-build --install` to install a bundle analyser if missing, then run the build to produce the artefact and re-run with `--with-stats`. |
 | Stats artefact present but unreadable | Corrupt or unrecognised format. | Treat the artefact as missing. Record the parse error in the snapshot. Continue with degraded checks. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in `metadata.json`. The implementation plan loses the community-derived split-plane suggestions; everything else is unaffected. |
 | Multiple build tools detected | Both Webpack and Vite configured — possibly in a migration. | Pick the one referenced by the production build script in `package.json`. Mention the secondary tool in the snapshot. |

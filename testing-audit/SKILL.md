@@ -229,7 +229,7 @@ When `--with-run` is set, invoke the detected runner:
 - Vitest: `npx vitest run --coverage --reporter=json` (capture stdout, parse JSON).
 - Jest: `npx jest --coverage --json` (capture stdout, parse JSON).
 
-If the runner fails to start (binary missing, configuration invalid), record the failure and continue. Run-dependent enrichment of the diagnostic snapshot and a small number of coverage-related checks degrades to `partial`.
+If the runner fails to start (binary missing, configuration invalid), record the failure, print to the chat and prepend to `findings.md`: "`--with-run` was requested but the test runner is not installed. Run `/preflight --audit=testing --install` to install `vitest` or `jest`, then re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Record `recoveryHint: "/preflight --audit=testing --install"` on each run-dependent check that degraded in `findings.json`. Continue. Run-dependent enrichment of the diagnostic snapshot and a small number of coverage-related checks degrades to `partial`.
 
 ### Step 4 — Walk the test files
 
@@ -366,7 +366,7 @@ The plan is descriptive, not executable. It does not edit tests, install package
 | React not detected | The project does not depend on `react` directly or via a meta-framework. | Stop. Inform the user that this skill currently supports React projects only. |
 | Neither Vitest nor Jest installed | The project has no recognised test runner. | Stop with a friendly message recommending `/quality-gates-audit` (which surfaces the broader gap) and the installation of Vitest or Jest before re-running. |
 | Both Vitest and Jest installed | Mid-migration or accidental dual install. | Continue. Run the audit against whichever has a configuration file. Surface dual-installation as a `violation` on the layer 1 "single test runner" check. |
-| `--with-run` set but runner fails to start | Binary missing, configuration invalid, monorepo path-resolution issue. | Record the failure and the captured stderr in metadata. Run-dependent checks degrade to `partial`. Continue with the static analysis. |
+| `--with-run` set but runner fails to start | Binary missing, configuration invalid, monorepo path-resolution issue. | Record the failure and the captured stderr in metadata. Run-dependent checks degrade to `partial`. Continue with the static analysis. **Recovery:** run `/preflight --audit=testing --install` to install `vitest` or `jest`, then re-run with `--with-run`. |
 | Test files exist but match no recognised pattern | Custom test file naming. | Run with the patterns declared in the runner configuration. When that fails, fall back to scanning files that import `@testing-library/react`. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The components-without-tests check falls back to per-folder heuristics; the implementation plan loses centrality-based prioritisation. |
 | Snapshot files exceed the threshold but were intentionally bounded by the author | False positive on the heuristic. | The implementation plan recommends the user document a per-snapshot rationale (a comment near the snapshot reference, or moving the snapshot to a separately-named file) before deciding to keep or replace. |
