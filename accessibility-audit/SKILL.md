@@ -22,11 +22,14 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 /accessibility-audit --include=<check-name>          # include only the named check (repeatable)
 /accessibility-audit --exclude=<check-name>          # skip the named check (repeatable)
 /accessibility-audit --severity=error                # report only violations and missing-required checks
+/accessibility-audit --target=<path>                 # operate on this directory instead of cwd (default: cwd)
 ```
 
 This skill never accepts `--apply`. Mutating the codebase is the responsibility of a separate fix step. The implementation plan is descriptive Markdown.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree accessibility` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/accessibility-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree accessibility` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

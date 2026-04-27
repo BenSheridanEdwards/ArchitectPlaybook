@@ -47,13 +47,16 @@ The skill detects which tier is available and records it in the diagnostic snaps
 /dependency-audit --threshold-major-versions-behind=3          # override default 2
 /dependency-audit --threshold-abandonment-months=18            # override default 24
 /dependency-audit --security-critical-packages=react,next,@remix-run/react   # override the default critical-package list
+/dependency-audit --target=<path>                                            # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree dependency` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands (including `npm audit` and `npm outdated` under `--with-network`) all run scoped to the target. Findings land at `<target>/audits/dependency-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree dependency` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

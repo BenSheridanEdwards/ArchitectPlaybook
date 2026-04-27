@@ -32,20 +32,20 @@ This is the headline feature — the playbook is designed around one specific wa
    /pre-audit-setup
    ```
    Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into `.claude/settings.json`.
-3. **Spin up a worktree per audit and run them in parallel.** Use `/worktree <name>` to create the worktree, then open a fresh Claude Code chat in it and run the audit. Each audit writes its findings to `audits/<audit-name>/findings.md` (and `findings.json`, and `metadata.json`).
+3. **Run audits, one per chat.** Each audit takes a `--target=<path>` flag, so you have two clean choices:
+   - **Main checkout (no worktree):** open a Claude Code chat in your project and run `/<audit>` directly. Findings land in `audits/<audit>/`.
+   - **Worktree:** open a Claude Code chat in your project and run `/worktree <name>`. The skill creates `../wt-<name>` on a `wt-<name>` branch *and* runs the matching audit against it, all in this same chat. Findings land in `../wt-<name>/audits/<audit>/`.
    ```
-   /worktree security        # then in a new chat in ../wt-security:        /security-audit
-   /worktree performance     # then in a new chat in ../wt-performance:     /performance-audit
-   /worktree accessibility   # then in a new chat in ../wt-accessibility:   /accessibility-audit
+   /security-audit                # one audit, main checkout
+   /worktree security             # one audit, on a fresh worktree branch — same chat
    ```
-   Run as many as you want in parallel — they are independent chat windows.
-4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit-name>/findings.md` and implement the fixes. Stay in that chat — it has the most context about what the audit surfaced.
-5. **Run the review in a fresh chat against the same worktree.** Re-running the originating audit *is* the review pass.
+   For multiple audits in true parallel, open multiple chats and run `/worktree <name>` in each. Each chat is independent; each audit operates on its own worktree.
+4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit>/findings.md` (or `../wt-<name>/audits/<audit>/findings.md` if you used a worktree) and implement the fixes. Stay in that chat — it has the most context.
+5. **Re-run the audit to review the fix.** In the same chat, run the audit again. The re-run *is* the review pass — anything still flagged is anything the fix didn't address.
    ```
-   # In a fresh Claude Code chat opened in the worktree (e.g. ../wt-security):
-   /security-audit              # the audit re-run sees the fix and reports anything still outstanding
+   /security-audit                # re-run; or /security-audit --target=../wt-security if you used a worktree
    ```
-   The review picks up anything the original audit flagged that the fix didn't address, plus anything new that emerged from the fix itself.
+   For full review independence (a separate chat with no memory of the fix conversation), open a fresh chat in the worktree and re-run the audit there. The trade-off is described in the [Single-audit shortcut](#single-audit-shortcut) section below.
 6. **If the review surfaces something the audit missed, evolve the audit.**
    ```
    /system-self-improve
@@ -54,17 +54,27 @@ This is the headline feature — the playbook is designed around one specific wa
 
 ### Single-audit shortcut
 
-The worktree-and-fresh-chat pattern is for the parallel case — multiple audits running at the same time, with reviews in independent chat sessions. **For a single audit, one chat is fine.** Open a Claude Code chat in your project, run `/pre-audit-setup` if you have not already, run the audit, ask Claude to fix the findings in the same chat, then re-run the audit to verify.
+For one audit, one chat does it all. Two flavours:
+
+**No worktree** — fixes land on the current branch:
 
 ```
-# In a chat opened in your project:
 /pre-audit-setup
 /security-audit
 # read findings, ask Claude to fix them in this chat
 /security-audit              # re-run to verify
 ```
 
-You give up branch isolation (fixes land on the current branch — `git checkout -b` first if you want a clean branch) and a small amount of review independence (the same chat that fixed it reviews it). Worth the trade for a low-stakes pass.
+**With worktree** — fixes land on a fresh `wt-security` branch:
+
+```
+/pre-audit-setup
+/worktree security           # creates ../wt-security and runs /security-audit --target=../wt-security
+# read findings, ask Claude to fix them in this chat (Claude edits ../wt-security/ files)
+/worktree security           # re-running /worktree on an existing worktree reuses it; the audit re-runs as a review
+```
+
+Both flavours give up a small amount of review independence (the same chat that fixed it reviews it). For full review independence, open a fresh chat in the worktree and run `/<audit>` there — that chat has no memory of the fix conversation, so the review is genuinely blind.
 
 ## Quick start
 
@@ -82,37 +92,37 @@ cd ~/Coding/some-project
 # in a fresh Claude Code chat:
 /pre-audit-setup
 
-# 4. Spin up a worktree for the first audit
-/worktree security
-# then open a new Claude Code chat in ../wt-security and run:
-#   /security-audit
+# 4. Run an audit. Pick one:
+/security-audit          # against the main checkout
+# or:
+/worktree security       # creates ../wt-security and runs the audit against it, in this same chat
 ```
 
 ## Running audits in parallel with Git worktrees
 
-Audits do not modify the codebase, so you can run several at once against the main checkout. Reviews and fixes are easier to keep separate when each lives in its own worktree.
-
-The fastest path is the [`/worktree`](worktree/SKILL.md) helper, which creates a worktree for the named audit and prints the next-step instructions:
+Audits don't modify the codebase, so you can run several at once. Each audit takes a `--target=<path>` flag, and the [`/worktree`](worktree/SKILL.md) helper packages the worktree-creation + audit-run pattern into a single slash command.
 
 ```
+# Open four Claude Code chats in the project, then in each one:
 /worktree security
 /worktree performance
 /worktree accessibility
 /worktree dependency
 ```
 
-The argument accepts the full skill name (`security-audit`), the short form (`security`), or any unambiguous prefix. Run `/worktree` with no argument to pick from a list of available audits.
+Each chat creates its own worktree (`../wt-security`, `../wt-performance`, ...) and runs the matching audit against it, all in that same chat. Four independent chats, four worktrees, four audits running in true parallel. When fixes are needed, apply them in the chat that produced the audit (each chat has the full findings in context).
 
-Or run the equivalent Git commands by hand:
+`/worktree` accepts the full skill name (`security-audit`), the short form (`security`), or any unambiguous prefix (`sec`). Run `/worktree` with no argument to pick from a list.
+
+If you'd rather skip the helper, the manual equivalent is:
 
 ```bash
-git worktree add ../wt-security       -b wt-security
-git worktree add ../wt-performance    -b wt-performance
-git worktree add ../wt-accessibility  -b wt-accessibility
-git worktree add ../wt-dependency     -b wt-dependency
+git worktree add ../wt-security -b wt-security
+# then in a Claude Code chat in your project:
+/security-audit --target=../wt-security
 ```
 
-Either way: open one Claude Code chat per worktree, run the matching audit slash command in each, and let them work in parallel. When you are ready to apply fixes, do it in the same chat that produced the audit (each chat has the most context about its own findings). When the fixes are in, spin up a fresh chat against the worktree to run the review pass.
+The skill always wins out because it bundles the worktree creation with the audit invocation in one slash command, but the underlying mechanic is plain Git plus the audit's `--target` flag.
 
 ## The findings-file contract
 
@@ -154,7 +164,7 @@ The playbook's skills fall into three categories: setup utilities you run once p
 | [`/install-skills-locally`](install-skills-locally/SKILL.md)   | ready | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-skills-globally`](install-skills-globally/SKILL.md) | ready | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | ready | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
-| [`/worktree`](worktree/SKILL.md)                               | ready | One-shot helper that creates a Git worktree for running an audit in parallel. Lenient prefix matching; bare `/worktree` opens a picker. |
+| [`/worktree`](worktree/SKILL.md)                               | ready | Creates a Git worktree for the named audit and runs the audit against it, all in this same chat. Lenient prefix matching; bare `/worktree` opens a picker. |
 
 ### Audits
 
@@ -196,7 +206,7 @@ Install once for the whole machine when you audit lots of different codebases an
 Idempotent project preparation that every audit assumes has been run. Verifies graphify, builds the knowledge graph the architecture audit (and others) read, and merges the graphify-aware PreToolUse hook into the project's `.claude/settings.json`.
 
 ### `/worktree`
-Removes the friction of spinning up a Git worktree per audit so you can run multiple audits in true parallel from separate Claude Code chats. Lenient prefix matching (`/worktree sec` resolves to `security-audit`); bare `/worktree` opens a picker.
+The single-chat wrapper for the audit-against-worktree pattern. `/worktree security` creates `../wt-security` *and* runs `/security-audit --target=../wt-security` in the same chat — no second chat needed. Lenient prefix matching (`/worktree sec` resolves to `security-audit`); bare `/worktree` opens a picker. The chat stays in the original project; the audit reaches into the worktree via the audit's `--target` flag, which every audit accepts. For multiple parallel audits, open multiple chats and `/worktree <name>` in each.
 
 ### `/quality-gates-audit`
 Three lifecycle stages — pre-commit, pre-push, CI/CD — graded against an opinionated baseline. Asks whether the gates *run*; `/linting-audit` and `/typescript-audit` ask whether what runs is *well-configured*.

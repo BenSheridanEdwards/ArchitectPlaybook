@@ -51,11 +51,14 @@ The skill never modifies any documentation, source, or configuration file.
 /documentation-audit --threshold-public-api-doc-coverage=80           # override default 60 (percent for present)
 /documentation-audit --threshold-todo-staleness-days=180              # override default 90
 /documentation-audit --threshold-doc-staleness-days=365               # override default 180
+/documentation-audit --target=<path>                                  # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree documentation` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads (including every Markdown file walk), file globbing, regex searches, `git blame` invocations for TODO age, and external-link HEAD requests under `--with-link-check` all run scoped to the target. Findings land at `<target>/audits/documentation-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree documentation` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

@@ -83,11 +83,14 @@ The skill **never modifies any test, configuration, or source file**, and **neve
 /testing-audit --threshold-by-role-ratio=60                      # override default 50 (percent of Priority 1)
 /testing-audit --threshold-user-event-ratio=90                   # override default 80 (percent)
 /testing-audit --threshold-snapshot-lines=50                     # override default 100 (lines, ceiling for partial)
+/testing-audit --target=<path>                                   # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree testing` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any test-runner subprocess (`vitest run --coverage`, `jest --coverage`) all run scoped to the target. Findings land at `<target>/audits/testing-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree testing` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

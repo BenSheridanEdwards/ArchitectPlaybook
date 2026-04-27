@@ -39,13 +39,16 @@ There is no graceful degradation. A misleading half-audit is worse than no audit
 /architecture-audit --threshold-god-component=30          # override the default god-component parent threshold (default 25)
 /architecture-audit --threshold-file-size=500             # override the default file-size threshold in lines (default 400)
 /architecture-audit --threshold-fan-out=20                # override the default component fan-out threshold (default 15)
+/architecture-audit --target=<path>                       # operate on this directory instead of cwd (default: cwd)
 ```
 
 This skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree architecture` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of `<target>/graphify-out/graph.json` all run scoped to the target. Findings land at `<target>/audits/architecture-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree architecture` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

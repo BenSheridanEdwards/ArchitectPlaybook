@@ -49,13 +49,16 @@ If the user wants a fresh real-run capture of hook violations, `/linting-audit -
 /react-audit --layer=react-eighteen-and-nineteen-idioms
 /react-audit --include=<check-name>                            # include only the named check (repeatable)
 /react-audit --exclude=<check-name>                            # skip the named check (repeatable)
+/react-audit --target=<path>                                   # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree react` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/audits/react-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree react` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

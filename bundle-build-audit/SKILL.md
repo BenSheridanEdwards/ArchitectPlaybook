@@ -37,13 +37,16 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 /bundle-build-audit --threshold-build-time=90s                   # override default 60s (clean build)
 /bundle-build-audit --threshold-incremental-build-time=15s       # override default 10s
 /bundle-build-audit --stats-path=path/to/stats.json              # override the auto-detected stats artefact location
+/bundle-build-audit --target=<path>                              # operate on this directory instead of cwd (default: cwd)
 ```
 
 Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interpreted as base-2 kilobytes, etc.); `s`, `ms`, `m` for time. The skill never accepts `--apply`.
 
 The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree bundle-build` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of bundle-stats artefacts all run scoped to the target. Findings land at `<target>/audits/bundle-build-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree bundle-build` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

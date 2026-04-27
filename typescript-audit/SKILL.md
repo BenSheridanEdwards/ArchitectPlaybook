@@ -51,11 +51,14 @@ This skill is read-only and never modifies anything. Two modes:
 /typescript-audit --threshold-as-per-file=10                      # override default 5 (excluding `as const`)
 /typescript-audit --threshold-non-null-assertion-per-file=5       # override default 3
 /typescript-audit --threshold-conditional-type-depth=4            # override default 3
+/typescript-audit --target=<path>                                 # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree typescript` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` invocation of `tsc --noEmit` all run scoped to the target. Findings land at `<target>/audits/typescript-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree typescript` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

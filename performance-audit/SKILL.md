@@ -49,13 +49,16 @@ The skill **never runs Lighthouse itself**. Spinning up a server and running an 
 /performance-audit --exclude=<check-name>                           # skip the named check (repeatable)
 /performance-audit --threshold-virtualization=100                   # override default 50 items
 /performance-audit --lighthouse-results-path=path/to/lighthouse.json  # override default lighthouse-results.json
+/performance-audit --target=<path>                                    # operate on this directory instead of cwd (default: cwd)
 ```
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. The list-virtualization threshold is tunable via flag; all other checks are zero-tolerance or qualitative. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree performance` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any reads of `lighthouse-results.json` all run scoped to the target. Findings land at `<target>/audits/performance-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree performance` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

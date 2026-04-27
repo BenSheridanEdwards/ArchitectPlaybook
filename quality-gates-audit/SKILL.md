@@ -21,11 +21,14 @@ The default mental model is a TypeScript and React frontend project. The detecti
 /quality-gates-audit --stage=continuous-integration
 /quality-gates-audit --include=<gate-name>    # include only the named gate (repeatable)
 /quality-gates-audit --exclude=<gate-name>    # skip the named gate (repeatable)
+/quality-gates-audit --target=<path>          # operate on this directory instead of cwd (default: cwd)
 ```
 
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
 
-**💡 Pro tip**: Spin this up in its own Git worktree with `/worktree quality-gates` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/quality-gates-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+**💡 Pro tip**: Use `/worktree quality-gates` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 

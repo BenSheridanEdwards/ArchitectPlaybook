@@ -28,12 +28,15 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
 4. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.
 5. **Add a 2–3 sentence entry to the README "Why each skill exists" section** — same commit. The entry explains *why* the skill is a separate concern, not what it does.
-6. **Insert the worktree Pro Tip block** right after the `## Usage` section if your skill is an audit:
+6. **Make the audit accept `--target=<path>`.** Every audit operates on the current working directory by default, but defers to `--target=<path>` when set. All file reads, file globbing, regex searches, subprocess invocations, and findings-output paths are scoped to the target. The `--target` flag is what makes `/worktree <name>` work — without it, `/worktree` could only create the worktree, not audit it from the same chat.
+7. **Insert the target-resolution paragraph and the worktree Pro Tip block** right after the `## Usage` section if your skill is an audit:
    ```markdown
-   **💡 Pro tip**: Spin this up in its own Git worktree with `/worktree <name>` (or just `/worktree` to pick from a list) so you can run multiple audits in true parallel without any conflicts.
+   When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/<skill-name>/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+
+   **💡 Pro tip**: Use `/worktree <short-name>` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
    ```
-   Setup and install skills do *not* get the Pro Tip — running them in a worktree would mislead because their effects need to land in the main checkout.
-7. **Commit with a Conventional Commits subject:**
+   Setup and install skills do *not* get `--target` or the Pro Tip — their effects need to land in the main checkout.
+8. **Commit with a Conventional Commits subject:**
    ```
    feat: implement <skill-name> skill
    ```
@@ -68,7 +71,7 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - [ ] SKILL.md follows the canonical body structure.
 - [ ] README skill index has a row for the skill in the right sub-table.
 - [ ] README "Why each skill exists" has a 2–3 sentence entry.
-- [ ] Worktree Pro Tip is in place (audits only).
+- [ ] `--target=<path>` flag is supported (audits only) and the target-resolution paragraph plus worktree Pro Tip are in place.
 - [ ] No abbreviations introduced anywhere.
 - [ ] Conventional Commits subject on every commit in the branch.
 - [ ] If the change touches behaviour shared across skills (boundary tables, status taxonomy, two-phase flow), the change has been justified in an ADR under `docs/decisions/` or via `/system-self-improve` with a real gap report.
