@@ -8,7 +8,8 @@ Thumbs.db
 
 # Local Claude Code state created when this playbook is itself audited
 .claude/settings.local.json
-.claude/skills/
+.claude/skills/*
+!.claude/skills/install-skills-globally
 graphify-out/
 audits/*
 !audits/documentation-audit/
