@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Lenient prefix matching on the skill name; bare /worktree opens a picker. The chat stays in the original project; the audit operates on the worktree via the audit's --target flag.
+description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Smart-handoff: if an audit was just run in this chat without --target and findings are recent, /worktree creates the worktree, copies the existing findings, and offers to generate the implementation plan against the worktree — no audit re-run. Lenient prefix matching on the skill name; bare /worktree opens a picker (or auto-resolves to the just-run audit when smart-handoff fires). The chat stays in the original project; the audit operates on the worktree via the audit's --target flag.
 trigger: /worktree
 ---
 
@@ -8,7 +8,10 @@ trigger: /worktree
 
 Create a Git worktree and run the named audit against it, in the same chat. The chat stays in the original project — Claude Code chats are bound to the directory they were opened in — but the audit operates on the worktree because every audit accepts a `--target=<path>` flag that overrides its working directory.
 
-This means: open a fresh chat in your project, run `/worktree security`, and the chat creates `../wt-security`, then runs `/security-audit --target=../wt-security`, then drops findings at `../wt-security/audits/security-audit/`. One chat, one command, audit done.
+The skill has two modes:
+
+- **Normal mode (default).** Open a fresh chat in your project, run `/worktree security`, and the chat creates `../wt-security`, then runs `/security-audit --target=../wt-security`, then drops findings at `../wt-security/audits/security-audit/`. One chat, one command, audit done.
+- **Smart-handoff mode.** If an audit was just run in this chat against the main checkout (no `--target`) and the findings are still recent, `/worktree` skips the audit re-run, copies the existing findings into the worktree, and asks whether to generate the implementation plan against the worktree. Useful when you ran the audit first to look at the findings, then decided you wanted a clean branch to apply the fixes on.
 
 ## Usage
 
@@ -31,14 +34,55 @@ When the argument is ambiguous (matches multiple skills), the skill prints the c
 1. **Confirms the working directory is a Git repository.** Stops with a friendly message if not.
 2. **Resolves the target skill name.**
    - With an argument, attempts an exact match first, then a `<arg>-audit` match, then a prefix match against every audit-style skill in the current `.claude/skills/` directory (or the playbook clone, when run from inside one).
-   - With no argument, lists the available audit-style skills and asks the user to pick.
+   - With no argument, *first* checks the chat's conversation history for a recent audit invocation that ran without `--target`. If found, that audit is the resolved name and smart-handoff mode is enabled.
+   - With no argument and no recent audit in chat, lists the available audit-style skills and asks the user to pick.
    - On ambiguity, lists the candidates and asks the user to pick.
-3. **Computes the worktree slug.** For `<short>-audit`, the slug is `<short>` (so `security-audit` → `wt-security`). For non-audit skills like `system-self-improve`, the slug is the full name (so `system-self-improve` → `wt-system-self-improve`).
-4. **Creates the worktree.** Runs `git worktree add ../wt-<slug> -b wt-<slug>`. When the branch already exists, runs `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, skips creation and notes "worktree already exists at `../wt-<slug>`".
-5. **Invokes the resolved audit against the worktree.** In the same chat, runs the resolved skill's body with `--target=../wt-<slug>` (relative to the chat's cwd). All file reads, file globbing, regex searches, and subprocess invocations performed by the audit run scoped to the worktree. Findings land at `../wt-<slug>/audits/<skill-name>/`.
-6. **Reports the result inline** in the chat, the same way the audit normally would. The two-phase flow (report → ask about implementation plan) runs as usual; the implementation-plan question is answered in this same chat.
+3. **Decides between Normal mode and Smart-handoff mode.** See the "Smart-handoff mode" section below for the trigger conditions. If smart-handoff fires, jumps to step 6. Otherwise, continues to step 4.
+4. **Computes the worktree slug.** For `<short>-audit`, the slug is `<short>` (so `security-audit` → `wt-security`). For non-audit skills like `system-self-improve`, the slug is the full name (so `system-self-improve` → `wt-system-self-improve`).
+5. **Creates the worktree.** Runs `git worktree add ../wt-<slug> -b wt-<slug>`. When the branch already exists, runs `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, skips creation and notes "worktree already exists at `../wt-<slug>`".
+6. **Branches on mode:**
+   - **Normal mode**: invokes the resolved audit against the worktree with `--target=../wt-<slug>`. All file reads, globbing, searches, and subprocess invocations run scoped to the worktree. Findings land at `../wt-<slug>/audits/<skill-name>/`. The audit's two-phase flow (report → ask about implementation plan) runs as usual.
+   - **Smart-handoff mode**: copies `audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Asks the user the standard phase-2 question: *"Generate an implementation plan against the worktree? (yes/no)"*. On yes, writes `../wt-<slug>/audits/<skill-name>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`.
+7. **Reports the result inline** in the chat. The chat is now positioned to apply fixes against the worktree if the user asks — Claude reads `../wt-<slug>/audits/<skill-name>/findings.json` and edits files under `../wt-<slug>/`.
 
-The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that runs the audit. Once the audit and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
+The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that does the work. Once the audit (or handoff) and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
+
+## Smart-handoff mode
+
+The smart-handoff is a quality-of-life branch for the common workflow of "I ran an audit, looked at the findings, now I want to apply the fixes on a clean branch instead of polluting the current one." Without smart-handoff the user would have to either re-run the audit fresh against a worktree (wasteful — the findings already exist) or copy files around by hand. With smart-handoff, `/worktree` does the right thing automatically.
+
+### Trigger conditions
+
+Smart-handoff fires when **all** of these hold:
+
+1. `/worktree` is invoked (with or without an argument).
+2. The chat's conversation history shows a recent `/<audit>` slash-command invocation in this chat that ran **without** `--target` (i.e., against the main checkout). When `/worktree` was called with an explicit argument, that argument must match the recent audit's name (or its short form via lenient prefix matching) for the handoff to fire — otherwise the user is asking for a different audit than the one they ran, and Normal mode runs.
+3. `audits/<resolved-audit>/findings.md` exists in the chat's current working directory.
+4. The findings file's modification time is within 30 minutes of "now" (a heuristic for "still fresh enough that re-running would not produce different results").
+
+If any condition fails, Normal mode runs (worktree + fresh audit invocation against it).
+
+### What the handoff does
+
+When the handoff fires, after the worktree is created:
+
+1. **Copy the findings.** `cp -R audits/<audit>/findings.md`, `findings.json`, `snapshot.md`, `metadata.json` from the chat's cwd into `../wt-<slug>/audits/<audit>/`. The implementation-plan.md is **not** copied; it gets regenerated against the worktree if the user asks.
+2. **Annotate the metadata.** Update `../wt-<slug>/audits/<audit>/metadata.json` to record:
+   - `handedOffFrom`: `"cwd"`
+   - `handedOffAt`: ISO timestamp of when the handoff ran
+   - `originalRunStartedAt`: preserved from the original metadata
+   - `originalRunFinishedAt`: preserved from the original metadata
+3. **Print a short summary.** "Smart-handoff: picked up findings for `<audit>` (originally run at `<timestamp>`). Worktree created at `../wt-<slug>`. The findings have been copied; no audit re-run."
+4. **Run phase 2 against the worktree.** Ask the user the same yes/no question the audit asks:
+   > "Generate an implementation plan against the worktree? (yes/no)"
+   On yes, write `../wt-<slug>/audits/<audit>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`. The plan can reference graph centrality from `../wt-<slug>/graphify-out/graph.json` if it exists in the worktree (which it does only if `/pre-audit-setup` was run on the worktree separately — most of the time it won't be, and the plan will note `noGraphify: true`).
+5. **Suggest the natural next step.** "If you'd like to apply the plan now, ask me to read `../wt-<slug>/audits/<audit>/implementation-plan.md` and start editing files under `../wt-<slug>/`. The chat will stay in this directory; the edits land in the worktree via absolute paths."
+
+### When the user wants a fresh re-run instead
+
+Pass an explicit argument that doesn't match the recently-run audit, or wait until the existing findings are older than 30 minutes. Both cause Normal mode to run instead of the handoff.
+
+If the user wants to *force* a fresh re-run of the same audit they just ran (for example, because they made changes between the audit and the `/worktree` invocation), the cleanest path is to re-run the audit first (`/<audit>` again, against the main checkout) and then run `/worktree` — the new findings overwrite the old ones, the mtime resets, and the handoff picks them up. Or delete `audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode (no findings to hand off).
 
 ## Implementation steps
 
@@ -56,14 +100,29 @@ Skills that do not benefit from worktrees — `pre-audit-setup`, `install-skills
 
 ### Step 3 — Resolve the requested skill
 
-- **No argument**: print the candidate list and ask the user which skill (number or name).
+If `/worktree` was called with no argument, **first** scan the chat's conversation history for a recent slash-command invocation matching `/<some-audit>` that ran without `--target`. If found, use that audit's name as the resolved name (this is the smart-handoff inference). If multiple recent audits ran in the same chat, take the most recent one.
+
+If `/worktree` was called with an argument, resolve it via the matching ladder:
+
 - **Exact match**: a candidate's `name` exactly equals the argument. Use it.
 - **`<arg>-audit` match**: the candidate `<arg>-audit` exists. Use it.
 - **Unique prefix match**: exactly one candidate starts with the argument. Use it.
 - **Ambiguous prefix**: multiple candidates start with the argument. Print them and ask.
 - **No match**: print the available list and ask.
 
-### Step 4 — Compute the slug
+If the no-argument inference yielded nothing AND no argument was supplied, print the candidate list and ask the user to pick.
+
+### Step 4 — Decide between Normal mode and Smart-handoff mode
+
+After the resolved skill is in hand, check the smart-handoff trigger conditions:
+
+1. The conversation history shows a recent `/<resolved-skill-name>` invocation in this chat that ran without `--target`. (If the user supplied an argument, the resolved name must match the recent invocation; otherwise the inference at step 3 is what surfaced this audit name in the first place.)
+2. `audits/<resolved-skill-name>/findings.md` exists in the chat's current working directory.
+3. The findings file's modification time is within 30 minutes of "now".
+
+If all three hold, set `mode=smart-handoff`. Otherwise set `mode=normal`.
+
+### Step 5 — Compute the slug
 
 ```
 slug = skill_name
@@ -73,7 +132,7 @@ if slug ends with "-audit":
 
 So `security-audit` → `security`, `bundle-build-audit` → `bundle-build`, `system-self-improve` → `system-self-improve`.
 
-### Step 5 — Create the worktree
+### Step 6 — Create the worktree
 
 ```bash
 slug="<resolved>"
@@ -91,15 +150,41 @@ fi
 
 If `git worktree add` fails (for example, because the branch is checked out elsewhere), surface the error and stop. Do not try to recover automatically — the user needs to clean up the conflicting worktree first.
 
-### Step 6 — Invoke the resolved audit against the worktree
+### Step 7 — Branch on mode
 
-In the same chat, follow the resolved skill's body with `--target=<worktree_path>` set. The audit's checks read files, run subprocesses, and write findings all scoped to the worktree path. Findings land at `<worktree_path>/audits/<resolved-skill-name>/`.
+**If `mode=normal`:** in the same chat, follow the resolved skill's body with `--target=<worktree_path>` set. The audit's checks read files, run subprocesses, and write findings all scoped to the worktree path. Findings land at `<worktree_path>/audits/<resolved-skill-name>/`. The audit's two-phase flow runs as usual.
 
-When the audit's two-phase flow asks whether to generate an implementation plan, the user answers in this chat. When the user asks Claude to fix the findings, Claude reads `<worktree_path>/audits/<resolved-skill-name>/findings.json` and edits files under `<worktree_path>/` — all from this same chat, all using absolute or worktree-relative paths.
+**If `mode=smart-handoff`:**
 
-### Step 7 — Suggest cleanup when the user is done
+```bash
+mkdir -p "$worktree_path/audits/$skill_name"
+cp audits/"$skill_name"/findings.md      "$worktree_path/audits/$skill_name/findings.md"
+cp audits/"$skill_name"/findings.json    "$worktree_path/audits/$skill_name/findings.json"
+cp audits/"$skill_name"/snapshot.md      "$worktree_path/audits/$skill_name/snapshot.md"
+cp audits/"$skill_name"/metadata.json    "$worktree_path/audits/$skill_name/metadata.json"
+```
 
-Print, after the audit completes (whether or not the user proceeds to phase 2):
+Then update `<worktree_path>/audits/<skill-name>/metadata.json` to add `handedOffFrom: "cwd"`, `handedOffAt: <iso-timestamp>`, and preserve the `originalRunStartedAt` and `originalRunFinishedAt` fields from the source metadata.
+
+Print to the chat:
+
+```
+Smart-handoff: picked up findings for <skill-name> (originally run at <originalRunFinishedAt>).
+Worktree created at <worktree_path>.
+The findings have been copied; no audit re-run.
+```
+
+Then ask the user the standard phase-2 question:
+
+> "Generate an implementation plan against the worktree? (yes/no)"
+
+On `yes`, write `<worktree_path>/audits/<skill-name>/implementation-plan.md` describing fixes against files at `<worktree_path>/...`. On `no`, exit with the cleanup hint from Step 8.
+
+When the user asks Claude to apply the plan, Claude reads `<worktree_path>/audits/<skill-name>/implementation-plan.md` and edits files under `<worktree_path>/` — all from this same chat, all using absolute or worktree-relative paths.
+
+### Step 8 — Suggest cleanup when the user is done
+
+Print, after the audit (or handoff phase 2) completes:
 
 ```
 Worktree at ../wt-<slug> on branch wt-<slug>.
@@ -120,6 +205,8 @@ The skill does not run cleanup automatically — the user might still be applyin
 | `git worktree add` fails because the branch is checked out elsewhere | A previous worktree for the same branch wasn't cleaned up. | Run `git worktree list` to find it; `git worktree remove` to clean up; re-run `/worktree <skill>`. |
 | The user runs `/worktree security` and `security-audit` does not exist in the project | The audit skill hasn't been installed yet. | Run `/install-skills-locally` to refresh, then re-run. |
 | Audit reads or writes the wrong directory | The audit body did not respect `--target=<path>`. | Bug in the audit. Report via `/system-self-improve` with a `review-gap-report.md` describing the path-resolution failure. |
+| Smart-handoff fired but the user wanted a fresh re-run | The user made changes between the original audit and the `/worktree` invocation, and the existing findings are stale. | Re-run the audit first (`/<audit>` again, no `--target`), which overwrites the findings and resets the mtime. Then run `/worktree` — the handoff picks up the fresh findings. Or delete `audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode. |
+| Smart-handoff did not fire and the user expected it to | The findings are older than 30 minutes, or `--target` was used in the recent run, or the conversation history doesn't include a recent `/<audit>` invocation that this `/worktree` call could match. | Confirm the recent invocation was in *this* chat (a different chat doesn't share history) and ran against the main checkout. If everything looks right but the handoff still doesn't fire, the trigger heuristic may need tuning — file a review gap report. |
 
 ## What this skill explicitly does NOT do
 

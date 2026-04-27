@@ -39,6 +39,8 @@ This is the headline feature — the playbook is designed around one specific wa
    /security-audit                # one audit, main checkout
    /worktree security             # one audit, on a fresh worktree branch — same chat
    ```
+   **Smart-handoff:** if you ran `/security-audit` in a chat and *then* decided you want a worktree to apply fixes on a clean branch, just run `/worktree` (no argument). When the chat already has recent findings from an audit run against the main checkout, `/worktree` infers the audit name from history, creates the worktree, copies the findings into it, and offers to generate the implementation plan against the worktree — no audit re-run.
+
    For multiple audits in true parallel, open multiple chats and run `/worktree <name>` in each. Each chat is independent; each audit operates on its own worktree.
 4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit>/findings.md` (or `../wt-<name>/audits/<audit>/findings.md` if you used a worktree) and implement the fixes. Stay in that chat — it has the most context.
 5. **Re-run the audit to review the fix.** In the same chat, run the audit again. The re-run *is* the review pass — anything still flagged is anything the fix didn't address.
@@ -206,7 +208,7 @@ Install once for the whole machine when you audit lots of different codebases an
 Idempotent project preparation that every audit assumes has been run. Verifies graphify, builds the knowledge graph the architecture audit (and others) read, and merges the graphify-aware PreToolUse hook into the project's `.claude/settings.json`.
 
 ### `/worktree`
-The single-chat wrapper for the audit-against-worktree pattern. `/worktree security` creates `../wt-security` *and* runs `/security-audit --target=../wt-security` in the same chat — no second chat needed. Lenient prefix matching (`/worktree sec` resolves to `security-audit`); bare `/worktree` opens a picker. The chat stays in the original project; the audit reaches into the worktree via the audit's `--target` flag, which every audit accepts. For multiple parallel audits, open multiple chats and `/worktree <name>` in each.
+The single-chat wrapper for the audit-against-worktree pattern. `/worktree security` creates `../wt-security` *and* runs `/security-audit --target=../wt-security` in the same chat — no second chat needed. Lenient prefix matching (`/worktree sec` resolves to `security-audit`); bare `/worktree` opens a picker. The chat stays in the original project; the audit reaches into the worktree via the audit's `--target` flag, which every audit accepts. For multiple parallel audits, open multiple chats and `/worktree <name>` in each. **Smart-handoff:** if an audit was just run against the main checkout in this chat (no `--target`, findings within the last 30 minutes), `/worktree` infers the audit name from chat history, copies the findings into the worktree, skips the audit re-run, and offers to generate the implementation plan against the worktree.
 
 ### `/quality-gates-audit`
 Three lifecycle stages — pre-commit, pre-push, CI/CD — graded against an opinionated baseline. Asks whether the gates *run*; `/linting-audit` and `/typescript-audit` ask whether what runs is *well-configured*.
