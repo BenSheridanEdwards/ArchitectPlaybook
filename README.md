@@ -31,7 +31,7 @@ This is the headline feature — the playbook is designed around one specific wa
    ```
    /pre-audit-setup
    ```
-   Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into `.claude/settings.json`.
+   Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into `.claude/settings.json`. If you plan to pass any `--with-*` enrichment flag (`--with-stats`, `--with-run`, `--with-lighthouse-results`, `--with-scan`), also run `/preflight` to detect — and optionally install — the development dependencies those flags need.
 3. **Run audits, one per chat.** Each audit takes a `--target=<path>` flag, so you have two clean choices:
    - **Main checkout (no worktree):** open a Claude Code chat in your project and run `/<audit>` directly. Findings land in `audits/<audit>/`.
    - **Worktree:** open a Claude Code chat in your project and run `/worktree <name>`. The skill creates `../wt-<name>` on a `wt-<name>` branch *and* runs the matching audit against it, all in this same chat. Findings land in `../wt-<name>/audits/<audit>/`.
