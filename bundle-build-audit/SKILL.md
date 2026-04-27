@@ -48,6 +48,8 @@ When `--target=<path>` is set, the skill operates on that path instead of the cu
 
 **💡 Pro tip**: Use `/worktree bundle-build` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
+**💡 Pro tip**: Run `/preflight --audit=bundle-build` first to detect — and optionally install — the development dependency that makes `--with-stats` useful (a bundle analyser matching your build tool: `webpack-bundle-analyzer`, `@next/bundle-analyzer`, `rollup-plugin-visualizer`, or `vite-bundle-visualizer`). Skip if you already know the tooling is wired up.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

@@ -167,6 +167,7 @@ The playbook's skills fall into three categories: setup utilities you run once p
 | [`/install-skills-globally`](install-skills-globally/SKILL.md) | `--dry-run` (print the plan without copying)<br>`--force` (overwrite destinations even if they appear newer)<br>`--include=<name>` / `--exclude=<name>` (narrow or skip skills, repeatable) | Copy every playbook skill into `~/.claude/skills/` for machine-wide use. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md)                 | `--dry-run` (describe what would change without modifying anything)<br>`--force` (rebuild the knowledge graph and rewrite the hook even if both already exist) | Verify graphify, build the project knowledge graph, merge the PreToolUse hook. |
 | [`/worktree`](worktree/SKILL.md)                               | `<skill-name>` — positional, lenient prefix matching (e.g. `sec` resolves to `security-audit`). Bare `/worktree` opens a picker. | Creates a Git worktree for the named audit and runs the audit against it, all in this same chat. |
+| [`/preflight`](preflight/SKILL.md)                             | `--audit=<name>` (lenient prefix matching like `/worktree`)<br>`--target=<path>` (operate on a different project root)<br>`--install` (prompt and install missing development dependencies)<br>`--scaffold-configs` (prompt and create minimal project configuration) | Detect optional enrichment tooling for audits with `--with-*` flags. Read-only by default; mutation is gated behind explicit flags and prompts before every change. |
 
 ### Audits
 
@@ -217,6 +218,9 @@ Idempotent project preparation that every audit assumes has been run. Verifies g
 
 ### `/worktree`
 The single-chat wrapper for the audit-against-worktree pattern. `/worktree security` creates `../wt-security` *and* runs `/security-audit --target=../wt-security` in the same chat — no second chat needed. Lenient prefix matching (`/worktree sec` resolves to `security-audit`); bare `/worktree` opens a picker. The chat stays in the original project; the audit reaches into the worktree via the audit's `--target` flag, which every audit accepts. For multiple parallel audits, open multiple chats and `/worktree <name>` in each. **Smart-handoff:** if an audit was just run against the main checkout in this chat (no `--target`, findings within the last 30 minutes), `/worktree` infers the audit name from chat history, copies the findings into the worktree, skips the audit re-run, and offers to generate the implementation plan against the worktree.
+
+### `/preflight`
+Optional pre-step for audits that accept enrichment flags. Seven audits (`/bundle-build-audit`, `/typescript-audit`, `/testing-audit`, `/dependency-audit`, `/performance-audit`, `/security-audit`, `/linting-audit`) gather more comprehensive findings when their enrichment tooling is installed; running an audit, discovering the tooling is missing, installing it, then re-running is wasteful. `/preflight` detects what's missing in one shot, prints a status table sorted with the actionable rows on top, and — only behind explicit `--install` and `--scaffold-configs` flags — installs development dependencies and scaffolds minimal project configuration. Read-only by default; never touches global CLIs or external services.
 
 ### `/quality-gates-audit`
 Three lifecycle stages — pre-commit, pre-push, CI/CD — graded against an opinionated baseline. Asks whether the gates *run*; `/linting-audit` and `/typescript-audit` ask whether what runs is *well-configured*.

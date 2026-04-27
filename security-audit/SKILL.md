@@ -62,6 +62,8 @@ When `--target=<path>` is set, the skill operates on that path instead of the cu
 
 **💡 Pro tip**: Use `/worktree security` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
+**💡 Pro tip**: Run `/preflight --audit=security` first to detect — and optionally install — the development dependencies that make `--with-scan` useful (`eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security`). Skip if you already know the tooling is wired up.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

@@ -60,6 +60,8 @@ When `--target=<path>` is set, the skill operates on that path instead of the cu
 
 **💡 Pro tip**: Use `/worktree typescript` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
+**💡 Pro tip**: Run `/preflight --audit=typescript` first to detect — and optionally install — the development dependency that makes `--with-run` useful (`typescript`, which provides `tsc --noEmit`). Skip if you already know the tooling is wired up.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:

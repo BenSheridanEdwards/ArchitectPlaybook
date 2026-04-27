@@ -58,6 +58,8 @@ When `--target=<path>` is set, the skill operates on that path instead of the cu
 
 **💡 Pro tip**: Use `/worktree dependency` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
+**💡 Pro tip**: Run `/preflight --audit=dependency` first to confirm the package manager and lockfile are detected — `--with-network` calls the package manager's audit subcommand (`npm audit`, `pnpm audit`, `yarn audit`, or `bun pm audit`), so no install is needed, but a missing or unrecognised lockfile will silently degrade the enrichment.
+
 ## The opinionated baseline
 
 A check resolves to one of four statuses:
