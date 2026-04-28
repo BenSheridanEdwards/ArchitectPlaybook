@@ -196,9 +196,20 @@ For each finding, record evidence and up to ten sample file references plus a to
 
 Create `.architect-audits/performance-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
-### Step 7 — Print the chat summary and offer phase 2
+### Step 7 — Print the concise chat summary and offer phase 2
 
-Print the snapshot's headline numbers (framework, data layer, performance provider, image primitive, captured Web Vitals when available) plus a short table mirroring the four layers with counts of present, partial, missing, and violation per layer. Highlight the top three violations by Core Web Vitals impact (LCP first, then INP, then CLS). Then ask the single yes-or-no question. Do not proceed to phase 2 without an explicit affirmative.
+Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 6. The chat output has exactly this shape:
+
+1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
+2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
+   - **Title** (one clear line).
+   - **Why it matters** (explain the principle in 1–2 sentences).
+   - **Real consequences if ignored** (honest downside for the team or project).
+   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
+   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
+3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/performance-audit/findings.md`
+
+After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
 
 ### Step 8 — Phase 2: generate the implementation plan
 

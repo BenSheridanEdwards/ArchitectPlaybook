@@ -135,9 +135,11 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
   <audit-name>/
     findings.md       human-readable report you can read at a glance
     findings.json     machine-readable list of issues for downstream skills
+    snapshot.md       the Layer 0 diagnostic snapshot, on its own
     metadata.json     skill version, run timestamp, graphify revision hash
 ```
 
+- **Chat output** is human-first and concise: a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks.
 - **Fixing** is a free-form chat conversation in the same chat that produced the audit. The user asks Claude to read `findings.json` (or `findings.md`) and implement the fixes. There is no dedicated fix skill — the audit's findings file plus the implementation plan are the brief.
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix. Whatever the audit still flags is what the fix didn't address. There is no dedicated review skill — the audit *is* the review.
 - **`/system-self-improve`** reads a review's gap report (or a user-supplied gap, or audit-history patterns) and proposes an edit to the originating audit's `SKILL.md` so the same class of gap is more likely to be caught next time.

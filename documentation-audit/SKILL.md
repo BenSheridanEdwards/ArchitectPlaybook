@@ -233,9 +233,20 @@ For each check, record evidence and up to ten representative samples plus a tota
 
 Create `.architect-audits/documentation-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
-### Step 10 — Print the chat summary and offer phase 2
+### Step 10 — Print the concise chat summary and offer phase 2
 
-Print the snapshot's headline numbers (project shape, total docs, README size, ADR count and most-recent date, TODO age breakdown, per-feature README coverage, external-link reachability when applicable) plus a short table mirroring the four layers with counts of present, partial, missing, and violation per layer. When layer 4's operational checks are skipped, the row reflects the skip with a note. Highlight the top three violations across layers 1 (onboarding) and 4 (drift) — both are the highest-leverage fixes for documentation. Then ask the single yes-or-no question. Do not proceed to phase 2 without an explicit affirmative.
+Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 9. The chat output has exactly this shape:
+
+1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
+2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
+   - **Title** (one clear line).
+   - **Why it matters** (explain the principle in 1–2 sentences).
+   - **Real consequences if ignored** (honest downside for the team or project).
+   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
+   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
+3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/documentation-audit/findings.md`
+
+After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
 
 ### Step 11 — Phase 2: generate the implementation plan
 

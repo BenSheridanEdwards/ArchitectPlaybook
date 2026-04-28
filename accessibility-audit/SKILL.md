@@ -139,9 +139,20 @@ Record every matching path in the `evidence` array. For component-pattern checks
 
 Create `.architect-audits/accessibility-audit/` if it does not exist. Write the three files. If a previous run exists, overwrite `findings.md`, `findings.json`, and `metadata.json`. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
 
-### Step 5 — Print the chat summary and offer phase 2
+### Step 5 — Print the concise chat summary and offer phase 2
 
-In the chat session, print a short table that mirrors the three layers, with a count of present, partial, missing, and violation per layer. Highlight the top three violations by severity. Then ask the user the single yes-or-no question described above. Do not proceed to phase 2 without an explicit affirmative.
+Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 4. The chat output has exactly this shape:
+
+1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
+2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
+   - **Title** (one clear line).
+   - **Why it matters** (explain the principle in 1–2 sentences).
+   - **Real consequences if ignored** (honest downside for the team or project).
+   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
+   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
+3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/accessibility-audit/findings.md`
+
+After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
 
 ### Step 6 — Phase 2: generate the implementation plan
 

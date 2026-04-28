@@ -88,6 +88,8 @@ Audits, fixes, and reviews each run in different chat sessions. They cannot shar
 
 `findings.md` always includes the snapshot at the top followed by check results grouped by layer. `findings.json` is structured for downstream tooling — its top-level shape is `{skillVersion, runStartedAt, runFinishedAt, snapshot, summary, checks}` with optional skill-specific fields.
 
+**Chat output is human-first and concise.** Every audit prints a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks. This keeps the chat scannable while the on-disk files carry the complete diagnostic.
+
 The contract is what makes the multi-chat workflow tractable. A chat opened in a worktree to fix issues reads `findings.json`. A chat opened in another worktree to review the fix re-runs the originating audit and produces a new `findings.md` plus an optional `review-gap-report.md` if it found something the original audit missed.
 
 ## The self-improvement loop
