@@ -26,7 +26,7 @@ The default mental model is a TypeScript and React frontend project. The detecti
 
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/quality-gates-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/quality-gates-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree quality-gates` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -75,7 +75,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 2. **Detects ecosystem.** Confirms a Node.js project by checking for `package.json`. If absent, the skill stops and tells the user it currently supports Node.js only.
 3. **Enumerates gates.** Walks the baseline above, applying any `--stage`, `--include`, or `--exclude` filters.
 4. **Resolves each gate's status** by inspecting the project for the signals listed in the baseline tables. Never executes any gate — this is a static audit.
-5. **Writes phase 1 outputs** to `audits/quality-gates-audit/`:
+5. **Writes phase 1 outputs** to `.architect-audits/quality-gates-audit/`:
    - `findings.md` — grouped by stage, one section per gate.
    - `findings.json` — machine-readable, see schema below.
    - `metadata.json` — skill version, run timestamp, graphify revision hash, ecosystem.
@@ -83,7 +83,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 
    > "Generate an implementation plan for the missing or misconfigured gates? (yes/no)"
 
-   On `yes`, writes `audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
+   On `yes`, writes `.architect-audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
 
    On `no`, exits cleanly. The user can re-run later with `--plan` to skip phase 1 and jump straight to plan generation.
 
@@ -119,10 +119,10 @@ Capture every matching path or configuration key in the `evidence` array so the 
 
 ### Step 4 — Write phase 1 outputs
 
-Create `audits/quality-gates-audit/` if it does not exist. Write the three files:
+Create `.architect-audits/quality-gates-audit/` if it does not exist. Write the three files:
 
 ```
-audits/quality-gates-audit/
+.architect-audits/quality-gates-audit/
   findings.md
   findings.json
   metadata.json
@@ -214,7 +214,7 @@ The plan is descriptive, not executable. It does not run the install commands an
 
 - Execute any gate. The audit is fully static.
 - Install any package or dependency.
-- Create, modify, or delete any configuration file outside `audits/quality-gates-audit/`.
+- Create, modify, or delete any configuration file outside `.architect-audits/quality-gates-audit/`.
 - Modify hooks, workflow files, or `package.json`.
 - Open pull requests or commit anything to git.
 - Audit any ecosystem other than Node.js. The opinionated baseline above is currently Node.js-only by design.

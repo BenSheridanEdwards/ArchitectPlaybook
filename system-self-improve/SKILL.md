@@ -8,7 +8,7 @@ trigger: /system-self-improve
 
 The meta-improvement layer of the architect-playbook. When a review surfaces a gap that one of the audits missed — or when running an audit reveals a weakness in the audit itself — `/system-self-improve` reads the gap, locates the affected SKILL.md (and any adjacent files: README, CLAUDE.md, `pre-audit-setup` hook, MEMORY.md), proposes a minimal reversible edit, asks for confirmation, and on approval mutates the playbook so the same gap is more likely to be caught next time.
 
-This is the only skill in the playbook that writes to files outside its own `audits/` directory. That power is gated behind a deliberate two-stage flow.
+This is the only skill in the playbook that writes to files outside its own `.architect-audits/` directory. That power is gated behind a deliberate two-stage flow.
 
 ## How this differs from neighbouring skills
 
@@ -25,15 +25,15 @@ This is the only skill in the playbook that writes to files outside its own `aud
 
 Three input modes, in priority order. The skill scans for them in this order and uses the first that yields usable input.
 
-1. **Review gap report** (most common). A reviewer — fresh chat against a worktree, human, or another agent — writes `audits/<originating-audit>/review-gap-report.md` describing what the originating audit failed to catch. The default scan path is `audits/*/review-gap-report.md` in the current working directory; an alternative path is supplied via `--gap-report=<path>`.
+1. **Review gap report** (most common). A reviewer — fresh chat against a worktree, human, or another agent — writes `.architect-audits/<originating-audit>/review-gap-report.md` describing what the originating audit failed to catch. The default scan path is `.architect-audits/*/review-gap-report.md` in the current working directory; an alternative path is supplied via `--gap-report=<path>`.
 2. **User-supplied gap description.** The user invokes the skill with `--gap="<freeform description>"` plus `--target-skill=<skill-name>`. Useful when the user has noticed a gap directly without writing a formal review.
-3. **Pattern across audit runs.** When run with `--from-audit-history`, the skill scans `audits/*/findings.json` across the project for patterns suggesting an audit is systematically wrong: every project hits the same threshold, an audit consistently surfaces `partial` with no `violation` (suggesting the threshold is too lenient or the check is too weak), an audit's `noGraphify` fallback is the dominant code path. This is the most speculative mode and reports candidates as suggestions only.
+3. **Pattern across audit runs.** When run with `--from-audit-history`, the skill scans `.architect-audits/*/findings.json` across the project for patterns suggesting an audit is systematically wrong: every project hits the same threshold, an audit consistently surfaces `partial` with no `violation` (suggesting the threshold is too lenient or the check is too weak), an audit's `noGraphify` fallback is the dominant code path. This is the most speculative mode and reports candidates as suggestions only.
 
 ## Where `/system-self-improve` operates
 
 The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repo and be re-installed via `/install-skills-locally` or `/install-skills-globally`.
 
-When the gap report lives in a target project (`<some-project>/audits/<audit>/review-gap-report.md`) and the playbook clone is elsewhere, the user passes both `--gap-report=<path>` and `--playbook-path=<path>`.
+When the gap report lives in a target project (`<some-project>/.architect-audits/<audit>/review-gap-report.md`) and the playbook clone is elsewhere, the user passes both `--gap-report=<path>` and `--playbook-path=<path>`.
 
 ## Posture: dry-run by default, `--apply` always prompts
 
@@ -50,7 +50,7 @@ This is the only skill in the playbook with a meaningful `--apply` mode. Two mod
 /system-self-improve                                          # dry-run; scan default review-gap-report paths
 /system-self-improve --apply                                  # dry-run output + confirmation prompt + (on yes) mutation
 /system-self-improve --gap="<description>" --target-skill=<name>   # user-supplied gap mode
-/system-self-improve --from-audit-history                     # scan audits/*/findings.json for systematic patterns
+/system-self-improve --from-audit-history                     # scan .architect-audits/*/findings.json for systematic patterns
 /system-self-improve --gap-report=<path>                      # explicit gap-report path
 /system-self-improve --playbook-path=<path>                   # operate on a playbook clone elsewhere
 /system-self-improve --plan                                   # regenerate improvement-plan.md for an existing run
@@ -134,8 +134,8 @@ Confirm with the user and (on approval) mutate. **This stage only runs when `--a
 4. **Walks Stage 1 — Weakness diagnosis** and reports the gap classification.
 5. **Walks Stage 2 — Locate and analyse**, including the ripple-effect map and Graphify centrality (when present). Flags recursive self-edits.
 6. **Walks Stage 3 — Propose the edit**, generating the minimal diff plus the cross-skill consistency edits. Verifies the edit doesn't violate the structural conventions.
-7. **Writes Layer 0 — the diagnostic snapshot** to `audits/system-self-improve/snapshot.md` and prepends the same content to `improvement-plan.md`.
-8. **Writes the proposal** to `audits/system-self-improve/`:
+7. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/system-self-improve/snapshot.md` and prepends the same content to `improvement-plan.md`.
+8. **Writes the proposal** to `.architect-audits/system-self-improve/`:
    - `improvement-plan.md` — the human-readable proposal with reasoning, the proposed diff, ripple effects, suggested commit message.
    - `improvement-plan.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -161,9 +161,9 @@ If none of these resolves, stop with:
 
 Walk the priority order:
 
-1. Scan for `review-gap-report.md` files. Default scan path is `audits/*/review-gap-report.md` in the current working directory (which is *not* the playbook directory in the typical case — review reports live in the target project). When `--gap-report=<path>` is supplied, use that exclusively.
+1. Scan for `review-gap-report.md` files. Default scan path is `.architect-audits/*/review-gap-report.md` in the current working directory (which is *not* the playbook directory in the typical case — review reports live in the target project). When `--gap-report=<path>` is supplied, use that exclusively.
 2. Honour `--gap` plus `--target-skill` when supplied.
-3. Honour `--from-audit-history` and walk `audits/*/findings.json` looking for systematic patterns.
+3. Honour `--from-audit-history` and walk `.architect-audits/*/findings.json` looking for systematic patterns.
 
 Record the resolved input source in metadata.
 
@@ -199,7 +199,7 @@ Generate the minimal diff. Verify against the prohibited-mutations list:
 
 Generate accompanying changes for every entry in the ripple-effect map. Draft the Conventional Commits message.
 
-Write the plan files to `audits/system-self-improve/`. The diff goes into `proposed-changes.diff` as a unified diff covering every affected file.
+Write the plan files to `.architect-audits/system-self-improve/`. The diff goes into `proposed-changes.diff` as a unified diff covering every affected file.
 
 ### Step 6 — Print the chat summary
 
@@ -221,7 +221,7 @@ Append a log entry to `system-self-improve-log.md`:
 ```markdown
 ## 2026-04-26T13:47:00Z — security-audit (missing-check)
 
-**Source:** audits/security-audit/review-gap-report.md
+**Source:** .architect-audits/security-audit/review-gap-report.md
 **Originating skill:** security-audit
 **Classification:** missing-check
 **Summary:** Added Layer 1 check for `prompt()` usage as an XSS vector. Updated boundary table reference to confirm `/security-audit` ownership.
@@ -245,7 +245,7 @@ Print the commit suggestion and the modified-file list. Do not commit.
   "playbookCommit": "08a38d8",
   "inputSource": {
     "type": "review-gap-report",
-    "path": "/Users/bense/Coding/Consulting/some-project/audits/security-audit/review-gap-report.md"
+    "path": "/Users/bense/Coding/Consulting/some-project/.architect-audits/security-audit/review-gap-report.md"
   },
   "snapshot": {
     "skillCounts": { "ready": 14, "stub": 1 },
@@ -296,7 +296,7 @@ Print the commit suggestion and the modified-file list. Do not commit.
 - Every applied change is reversible by reverting a single git commit (the user's commit, not one this skill makes — the skill never commits).
 - Threshold changes record the previous value in the plan and the log so the user can revert without re-deriving it.
 - Wording changes record the previous text in the plan and the log.
-- The skill never deletes a check, a skill, or any file outside its own `audits/` directory.
+- The skill never deletes a check, a skill, or any file outside its own `.architect-audits/` directory.
 
 ## Failure modes and remediation
 

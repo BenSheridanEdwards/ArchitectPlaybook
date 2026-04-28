@@ -41,18 +41,18 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
 
 ## Audit behavior
 
-- **Read-only by default.** No skill writes to the codebase outside of `audits/<skill-name>/` unless the user passes `--apply`.
+- **Read-only by default.** No skill writes to the codebase outside of `.architect-audits/<skill-name>/` unless the user passes `--apply`.
 - A mutating run prints a dry-run summary first and waits for confirmation.
 - Every audit writes three files:
-  - `audits/<skill-name>/findings.md` — human-readable report.
-  - `audits/<skill-name>/findings.json` — machine-readable for downstream skills.
-  - `audits/<skill-name>/metadata.json` — skill version, run timestamp, graphify revision hash.
+  - `.architect-audits/<skill-name>/findings.md` — human-readable report.
+  - `.architect-audits/<skill-name>/findings.json` — machine-readable for downstream skills.
+  - `.architect-audits/<skill-name>/metadata.json` — skill version, run timestamp, graphify revision hash.
 
 ## Cross-session handoff
 
 Audits, fixes, and reviews each run in different Claude Code chat sessions. They cannot share in-memory state. The on-disk findings files are the protocol.
 
-- A fix skill reads `audits/<skill-name>/findings.json` from the same project.
+- A fix skill reads `.architect-audits/<skill-name>/findings.json` from the same project.
 - A review skill reads the audit's findings plus the diff produced by the fix.
 - `/system-self-improve` reads the review's gap report and rewrites the originating audit's `SKILL.md` so the same gap is caught next time.
 

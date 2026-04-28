@@ -58,7 +58,7 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (any open redirect, any `eval`, any unsandboxed third-party iframe is a finding); soft checks report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/security-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/security-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree security` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -155,9 +155,9 @@ Layer 0 is informational only and has no status.
    - Semgrep via `semgrep --config=p/owasp-top-ten --config=p/javascript --json` if `semgrep` is on PATH.
 
    If none of the recognised scanners is installed (no security ESLint plugins in `devDependencies` and `semgrep` is not on PATH), record `scannersExecuted: []` in metadata, print to the chat and prepend to `findings.md`: "`--with-scan` was requested but none of the recognised security scanners is installed. Run `/preflight --audit=security --install` to install the ESLint security plugins, then re-run this audit. The static analysis has been completed; only the scan-derived enrichment degraded. (Semgrep is a global CLI and out of scope for `/preflight` — install it manually if you want it.)" Record `recoveryHint: "/preflight --audit=security --install"` on each scan-dependent check that degraded in `findings.json`. Continue with the static analysis.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/security-audit/snapshot.md` and prepends the same content to `findings.md`.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/security-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check. Heuristic checks (PII detection) explicitly mark `confidence: "heuristic"` in `findings.json` and report `partial`.
-7. **Writes phase 1 outputs** to `audits/security-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/security-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -166,7 +166,7 @@ Layer 0 is informational only and has no status.
 
    > "Generate an implementation plan for the security gaps? (yes/no)"
 
-   On `yes`, writes `audits/security-audit/implementation-plan.md` describing exactly which configuration entries to add (security headers, Content Security Policy directives, cookie flags), which source-level changes to make (sanitization wrapping, redirect allowlists, SRI hashes), and which third-party integrations to harden. The plan is ordered by **severity** rather than by layer, because security findings cross layers and the user wants to fix the highest-impact issues first.
+   On `yes`, writes `.architect-audits/security-audit/implementation-plan.md` describing exactly which configuration entries to add (security headers, Content Security Policy directives, cookie flags), which source-level changes to make (sanitization wrapping, redirect allowlists, SRI hashes), and which third-party integrations to harden. The plan is ordered by **severity** rather than by layer, because security findings cross layers and the user wants to fix the highest-impact issues first.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -206,7 +206,7 @@ For each check in the active layer list, walk its detection logic. Use the stand
 
 ### Step 6 — Write phase 1 outputs
 
-Create `audits/security-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/security-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 7 — Print the chat summary and offer phase 2
 

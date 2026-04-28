@@ -56,7 +56,7 @@ This skill is read-only and never modifies anything. Two modes:
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` invocation of `tsc --noEmit` all run scoped to the target. Findings land at `<target>/audits/typescript-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` invocation of `tsc --noEmit` all run scoped to the target. Findings land at `<target>/.architect-audits/typescript-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree typescript` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -147,9 +147,9 @@ Layer 0 is informational only and has no status.
 4. **Detects the runtime validation library** (zod, valibot, arktype, io-ts, yup, joi, superstruct, runtypes) for the diagnostic snapshot and for the layer 4 checks.
 5. **When `--with-run` is set**, invokes `npx tsc --noEmit` and parses the diagnostics. If `tsc` fails to start (not installed in the project), records the failure, prints to the chat and prepends to `findings.md`: "`--with-run` was requested but `typescript` is not installed. Run `/preflight --audit=typescript --install` to install it, then re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Records `recoveryHint: "/preflight --audit=typescript --install"` on each run-dependent check that degraded in `findings.json`. Continues with run-dependent enrichment degrading to `partial`.
 6. **Walks every source file** to compute the type-quality counts, locating each offending pattern with file and line. Uses Graphify communities to sample broadly when the graph is present; otherwise sweeps all `.ts` and `.tsx` files under `src/` (or the framework equivalent).
-7. **Writes Layer 0 — the diagnostic snapshot** to `audits/typescript-audit/snapshot.md` and prepends the same content to `findings.md`.
+7. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/typescript-audit/snapshot.md` and prepends the same content to `findings.md`.
 8. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-9. **Writes phase 1 outputs** to `audits/typescript-audit/`:
+9. **Writes phase 1 outputs** to `.architect-audits/typescript-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -158,7 +158,7 @@ Layer 0 is informational only and has no status.
 
     > "Generate an implementation plan for the TypeScript discipline gaps? (yes/no)"
 
-    On `yes`, writes `audits/typescript-audit/implementation-plan.md` describing exactly which compiler flags to flip on, which files to clean up (graph-prioritised when Graphify is present), which type-system patterns to introduce, and which IO boundaries to wrap with validation. The plan does not modify any project files.
+    On `yes`, writes `.architect-audits/typescript-audit/implementation-plan.md` describing exactly which compiler flags to flip on, which files to clean up (graph-prioritised when Graphify is present), which type-system patterns to introduce, and which IO boundaries to wrap with validation. The plan does not modify any project files.
 
     On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -218,7 +218,7 @@ For each check, record evidence and up to ten representative samples plus a tota
 
 ### Step 8 — Write phase 1 outputs
 
-Create `audits/typescript-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/typescript-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 9 — Print the chat summary and offer phase 2
 

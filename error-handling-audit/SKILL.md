@@ -35,7 +35,7 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (an empty catch is an empty catch); the rest report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/audits/error-handling-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/.architect-audits/error-handling-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree error-handling` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -114,9 +114,9 @@ Layer 0 is informational only and has no status. Layer 3 reports `skipped: "reac
 2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and a TypeScript dependency. If absent, the skill stops and tells the user it currently supports TypeScript projects only.
 3. **Detects React.** Layer 3 is enabled only when `react` is in dependencies (directly or via a meta-framework that brings it in). When absent, layer 3 is recorded as skipped in `findings.json` and omitted from the chat summary.
 4. **Detects the error-reporting service and the logger** for the diagnostic snapshot and for the layer 4 checks.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/error-handling-audit/snapshot.md` and prepends the same content to `findings.md`.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/error-handling-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check.
-7. **Writes phase 1 outputs** to `audits/error-handling-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/error-handling-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -125,7 +125,7 @@ Layer 0 is informational only and has no status. Layer 3 reports `skipped: "reac
 
    > "Generate an implementation plan for the error-handling gaps? (yes/no)"
 
-   On `yes`, writes `audits/error-handling-audit/implementation-plan.md` describing exactly which catch blocks to fix, which network call sites to wrap, which React error boundaries to add, and which observability primitives to wire up — ordered by layer and then by severity. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/error-handling-audit/implementation-plan.md` describing exactly which catch blocks to fix, which network call sites to wrap, which React error boundaries to add, and which observability primitives to wire up — ordered by layer and then by severity. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -164,7 +164,7 @@ For checks that can produce many offenders (empty catches, swallowed errors, ung
 
 ### Step 5 — Write phase 1 outputs
 
-Create `audits/error-handling-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/error-handling-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 6 — Print the chat summary and offer phase 2
 
@@ -259,7 +259,7 @@ When React is not detected, `reactErrorBoundaries` summary becomes `"reactErrorB
 - Execute any code, run any test, or query any error-reporting service.
 - Read production error data. Runtime error frequency and impact are out of scope; that belongs to the user's existing observability tooling.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/error-handling-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/error-handling-audit/`.
 - Modify source files, configuration, or continuous-integration workflows.
 - Open pull requests or commit anything to git.
 - Audit JavaScript-only projects.

@@ -88,7 +88,7 @@ The skill **never modifies any test, configuration, or source file**, and **neve
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any test-runner subprocess (`vitest run --coverage`, `jest --coverage`) all run scoped to the target. Findings land at `<target>/audits/testing-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any test-runner subprocess (`vitest run --coverage`, `jest --coverage`) all run scoped to the target. Findings land at `<target>/.architect-audits/testing-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree testing` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -185,9 +185,9 @@ This layer encodes the testing philosophy stated above.
 3. **Detects the test runner, component testing library, and end-to-end framework** for the diagnostic snapshot and for layer-1 and layer-4 checks.
 4. **When `--with-run` is set**, invokes the detected unit-test runner in coverage mode (`vitest run --coverage --reporter=json` or `jest --coverage --json`), captures the JSON output, and folds it into the snapshot. Never runs Playwright or Cypress.
 5. **Walks every test file** to compute the diagnostic distributions (query priority breakdown, `userEvent`/`fireEvent` ratio, `getByTestId` count, `container.querySelector` count, snapshot count and sizes, flaky-pattern signal counts).
-6. **Writes Layer 0 — the diagnostic snapshot** to `audits/testing-audit/snapshot.md` and prepends the same content to `findings.md`.
+6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/testing-audit/snapshot.md` and prepends the same content to `findings.md`.
 7. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-8. **Writes phase 1 outputs** to `audits/testing-audit/`:
+8. **Writes phase 1 outputs** to `.architect-audits/testing-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -196,7 +196,7 @@ This layer encodes the testing philosophy stated above.
 
    > "Generate an implementation plan for the testing gaps? (yes/no)"
 
-   On `yes`, writes `audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -267,7 +267,7 @@ For each check, record evidence and up to ten representative samples plus a tota
 
 ### Step 7 — Write phase 1 outputs
 
-Create `audits/testing-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/testing-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 8 — Print the chat summary and offer phase 2
 

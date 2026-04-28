@@ -21,7 +21,7 @@ Idempotent preparation that every audit in the architect-playbook expects to hav
 1. **Verifies graphify is installed at `~/.claude/skills/graphify`.** This skill does not install graphify. If it is missing, stop and tell the user where to install it (see [https://graphify.net/graphify-claude-code-integration.html](https://graphify.net/graphify-claude-code-integration.html)). Do not invent a clone URL.
 2. **Builds the project knowledge graph** by invoking `/graphify .` from the current working directory. Subsequent audits read `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` as their map of the codebase.
 3. **Merges the graphify-aware PreToolUse hook** into the project-local `.claude/settings.json` (creating the file if needed). The hook attaches a hint to every Glob and Grep call: when the knowledge graph exists, Claude is reminded to read the report before searching raw files.
-4. **Creates the `audits/` directory** that downstream audits will write findings into. Adds a single `.gitkeep` so it survives `git clean`.
+4. **Creates the `.architect-audits/` directory** that downstream audits will write findings into. Adds a single `.gitkeep` so it survives `git clean`.
 5. **Prints a checklist** describing what was done, what was already in place, and what the user should verify before launching audits.
 
 ## Implementation steps
@@ -86,11 +86,11 @@ Merge rules (in order):
 
 After merging, print the final hook block so the user can confirm.
 
-### Step 5 — Ensure the `audits/` directory exists
+### Step 5 — Ensure the `.architect-audits/` directory exists
 
 ```bash
 mkdir -p audits
-[ -f audits/.gitkeep ] || touch audits/.gitkeep
+[ -f .architect-audits/.gitkeep ] || touch .architect-audits/.gitkeep
 ```
 
 ### Step 6 — Print the checklist
@@ -101,7 +101,7 @@ Output a short report with one line per item, each prefixed with `[done]`, `[ski
 [done]    graphify presence verified
 [done]    graphify-out/graph.json built (53 files indexed)
 [done]    PreToolUse hook merged into .claude/settings.json
-[done]    audits/ directory created
+[done]    .architect-audits/ directory created
 [hint]    next: open one chat per audit slash command and run them in parallel
 ```
 

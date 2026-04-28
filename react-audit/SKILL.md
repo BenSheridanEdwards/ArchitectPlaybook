@@ -56,7 +56,7 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/audits/react-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/.architect-audits/react-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree react` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -141,9 +141,9 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 3. **Resolves the React version** from `package.json` and the lockfile. Determines whether layer 4 runs (React 18 or newer) or is reported as skipped.
 4. **Detects framework, form library, animation library, and design system** for the diagnostic snapshot and for layer-specific dispatch (App Router gates two layer 4 checks).
 5. **Counts class components and identifies the most-recently-modified component of each kind** so the implementation plan can flag class components newer than the most recent function component as the strongest migration signal.
-6. **Writes Layer 0 — the diagnostic snapshot** to `audits/react-audit/snapshot.md` and prepends the same content to `findings.md`.
+6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/react-audit/snapshot.md` and prepends the same content to `findings.md`.
 7. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check.
-8. **Writes phase 1 outputs** to `audits/react-audit/`:
+8. **Writes phase 1 outputs** to `.architect-audits/react-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -152,7 +152,7 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 
    > "Generate an implementation plan for the React idiom gaps? (yes/no)"
 
-   On `yes`, writes `audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -208,7 +208,7 @@ Record up to ten representative samples plus a total count per check.
 
 ### Step 6 — Write phase 1 outputs
 
-Create `audits/react-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/react-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 7 — Print the chat summary and offer phase 2
 
@@ -310,7 +310,7 @@ When React is below 18, the layer 4 summary becomes `"reactEighteenAndNineteenId
 - Audit ESLint plugin coverage. That is owned by `/linting-audit` (the `react-hooks` plugin overlap is intentionally surfaced in both).
 - Audit `React.lazy` configuration or dynamic-import wiring. Those are owned by `/bundle-build-audit`.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/react-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/react-audit/`.
 - Modify components, hooks, or configuration.
 - Open pull requests or commit anything to git.
 - Audit non-React frontends. Vue, Svelte, Angular, and Solid are out of scope for v1.

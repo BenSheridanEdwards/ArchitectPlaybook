@@ -10,7 +10,7 @@ Create a Git worktree and run the named audit against it, in the same chat. The 
 
 The skill has two modes:
 
-- **Normal mode (default).** Open a fresh chat in your project, run `/worktree security`, and the chat creates `../wt-security`, then runs `/security-audit --target=../wt-security`, then drops findings at `../wt-security/audits/security-audit/`. One chat, one command, audit done.
+- **Normal mode (default).** Open a fresh chat in your project, run `/worktree security`, and the chat creates `../wt-security`, then runs `/security-audit --target=../wt-security`, then drops findings at `../wt-security/.architect-audits/security-audit/`. One chat, one command, audit done.
 - **Smart-handoff mode.** If an audit was just run in this chat against the main checkout (no `--target`) and the findings are still recent, `/worktree` skips the audit re-run, copies the existing findings into the worktree, and asks whether to generate the implementation plan against the worktree. Useful when you ran the audit first to look at the findings, then decided you wanted a clean branch to apply the fixes on.
 
 ## Usage
@@ -41,9 +41,9 @@ When the argument is ambiguous (matches multiple skills), the skill prints the c
 4. **Computes the worktree slug.** For `<short>-audit`, the slug is `<short>` (so `security-audit` → `wt-security`). For non-audit skills like `system-self-improve`, the slug is the full name (so `system-self-improve` → `wt-system-self-improve`).
 5. **Creates the worktree.** Runs `git worktree add ../wt-<slug> -b wt-<slug>`. When the branch already exists, runs `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, skips creation and notes "worktree already exists at `../wt-<slug>`".
 6. **Branches on mode:**
-   - **Normal mode**: invokes the resolved audit against the worktree with `--target=../wt-<slug>`. All file reads, globbing, searches, and subprocess invocations run scoped to the worktree. Findings land at `../wt-<slug>/audits/<skill-name>/`. The audit's two-phase flow (report → ask about implementation plan) runs as usual.
-   - **Smart-handoff mode**: copies `audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Asks the user the standard phase-2 question: *"Generate an implementation plan against the worktree? (yes/no)"*. On yes, writes `../wt-<slug>/audits/<skill-name>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`.
-7. **Reports the result inline** in the chat. The chat is now positioned to apply fixes against the worktree if the user asks — Claude reads `../wt-<slug>/audits/<skill-name>/findings.json` and edits files under `../wt-<slug>/`.
+   - **Normal mode**: invokes the resolved audit against the worktree with `--target=../wt-<slug>`. All file reads, globbing, searches, and subprocess invocations run scoped to the worktree. Findings land at `../wt-<slug>/.architect-audits/<skill-name>/`. The audit's two-phase flow (report → ask about implementation plan) runs as usual.
+   - **Smart-handoff mode**: copies `.architect-audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/.architect-audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Asks the user the standard phase-2 question: *"Generate an implementation plan against the worktree? (yes/no)"*. On yes, writes `../wt-<slug>/.architect-audits/<skill-name>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`.
+7. **Reports the result inline** in the chat. The chat is now positioned to apply fixes against the worktree if the user asks — Claude reads `../wt-<slug>/.architect-audits/<skill-name>/findings.json` and edits files under `../wt-<slug>/`.
 
 The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that does the work. Once the audit (or handoff) and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
 
@@ -57,7 +57,7 @@ Smart-handoff fires when **all** of these hold:
 
 1. `/worktree` is invoked (with or without an argument).
 2. The chat's conversation history shows a recent `/<audit>` slash-command invocation in this chat that ran **without** `--target` (i.e., against the main checkout). When `/worktree` was called with an explicit argument, that argument must match the recent audit's name (or its short form via lenient prefix matching) for the handoff to fire — otherwise the user is asking for a different audit than the one they ran, and Normal mode runs.
-3. `audits/<resolved-audit>/findings.md` exists in the chat's current working directory.
+3. `.architect-audits/<resolved-audit>/findings.md` exists in the chat's current working directory.
 4. The findings file's modification time is within 30 minutes of "now" (a heuristic for "still fresh enough that re-running would not produce different results").
 
 If any condition fails, Normal mode runs (worktree + fresh audit invocation against it).
@@ -66,8 +66,8 @@ If any condition fails, Normal mode runs (worktree + fresh audit invocation agai
 
 When the handoff fires, after the worktree is created:
 
-1. **Copy the findings.** `cp -R audits/<audit>/findings.md`, `findings.json`, `snapshot.md`, `metadata.json` from the chat's cwd into `../wt-<slug>/audits/<audit>/`. The implementation-plan.md is **not** copied; it gets regenerated against the worktree if the user asks.
-2. **Annotate the metadata.** Update `../wt-<slug>/audits/<audit>/metadata.json` to record:
+1. **Copy the findings.** `cp -R .architect-audits/<audit>/findings.md`, `findings.json`, `snapshot.md`, `metadata.json` from the chat's cwd into `../wt-<slug>/.architect-audits/<audit>/`. The implementation-plan.md is **not** copied; it gets regenerated against the worktree if the user asks.
+2. **Annotate the metadata.** Update `../wt-<slug>/.architect-audits/<audit>/metadata.json` to record:
    - `handedOffFrom`: `"cwd"`
    - `handedOffAt`: ISO timestamp of when the handoff ran
    - `originalRunStartedAt`: preserved from the original metadata
@@ -75,14 +75,14 @@ When the handoff fires, after the worktree is created:
 3. **Print a short summary.** "Smart-handoff: picked up findings for `<audit>` (originally run at `<timestamp>`). Worktree created at `../wt-<slug>`. The findings have been copied; no audit re-run."
 4. **Run phase 2 against the worktree.** Ask the user the same yes/no question the audit asks:
    > "Generate an implementation plan against the worktree? (yes/no)"
-   On yes, write `../wt-<slug>/audits/<audit>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`. The plan can reference graph centrality from `../wt-<slug>/graphify-out/graph.json` if it exists in the worktree (which it does only if `/pre-audit-setup` was run on the worktree separately — most of the time it won't be, and the plan will note `noGraphify: true`).
-5. **Suggest the natural next step.** "If you'd like to apply the plan now, ask me to read `../wt-<slug>/audits/<audit>/implementation-plan.md` and start editing files under `../wt-<slug>/`. The chat will stay in this directory; the edits land in the worktree via absolute paths."
+   On yes, write `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`. The plan can reference graph centrality from `../wt-<slug>/graphify-out/graph.json` if it exists in the worktree (which it does only if `/pre-audit-setup` was run on the worktree separately — most of the time it won't be, and the plan will note `noGraphify: true`).
+5. **Suggest the natural next step.** "If you'd like to apply the plan now, ask me to read `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md` and start editing files under `../wt-<slug>/`. The chat will stay in this directory; the edits land in the worktree via absolute paths."
 
 ### When the user wants a fresh re-run instead
 
 Pass an explicit argument that doesn't match the recently-run audit, or wait until the existing findings are older than 30 minutes. Both cause Normal mode to run instead of the handoff.
 
-If the user wants to *force* a fresh re-run of the same audit they just ran (for example, because they made changes between the audit and the `/worktree` invocation), the cleanest path is to re-run the audit first (`/<audit>` again, against the main checkout) and then run `/worktree` — the new findings overwrite the old ones, the mtime resets, and the handoff picks them up. Or delete `audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode (no findings to hand off).
+If the user wants to *force* a fresh re-run of the same audit they just ran (for example, because they made changes between the audit and the `/worktree` invocation), the cleanest path is to re-run the audit first (`/<audit>` again, against the main checkout) and then run `/worktree` — the new findings overwrite the old ones, the mtime resets, and the handoff picks them up. Or delete `.architect-audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode (no findings to hand off).
 
 ## Implementation steps
 
@@ -117,7 +117,7 @@ If the no-argument inference yielded nothing AND no argument was supplied, print
 After the resolved skill is in hand, check the smart-handoff trigger conditions:
 
 1. The conversation history shows a recent `/<resolved-skill-name>` invocation in this chat that ran without `--target`. (If the user supplied an argument, the resolved name must match the recent invocation; otherwise the inference at step 3 is what surfaced this audit name in the first place.)
-2. `audits/<resolved-skill-name>/findings.md` exists in the chat's current working directory.
+2. `.architect-audits/<resolved-skill-name>/findings.md` exists in the chat's current working directory.
 3. The findings file's modification time is within 30 minutes of "now".
 
 If all three hold, set `mode=smart-handoff`. Otherwise set `mode=normal`.
@@ -152,19 +152,19 @@ If `git worktree add` fails (for example, because the branch is checked out else
 
 ### Step 7 — Branch on mode
 
-**If `mode=normal`:** in the same chat, follow the resolved skill's body with `--target=<worktree_path>` set. The audit's checks read files, run subprocesses, and write findings all scoped to the worktree path. Findings land at `<worktree_path>/audits/<resolved-skill-name>/`. The audit's two-phase flow runs as usual.
+**If `mode=normal`:** in the same chat, follow the resolved skill's body with `--target=<worktree_path>` set. The audit's checks read files, run subprocesses, and write findings all scoped to the worktree path. Findings land at `<worktree_path>/.architect-audits/<resolved-skill-name>/`. The audit's two-phase flow runs as usual.
 
 **If `mode=smart-handoff`:**
 
 ```bash
-mkdir -p "$worktree_path/audits/$skill_name"
-cp audits/"$skill_name"/findings.md      "$worktree_path/audits/$skill_name/findings.md"
-cp audits/"$skill_name"/findings.json    "$worktree_path/audits/$skill_name/findings.json"
-cp audits/"$skill_name"/snapshot.md      "$worktree_path/audits/$skill_name/snapshot.md"
-cp audits/"$skill_name"/metadata.json    "$worktree_path/audits/$skill_name/metadata.json"
+mkdir -p "$worktree_path/.architect-audits/$skill_name"
+cp .architect-audits/"$skill_name"/findings.md      "$worktree_path/.architect-audits/$skill_name/findings.md"
+cp .architect-audits/"$skill_name"/findings.json    "$worktree_path/.architect-audits/$skill_name/findings.json"
+cp .architect-audits/"$skill_name"/snapshot.md      "$worktree_path/.architect-audits/$skill_name/snapshot.md"
+cp .architect-audits/"$skill_name"/metadata.json    "$worktree_path/.architect-audits/$skill_name/metadata.json"
 ```
 
-Then update `<worktree_path>/audits/<skill-name>/metadata.json` to add `handedOffFrom: "cwd"`, `handedOffAt: <iso-timestamp>`, and preserve the `originalRunStartedAt` and `originalRunFinishedAt` fields from the source metadata.
+Then update `<worktree_path>/.architect-audits/<skill-name>/metadata.json` to add `handedOffFrom: "cwd"`, `handedOffAt: <iso-timestamp>`, and preserve the `originalRunStartedAt` and `originalRunFinishedAt` fields from the source metadata.
 
 Print to the chat:
 
@@ -178,9 +178,9 @@ Then ask the user the standard phase-2 question:
 
 > "Generate an implementation plan against the worktree? (yes/no)"
 
-On `yes`, write `<worktree_path>/audits/<skill-name>/implementation-plan.md` describing fixes against files at `<worktree_path>/...`. On `no`, exit with the cleanup hint from Step 8.
+On `yes`, write `<worktree_path>/.architect-audits/<skill-name>/implementation-plan.md` describing fixes against files at `<worktree_path>/...`. On `no`, exit with the cleanup hint from Step 8.
 
-When the user asks Claude to apply the plan, Claude reads `<worktree_path>/audits/<skill-name>/implementation-plan.md` and edits files under `<worktree_path>/` — all from this same chat, all using absolute or worktree-relative paths.
+When the user asks Claude to apply the plan, Claude reads `<worktree_path>/.architect-audits/<skill-name>/implementation-plan.md` and edits files under `<worktree_path>/` — all from this same chat, all using absolute or worktree-relative paths.
 
 ### Step 8 — Suggest cleanup when the user is done
 
@@ -205,7 +205,7 @@ The skill does not run cleanup automatically — the user might still be applyin
 | `git worktree add` fails because the branch is checked out elsewhere | A previous worktree for the same branch wasn't cleaned up. | Run `git worktree list` to find it; `git worktree remove` to clean up; re-run `/worktree <skill>`. |
 | The user runs `/worktree security` and `security-audit` does not exist in the project | The audit skill hasn't been installed yet. | Run `/install-skills-locally` to refresh, then re-run. |
 | Audit reads or writes the wrong directory | The audit body did not respect `--target=<path>`. | Bug in the audit. Report via `/system-self-improve` with a `review-gap-report.md` describing the path-resolution failure. |
-| Smart-handoff fired but the user wanted a fresh re-run | The user made changes between the original audit and the `/worktree` invocation, and the existing findings are stale. | Re-run the audit first (`/<audit>` again, no `--target`), which overwrites the findings and resets the mtime. Then run `/worktree` — the handoff picks up the fresh findings. Or delete `audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode. |
+| Smart-handoff fired but the user wanted a fresh re-run | The user made changes between the original audit and the `/worktree` invocation, and the existing findings are stale. | Re-run the audit first (`/<audit>` again, no `--target`), which overwrites the findings and resets the mtime. Then run `/worktree` — the handoff picks up the fresh findings. Or delete `.architect-audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode. |
 | Smart-handoff did not fire and the user expected it to | The findings are older than 30 minutes, or `--target` was used in the recent run, or the conversation history doesn't include a recent `/<audit>` invocation that this `/worktree` call could match. | Confirm the recent invocation was in *this* chat (a different chat doesn't share history) and ran against the main checkout. If everything looks right but the handoff still doesn't fire, the trigger heuristic may need tuning — file a review gap report. |
 
 ## What this skill explicitly does NOT do

@@ -42,7 +42,7 @@ The skill never invokes any linter with `--fix` or any other mutating flag. Runn
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` linter invocation (`eslint . --format json` or `biome lint --reporter json`) all run scoped to the target. Findings land at `<target>/audits/linting-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` linter invocation (`eslint . --format json` or `biome lint --reporter json`) all run scoped to the target. Findings land at `<target>/.architect-audits/linting-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree linting` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -135,9 +135,9 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 3. **Detects the linter.** Looks for `eslint` and/or `@biomejs/biome` in `package.json` dependencies, then for the configuration files of each. When neither is detected, the audit stops with a clear message: a project with no linter is a `/quality-gates-audit` problem first.
 4. **Detects React** for the React-conditional rule-coverage checks.
 5. **When `--with-run` is set**, invokes the detected linter in JSON-reporter mode, captures the output, and parses it. If the lint command fails to start (binary missing, configuration syntactically invalid), records the failure and degrades run-dependent checks to `partial`.
-6. **Writes Layer 0 — the diagnostic snapshot** to `audits/linting-audit/snapshot.md` and prepends the same content to `findings.md`.
+6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/linting-audit/snapshot.md` and prepends the same content to `findings.md`.
 7. **Walks each check in the active layer list**, dispatching to the ESLint or Biome variant where the layer 2 checks differ. Records a status, evidence, and (where relevant) sample file references per check.
-8. **Writes phase 1 outputs** to `audits/linting-audit/`:
+8. **Writes phase 1 outputs** to `.architect-audits/linting-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -146,7 +146,7 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 
    > "Generate an implementation plan for the linting gaps? (yes/no)"
 
-   On `yes`, writes `audits/linting-audit/implementation-plan.md` describing exactly which configuration entries to add or change, which plugins to install, which suppressions to clean up first (graph-prioritised when the graph is present), and which continuous-integration steps to tighten — ordered by layer. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/linting-audit/implementation-plan.md` describing exactly which configuration entries to add or change, which plugins to install, which suppressions to clean up first (graph-prioritised when the graph is present), and which continuous-integration steps to tighten — ordered by layer. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -193,7 +193,7 @@ For each check in the active layer list, walk its detection logic. Layer 2 dispa
 
 ### Step 7 — Write phase 1 outputs
 
-Create `audits/linting-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/linting-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 8 — Print the chat summary and offer phase 2
 

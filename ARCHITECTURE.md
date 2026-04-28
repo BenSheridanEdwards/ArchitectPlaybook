@@ -18,11 +18,11 @@ Skills fall into three categories with deliberately different shapes:
 
 ### Audits
 
-The thirteen `*-audit` skills plus the layer-2-onwards parts of `pre-audit-setup`'s knowledge-graph dependency model. Audits are read-only by default; they grade a codebase against an opinionated baseline and write findings to `audits/<audit-name>/`. Audits never mutate the codebase. They follow a strict canonical shape (see "The audit shape" below).
+The thirteen `*-audit` skills plus the layer-2-onwards parts of `pre-audit-setup`'s knowledge-graph dependency model. Audits are read-only by default; they grade a codebase against an opinionated baseline and write findings to `.architect-audits/<audit-name>/`. Audits never mutate the codebase. They follow a strict canonical shape (see "The audit shape" below).
 
 ### Meta
 
-`system-self-improve`. The only skill that mutates files outside its own `audits/` directory, and the only one with an `--apply` mode. Reads gap reports, locates affected SKILL.md files, proposes minimal reversible edits to the playbook so the same gap is more likely to be caught next time. Has its own structural conventions (four sequential stages with `outcome: advanced | blocked | skipped`) because it grades the playbook itself rather than a target codebase.
+`system-self-improve`. The only skill that mutates files outside its own `.architect-audits/` directory, and the only one with an `--apply` mode. Reads gap reports, locates affected SKILL.md files, proposes minimal reversible edits to the playbook so the same gap is more likely to be caught next time. Has its own structural conventions (four sequential stages with `outcome: advanced | blocked | skipped`) because it grades the playbook itself rather than a target codebase.
 
 ## The audit shape
 
@@ -77,7 +77,7 @@ Three audits carry verbatim boundary tables that map who-owns-what across overla
 Audits, fixes, and reviews each run in different chat sessions. They cannot share in-memory state. The protocol between them is a deterministic on-disk shape:
 
 ```
-audits/
+.architect-audits/
   <audit-name>/
     findings.md              human-readable report
     findings.json            machine-readable list of issues
@@ -97,7 +97,7 @@ The playbook is designed to evolve based on real review feedback rather than mai
 1. The user runs an audit. It writes `findings.md`.
 2. The user fixes the findings in the same chat. The fix lands as commits on a worktree branch.
 3. The user opens a fresh chat against the worktree and re-runs the originating audit as a review pass. The re-run sees what the fix did and didn't address.
-4. If the review surfaces a class of issue the original audit *should* have caught but didn't, the user writes `audits/<audit-name>/review-gap-report.md` describing the gap.
+4. If the review surfaces a class of issue the original audit *should* have caught but didn't, the user writes `.architect-audits/<audit-name>/review-gap-report.md` describing the gap.
 5. From inside the playbook clone, the user runs `/system-self-improve`. It reads the gap report, locates the affected SKILL.md, proposes a minimal reversible edit, asks for confirmation, and on `--apply` mutates the playbook.
 
 The loop's safety properties are non-negotiable: dry-run by default, `--apply` always prompts for explicit confirmation (no `--yes` escape hatch), hard prohibitions against deleting checks or skills or changing the four-layer convention, append-only `system-self-improve-log.md`, never commits on its own.

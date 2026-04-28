@@ -56,7 +56,7 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 The defaults baked into the skill are the recommended baseline. The list-virtualization threshold is tunable via flag; all other checks are zero-tolerance or qualitative. The canonical path to evolving the baseline itself is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any reads of `lighthouse-results.json` all run scoped to the target. Findings land at `<target>/audits/performance-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any reads of `lighthouse-results.json` all run scoped to the target. Findings land at `<target>/.architect-audits/performance-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree performance` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -141,9 +141,9 @@ Layer 0 is informational only and has no status.
 2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If any are absent, the skill stops and tells the user it currently supports TypeScript and React frontend projects only.
 3. **Detects framework, data layer, performance provider, and image primitive** for the diagnostic snapshot and for resolving framework-conditional checks.
 4. **When `--with-lighthouse-results` is set**, reads the JSON file at the resolved path and extracts LCP, INP, CLS, TBT, FCP, and the overall performance score. If the file is missing or unparseable, prints to the chat and prepends to `findings.md`: "`--with-lighthouse-results` was requested but no usable results file was found. Run `/preflight --audit=performance --install --scaffold-configs` to install Lighthouse and scaffold a minimal `.lighthouserc.json`, then run Lighthouse to produce the results file and re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Records `recoveryHint: "/preflight --audit=performance --install --scaffold-configs"` on the LCP-image and performance-budget checks that degraded in `findings.json`. The run-dependent enrichment of those checks degrades to `partial` with a clear gap; the static analysis still runs.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/performance-audit/snapshot.md` and prepends the same content to `findings.md`.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/performance-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-7. **Writes phase 1 outputs** to `audits/performance-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/performance-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -152,7 +152,7 @@ Layer 0 is informational only and has no status.
 
    > "Generate an implementation plan for the performance gaps? (yes/no)"
 
-   On `yes`, writes `audits/performance-audit/implementation-plan.md` describing exactly which components to memoize, which lists to virtualize, which fetch sites to parallelise, which images to mark priority, and which monitoring primitives to wire up — ordered by Core Web Vitals impact (LCP-related and INP-related first, then CLS, then code-quality items). The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/performance-audit/implementation-plan.md` describing exactly which components to memoize, which lists to virtualize, which fetch sites to parallelise, which images to mark priority, and which monitoring primitives to wire up — ordered by Core Web Vitals impact (LCP-related and INP-related first, then CLS, then code-quality items). The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -194,7 +194,7 @@ For each finding, record evidence and up to ten sample file references plus a to
 
 ### Step 6 — Write phase 1 outputs
 
-Create `audits/performance-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/performance-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 7 — Print the chat summary and offer phase 2
 
@@ -303,7 +303,7 @@ The plan is descriptive, not executable. It does not edit source files and it do
 - Audit god components, file size, or fan-out as architectural invariants. Those are owned by `/architecture-audit`.
 - Audit hook correctness or idiomatic React patterns. Those are owned by `/react-audit`.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/performance-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/performance-audit/`.
 - Modify components, configuration, or continuous-integration workflows.
 - Open pull requests or commit anything to git.
 - Audit non-React frontends. Vue, Svelte, Angular, and Solid are out of scope for v1; Vue and Svelte performance patterns share much of this baseline but require their own dispatch logic.

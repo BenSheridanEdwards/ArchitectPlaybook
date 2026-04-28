@@ -54,7 +54,7 @@ The skill never accepts `--apply`. The implementation plan is descriptive Markdo
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands (including `npm audit` and `npm outdated` under `--with-network`) all run scoped to the target. Findings land at `<target>/audits/dependency-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands (including `npm audit` and `npm outdated` under `--with-network`) all run scoped to the target. Findings land at `<target>/.architect-audits/dependency-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree dependency` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -132,9 +132,9 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 2. **Confirms a Node.js project.** Detects `package.json`. If absent, the skill stops and tells the user it currently supports Node.js projects only.
 3. **Detects the package manager and tier.** Infers the package manager from the lockfile present (and falls back to the `packageManager` field in `package.json`). Determines the input tier based on the presence of `node_modules` and the `--with-network` flag.
 4. **When `--with-network` is set**, runs the package manager's read-only audit and outdated commands and captures their JSON output. Never runs install, update, or any mutating operation.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/dependency-audit/snapshot.md` and prepends the same content to `findings.md`.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/dependency-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, threshold overrides, and the security-critical-package list. Tier-dependent checks running below their required tier emit `partial` with a "needs tier N — pass `--with-network` (or run `npm install` first)" gap.
-7. **Writes phase 1 outputs** to `audits/dependency-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/dependency-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -143,7 +143,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 
    > "Generate an implementation plan for the dependency gaps? (yes/no)"
 
-   On `yes`, writes `audits/dependency-audit/implementation-plan.md` describing exactly which packages to upgrade, which to remove, which to relocate between `dependencies` and `devDependencies`, which licenses to review with a human, and which continuous-integration steps to add. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/dependency-audit/implementation-plan.md` describing exactly which packages to upgrade, which to remove, which to relocate between `dependencies` and `devDependencies`, which licenses to review with a human, and which continuous-integration steps to add. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -194,7 +194,7 @@ For each check in the active layer list, walk its detection logic. Tier-dependen
 
 ### Step 6 — Write phase 1 outputs
 
-Create `audits/dependency-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/dependency-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 7 — Print the chat summary and offer phase 2
 

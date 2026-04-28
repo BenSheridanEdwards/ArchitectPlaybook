@@ -46,7 +46,7 @@ This skill never accepts `--apply`. The implementation plan is descriptive Markd
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of `<target>/graphify-out/graph.json` all run scoped to the target. Findings land at `<target>/audits/architecture-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of `<target>/graphify-out/graph.json` all run scoped to the target. Findings land at `<target>/.architect-audits/architecture-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree architecture` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -120,9 +120,9 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 2. **Reads the knowledge graph.** Loads `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`. The PreToolUse hook installed by `/pre-audit-setup` reminds you of this on every Glob and Grep — respect it.
 3. **Confirms a TypeScript project.** Detects TypeScript via `tsconfig.json` and a `package.json` dependency on `typescript`. If absent, the skill stops and tells the user it currently supports TypeScript only.
 4. **Detects the meta-framework and the architectural pattern.** Records both in the diagnostic snapshot. The pattern detection is heuristic; the rationale is recorded so the user can override with `--pattern=` if the inference is wrong.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/architecture-audit/snapshot.md` and embeds the same content at the top of `findings.md`. The snapshot is informational and always present.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/architecture-audit/snapshot.md` and embeds the same content at the top of `findings.md`. The snapshot is informational and always present.
 6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-7. **Writes phase 1 outputs** to `audits/architecture-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/architecture-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own, for easy linking from elsewhere.
@@ -131,7 +131,7 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 
    > "Generate an implementation plan for the architectural violations and partial-coverage gaps? (yes/no)"
 
-   On `yes`, writes `audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -184,7 +184,7 @@ Record every matching path in the `evidence` array. For checks that can produce 
 
 ### Step 5 — Write phase 1 outputs
 
-Create `audits/architecture-audit/` if it does not exist. Write `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json`. If a previous run exists, overwrite all four. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
+Create `.architect-audits/architecture-audit/` if it does not exist. Write `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json`. If a previous run exists, overwrite all four. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
 
 ### Step 6 — Print the chat summary and offer phase 2
 
@@ -307,7 +307,7 @@ The plan is descriptive, not executable. It does not move files, rewrite imports
 - Run any code, type-checker, linter, or test.
 - Move files, rewrite imports, delete orphans, or otherwise modify the project.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/architecture-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/architecture-audit/`.
 - Open pull requests or commit anything to git.
 - Audit JavaScript-only projects.
 - Audit individual workspaces in a monorepo. The skill audits the repository root and reports on cross-workspace boundaries; per-workspace deep-dives are recommended as follow-up.

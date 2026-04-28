@@ -33,8 +33,8 @@ This is the headline feature — the playbook is designed around one specific wa
    ```
    Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into `.claude/settings.json`. If you plan to pass any `--with-*` enrichment flag (`--with-stats`, `--with-run`, `--with-lighthouse-results`, `--with-scan`), also run `/preflight` to detect — and optionally install — the development dependencies those flags need.
 3. **Run audits, one per chat.** Each audit takes a `--target=<path>` flag, so you have two clean choices:
-   - **Main checkout (no worktree):** open a Claude Code chat in your project and run `/<audit>` directly. Findings land in `audits/<audit>/`.
-   - **Worktree:** open a Claude Code chat in your project and run `/worktree <name>`. The skill creates `../wt-<name>` on a `wt-<name>` branch *and* runs the matching audit against it, all in this same chat. Findings land in `../wt-<name>/audits/<audit>/`.
+   - **Main checkout (no worktree):** open a Claude Code chat in your project and run `/<audit>` directly. Findings land in `.architect-audits/<audit>/`.
+   - **Worktree:** open a Claude Code chat in your project and run `/worktree <name>`. The skill creates `../wt-<name>` on a `wt-<name>` branch *and* runs the matching audit against it, all in this same chat. Findings land in `../wt-<name>/.architect-audits/<audit>/`.
    ```
    /security-audit                # one audit, main checkout
    /worktree security             # one audit, on a fresh worktree branch — same chat
@@ -42,7 +42,7 @@ This is the headline feature — the playbook is designed around one specific wa
    **Smart-handoff:** if you ran `/security-audit` in a chat and *then* decided you want a worktree to apply fixes on a clean branch, just run `/worktree` (no argument). When the chat already has recent findings from an audit run against the main checkout, `/worktree` infers the audit name from history, creates the worktree, copies the findings into it, and offers to generate the implementation plan against the worktree — no audit re-run.
 
    For multiple audits in true parallel, open multiple chats and run `/worktree <name>` in each. Each chat is independent; each audit operates on its own worktree.
-4. **Fix the findings in the same chat that produced them.** Ask Claude to read `audits/<audit>/findings.md` (or `../wt-<name>/audits/<audit>/findings.md` if you used a worktree) and implement the fixes. Stay in that chat — it has the most context.
+4. **Fix the findings in the same chat that produced them.** Ask Claude to read `.architect-audits/<audit>/findings.md` (or `../wt-<name>/.architect-audits/<audit>/findings.md` if you used a worktree) and implement the fixes. Stay in that chat — it has the most context.
 5. **Re-run the audit to review the fix.** In the same chat, run the audit again. The re-run *is* the review pass — anything still flagged is anything the fix didn't address.
    ```
    /security-audit                # re-run; or /security-audit --target=../wt-security if you used a worktree
@@ -131,7 +131,7 @@ The skill always wins out because it bundles the worktree creation with the audi
 Audits, fixes, and reviews each run in different chat sessions, so they cannot share in-memory state. The protocol between them is a deterministic on-disk shape:
 
 ```
-audits/
+.architect-audits/
   <audit-name>/
     findings.md       human-readable report you can read at a glance
     findings.json     machine-readable list of issues for downstream skills
@@ -142,7 +142,7 @@ audits/
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix. Whatever the audit still flags is what the fix didn't address. There is no dedicated review skill — the audit *is* the review.
 - **`/system-self-improve`** reads a review's gap report (or a user-supplied gap, or audit-history patterns) and proposes an edit to the originating audit's `SKILL.md` so the same class of gap is more likely to be caught next time.
 
-A worked example of this contract — `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` produced by running `/documentation-audit` against the playbook itself — is committed at [`audits/documentation-audit/`](audits/documentation-audit/).
+A worked example of this contract — `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` produced by running `/documentation-audit` against the playbook itself — is committed at [`.architect-audits/documentation-audit/`](.architect-audits/documentation-audit/).
 
 ## Status taxonomy
 
@@ -201,7 +201,7 @@ Many audits also expose `--threshold-*` flags as escape hatches for codebases wi
 
 | Trigger | Flags | Purpose |
 | --- | --- | --- |
-| [`/system-self-improve`](system-self-improve/SKILL.md)         | `--apply` (perform the proposed edit; always prompts for explicit confirmation first — there is no `--yes` escape hatch)<br>`--gap=<description>` + `--target-skill=<name>` (user-supplied gap mode: describe the gap and which skill should absorb the lesson)<br>`--from-audit-history` (scan `audits/*/findings.json` for systematic patterns instead of a single review report)<br>`--gap-report=<path>` (explicit path to a review gap report, overriding the default scan)<br>`--playbook-path=<path>` (operate on a playbook clone at a different location, e.g. a worktree)<br>`--plan` (regenerate `improvement-plan.md` for an existing run without re-scanning) | The meta-improvement layer of the playbook. Reads a review gap report and proposes a minimal reversible edit to the affected SKILL.md so the same class of gap is more likely to be caught next time. The only skill that mutates files outside its own `audits/` directory. |
+| [`/system-self-improve`](system-self-improve/SKILL.md)         | `--apply` (perform the proposed edit; always prompts for explicit confirmation first — there is no `--yes` escape hatch)<br>`--gap=<description>` + `--target-skill=<name>` (user-supplied gap mode: describe the gap and which skill should absorb the lesson)<br>`--from-audit-history` (scan `.architect-audits/*/findings.json` for systematic patterns instead of a single review report)<br>`--gap-report=<path>` (explicit path to a review gap report, overriding the default scan)<br>`--playbook-path=<path>` (operate on a playbook clone at a different location, e.g. a worktree)<br>`--plan` (regenerate `improvement-plan.md` for an existing run without re-scanning) | The meta-improvement layer of the playbook. Reads a review gap report and proposes a minimal reversible edit to the affected SKILL.md so the same class of gap is more likely to be caught next time. The only skill that mutates files outside its own `.architect-audits/` directory. |
 
 ## Why each skill exists
 
@@ -262,7 +262,7 @@ Throw/catch hygiene, async and network error paths, React error boundaries, obse
 Documentation as four lenses (onboarding, architectural/decision, code-level, operational + drift). Operational checks auto-skip for library-only projects so the audit doesn't penalise a library for not having a runbook.
 
 ### `/system-self-improve`
-The only skill that mutates files outside its own `audits/` directory, and the only one with an `--apply` mode. Hard prohibitions baked in (never deletes a check or skill, never changes the four-layer convention, never edits target-project files, never commits) and `--apply` always prompts for explicit confirmation — there is no `--yes` escape hatch, by design.
+The only skill that mutates files outside its own `.architect-audits/` directory, and the only one with an `--apply` mode. Hard prohibitions baked in (never deletes a check or skill, never changes the four-layer convention, never edits target-project files, never commits) and `--apply` always prompts for explicit confirmation — there is no `--yes` escape hatch, by design.
 
 ## Conventions
 

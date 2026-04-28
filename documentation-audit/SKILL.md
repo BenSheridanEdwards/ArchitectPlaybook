@@ -56,7 +56,7 @@ The skill never modifies any documentation, source, or configuration file.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads (including every Markdown file walk), file globbing, regex searches, `git blame` invocations for TODO age, and external-link HEAD requests under `--with-link-check` all run scoped to the target. Findings land at `<target>/audits/documentation-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads (including every Markdown file walk), file globbing, regex searches, `git blame` invocations for TODO age, and external-link HEAD requests under `--with-link-check` all run scoped to the target. Findings land at `<target>/.architect-audits/documentation-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree documentation` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -147,9 +147,9 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 5. **When `--with-link-check` is set**, collects every external URL from documentation files and HEAD-requests them with a short timeout. Records reachability status per URL. Internal links and anchors are always checked against the file system.
 6. **Walks every documentation file** to collect counts, headings, code blocks, and link references. Cross-references README command blocks against `package.json` scripts.
 7. **Walks every source file** to collect TODO/FIXME comments (with Git blame for age), TSDoc/JSDoc coverage on public exports, and commented-out code blocks.
-8. **Writes Layer 0 — the diagnostic snapshot** to `audits/documentation-audit/snapshot.md` and prepends the same content to `findings.md`.
+8. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/documentation-audit/snapshot.md` and prepends the same content to `findings.md`.
 9. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-10. **Writes phase 1 outputs** to `audits/documentation-audit/`:
+10. **Writes phase 1 outputs** to `.architect-audits/documentation-audit/`:
     - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
     - `findings.json` — machine-readable.
     - `snapshot.md` — diagnostic snapshot on its own.
@@ -158,7 +158,7 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 
     > "Generate an implementation plan for the documentation gaps? (yes/no)"
 
-    On `yes`, writes `audits/documentation-audit/implementation-plan.md` describing exactly which documents to create, which sections to add to existing docs, which TODOs to address (or close), which links to fix, and which TSDoc/JSDoc blocks to write — ordered by audience: onboarding documentation first (newcomer experience matters most), then architectural and operational, then code-level, then drift cleanup. The plan does not modify any project files.
+    On `yes`, writes `.architect-audits/documentation-audit/implementation-plan.md` describing exactly which documents to create, which sections to add to existing docs, which TODOs to address (or close), which links to fix, and which TSDoc/JSDoc blocks to write — ordered by audience: onboarding documentation first (newcomer experience matters most), then architectural and operational, then code-level, then drift cleanup. The plan does not modify any project files.
 
     On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -231,7 +231,7 @@ For each check, record evidence and up to ten representative samples plus a tota
 
 ### Step 9 — Write phase 1 outputs
 
-Create `audits/documentation-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/documentation-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 10 — Print the chat summary and offer phase 2
 

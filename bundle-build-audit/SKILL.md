@@ -44,7 +44,7 @@ Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interp
 
 The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of bundle-stats artefacts all run scoped to the target. Findings land at `<target>/audits/bundle-build-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of bundle-stats artefacts all run scoped to the target. Findings land at `<target>/.architect-audits/bundle-build-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree bundle-build` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -126,9 +126,9 @@ Defaults in parentheses; every threshold overridable via flags. Checks marked **
 2. **Confirms a Node.js project with a recognised build tool.** Detects the build tool from `package.json` dependencies and configuration files. If none of the supported build tools is detected, the skill stops and tells the user.
 3. **Detects the meta-framework** for the diagnostic snapshot.
 4. **Locates a stats artefact when `--with-stats` is set.** Searches the conventional paths for the detected build tool, plus any path passed via `--stats-path`. Records the path or the absence in the snapshot.
-5. **Writes Layer 0 — the diagnostic snapshot** to `audits/bundle-build-audit/snapshot.md` and prepends the same content to `findings.md`.
+5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/bundle-build-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Stats-required checks emit `partial` with a clear "no stats artefact" gap when running without enrichment.
-7. **Writes phase 1 outputs** to `audits/bundle-build-audit/`:
+7. **Writes phase 1 outputs** to `.architect-audits/bundle-build-audit/`:
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
@@ -137,7 +137,7 @@ Defaults in parentheses; every threshold overridable via flags. Checks marked **
 
    > "Generate an implementation plan for the bundle and build gaps? (yes/no)"
 
-   On `yes`, writes `audits/bundle-build-audit/implementation-plan.md` describing exactly which configuration entries to add, which dependencies to swap, which dynamic imports to introduce, and which continuous-integration steps to add — ordered by layer and then by severity. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/bundle-build-audit/implementation-plan.md` describing exactly which configuration entries to add, which dependencies to swap, which dynamic imports to introduce, and which continuous-integration steps to add — ordered by layer and then by severity. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -184,7 +184,7 @@ For each check in the active layer list, walk its detection logic. Use the same 
 
 ### Step 5 — Write phase 1 outputs
 
-Create `audits/bundle-build-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
+Create `.architect-audits/bundle-build-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
 
 ### Step 6 — Print the chat summary and offer phase 2
 
@@ -283,7 +283,7 @@ The plan is descriptive, not executable. It does not install packages and it doe
 
 - Run the build. The audit is fully read-only.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/bundle-build-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/bundle-build-audit/`.
 - Modify configuration, source files, or continuous-integration workflows.
 - Open pull requests or commit anything to git.
 - Audit Parcel, raw esbuild, or custom build pipelines. Those are out of scope for v1.

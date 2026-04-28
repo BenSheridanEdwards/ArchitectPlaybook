@@ -27,7 +27,7 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 
 This skill never accepts `--apply`. Mutating the codebase is the responsibility of a separate fix step. The implementation plan is descriptive Markdown.
 
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/audits/accessibility-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
+When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/accessibility-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
 
 **💡 Pro tip**: Use `/worktree accessibility` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
@@ -88,7 +88,7 @@ These checks require reading components. Use the knowledge graph to find the rig
 2. **Confirms a React project.** Detects React via `package.json` dependencies (`react`, `react-dom`, or a meta-framework that depends on them). If absent, the skill stops and tells the user it currently supports React only.
 3. **Detects the framework variant** (plain React, Next.js `pages/` router, Next.js `app/` router, Remix, Vite-React) by looking at dependencies and directory layout. The variant influences which application-shell signals are checked and which remediation snippets are produced.
 4. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, or `--severity` filters. Records a status per check and a list of representative file references.
-5. **Writes phase 1 outputs** to `audits/accessibility-audit/`:
+5. **Writes phase 1 outputs** to `.architect-audits/accessibility-audit/`:
    - `findings.md` — grouped by layer, one section per check.
    - `findings.json` — machine-readable.
    - `metadata.json` — skill version, run timestamp, graphify revision hash, framework variant.
@@ -96,7 +96,7 @@ These checks require reading components. Use the knowledge graph to find the rig
 
    > "Generate an implementation plan for the missing or violating accessibility checks? (yes/no)"
 
-   On `yes`, writes `audits/accessibility-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, which application-shell elements to wire up, and which component-pattern violations to remediate — ordered by layer and then by severity. The plan does not modify any project files.
+   On `yes`, writes `.architect-audits/accessibility-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, which application-shell elements to wire up, and which component-pattern violations to remediate — ordered by layer and then by severity. The plan does not modify any project files.
 
    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
 
@@ -137,7 +137,7 @@ Record every matching path in the `evidence` array. For component-pattern checks
 
 ### Step 4 — Write phase 1 outputs
 
-Create `audits/accessibility-audit/` if it does not exist. Write the three files. If a previous run exists, overwrite `findings.md`, `findings.json`, and `metadata.json`. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
+Create `.architect-audits/accessibility-audit/` if it does not exist. Write the three files. If a previous run exists, overwrite `findings.md`, `findings.json`, and `metadata.json`. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
 
 ### Step 5 — Print the chat summary and offer phase 2
 
@@ -240,7 +240,7 @@ The plan is descriptive, not executable. It does not install packages and it doe
 - Verify screen-reader behaviour. That requires a human and assistive technology.
 - Verify focus order in a rendered application. The audit can flag missing focus management primitives, but cannot replay a tab sequence.
 - Install any package or dependency.
-- Create, modify, or delete any file outside `audits/accessibility-audit/`.
+- Create, modify, or delete any file outside `.architect-audits/accessibility-audit/`.
 - Modify components, configuration, or routes.
 - Open pull requests or commit anything to git.
 - Audit any framework other than React. Vue, Svelte, Angular, and Solid are out of scope for this version.

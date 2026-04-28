@@ -8,7 +8,7 @@ trigger: /preflight
 
 A pre-audit readiness check. Several audits in the playbook accept optional enrichment flags (`--with-stats`, `--with-run`, `--with-network`, `--with-lighthouse-results`, `--with-scan`, `--with-link-check`) that depend on tooling being present in the target project. Running an audit, discovering the tooling is missing, installing it, then re-running the audit is wasteful — `/preflight` consolidates that into one pre-step.
 
-Run `/preflight` once before launching audits. The default mode is read-only: it prints a status table for every relevant tool and writes findings to `audits/preflight/`. With explicit flags, it can install missing development dependencies and scaffold minimal project configuration, prompting before every change.
+Run `/preflight` once before launching audits. The default mode is read-only: it prints a status table for every relevant tool and writes findings to `.architect-audits/preflight/`. With explicit flags, it can install missing development dependencies and scaffold minimal project configuration, prompting before every change.
 
 This skill is also the canonical reference for any audit's preflight needs. Audits do not duplicate the detection logic; they link here from a Pro-tip line in their intro, the same way they link to `/worktree` and `/pre-audit-setup`.
 
@@ -149,7 +149,7 @@ The minimal scaffolds:
 
 ### Step 9 — Write the findings artefacts
 
-Write to `<target>/audits/preflight/`:
+Write to `<target>/.architect-audits/preflight/`:
 
 - `findings.md` — human-readable report containing the status table, the per-row detail, and a "next steps" block listing exactly which install commands or configuration edits were performed (if any).
 - `findings.json` — machine-readable list of rows. Each entry includes `audit`, `flag`, `candidates[]`, `configurationFile`, `status`, `installAction` (`null` | `installed` | `failed` | `declined` | `skipped-multi`), `scaffoldAction` (`null` | `created` | `declined` | `not-supported`), and the final exit code of any subprocess.
