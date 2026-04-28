@@ -44,6 +44,7 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
 - **Read-only by default.** No skill writes to the codebase outside of `.architect-audits/<skill-name>/` unless the user passes `--apply`.
 - A mutating run prints a dry-run summary first and waits for confirmation.
 - **Chat output is human-first and concise.** Every audit prints a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings, snapshot, metadata, and implementation plan are always written to `.architect-audits/<skill-name>/` but never printed in the chat unless the user explicitly asks.
+- **`--learning` or `--teach` expands output into teaching mode.** When set, each recommendation is explained as if teaching a mid-level engineer, with specific file references, line numbers, educational language ("Here's why this pattern bites teams…"), and a "What you'll learn from fixing this" section. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
 - Every audit writes four files to disk:
   - `.architect-audits/<skill-name>/findings.md` — human-readable report.
   - `.architect-audits/<skill-name>/findings.json` — machine-readable for downstream skills.

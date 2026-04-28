@@ -53,6 +53,12 @@ Phase 1: write findings, print summary. Phase 2: ask the user whether to generat
 
 No audit ever mutates the codebase. The implementation plan is descriptive Markdown that the user (or Claude in a follow-up chat) executes manually. The two-phase shape is what makes audits safe to run in any working tree at any time.
 
+### Chat output shape
+
+Default mode prints a concise summary: a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks.
+
+When `--learning` or `--teach` is set, each recommendation expands into mid-level engineer teaching mode: specific file references, line numbers, educational language ("Here's why this pattern bites teams…"), and a "What you'll learn from fixing this" section. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
+
 ### Static-first with optional enrichment
 
 Every audit is fully static by default. Some audits offer opt-in flags that enrich the analysis with additional data:

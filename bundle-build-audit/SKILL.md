@@ -38,6 +38,8 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 /bundle-build-audit --threshold-incremental-build-time=15s       # override default 10s
 /bundle-build-audit --stats-path=path/to/stats.json              # override the auto-detected stats artefact location
 /bundle-build-audit --target=<path>                              # operate on this directory instead of cwd (default: cwd)
+/bundle-build-audit --learning                                   # expand Top 5 into mid-level engineer teaching mode
+/bundle-build-audit --teach                                      # alias for --learning
 ```
 
 Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interpreted as base-2 kilobytes, etc.); `s`, `ms`, `m` for time. The skill never accepts `--apply`.
@@ -198,6 +200,13 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/bundle-build-audit/findings.md`
+
+When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+- For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
+- Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
+- Include a short "What you'll learn from fixing this" section for each recommendation.
+- Keep the numbered/lettered structure so the user can still reply with "2b" or "1 and 3".
+- End with the same bottom-line link to the full report.
 
 After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
 

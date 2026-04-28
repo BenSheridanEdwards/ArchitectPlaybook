@@ -180,6 +180,7 @@ Every audit accepts the same set of common flags, listed once here so the per-sk
 - `--layer=<name>` — restrict to a single layer (repeatable). `/quality-gates-audit` uses `--stage=<name>` instead.
 - `--include=<check>` / `--exclude=<check>` — narrow or skip individual checks (repeatable).
 - `--target=<path>` — operate on a different directory instead of the current working directory. This is what lets `/worktree` audit a worktree from a chat opened elsewhere.
+- `--learning` / `--teach` — expand the Top 5 recommendations into mid-level engineer teaching mode with specific file references, line numbers, educational language, and a "What you'll learn from fixing this" section per recommendation. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
 
 Many audits also expose `--threshold-*` flags as escape hatches for codebases with deliberately different defaults — see each `SKILL.md` for the full list. None of the audit skills accept `--apply`; mutation is reserved for `/system-self-improve`.
 

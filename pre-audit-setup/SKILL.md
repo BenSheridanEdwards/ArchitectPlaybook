@@ -89,7 +89,7 @@ After merging, print the final hook block so the user can confirm.
 ### Step 5 — Ensure the `.architect-audits/` directory exists
 
 ```bash
-mkdir -p audits
+mkdir -p .architect-audits
 [ -f .architect-audits/.gitkeep ] || touch .architect-audits/.gitkeep
 ```
 
