@@ -19,7 +19,7 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - Purpose paragraph.
    - "How this differs from neighbouring skills" with a verbatim boundary table mapping cross-cutting concerns to their owning skill.
    - Posture statement (static-only, static-with-`--with-X`, etc.).
-   - `## Usage` with the slash command and every flag.
+   - `## Usage` with the slash command and its flags. Every audit uses the standard format: default, `--learn`, `--teach`, plus any audit-specific flags. End with the worktree Pro Tip: `**💡 Pro tip**: Use '/worktree <short-name>' to run this in an isolated worktree.`
    - The opinionated baseline organised in **four layers plus a Layer 0 diagnostic snapshot**. Layer 0 is informational only and has no status; layers 1–4 grade against the four-status taxonomy (`present | partial | missing | violation`).
    - "What this skill does" — a numbered walk through the skill's behaviour.
    - "Implementation steps" — the concrete steps Claude follows when invoked.
@@ -28,15 +28,7 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
 4. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.
 5. **Add a 2–3 sentence entry to the README "Why each skill exists" section** — same commit. The entry explains *why* the skill is a separate concern, not what it does.
-6. **Make the audit accept `--target=<path>`.** Every audit operates on the current working directory by default, but defers to `--target=<path>` when set. All file reads, file globbing, regex searches, subprocess invocations, and findings-output paths are scoped to the target. The `--target` flag is what makes `/worktree <name>` work — without it, `/worktree` could only create the worktree, not audit it from the same chat.
-7. **Insert the target-resolution paragraph and the worktree Pro Tip block** right after the `## Usage` section if your skill is an audit:
-   ```markdown
-   When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/<skill-name>/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-   **💡 Pro tip**: Use `/worktree <short-name>` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
-   ```
-   Setup and install skills do *not* get `--target` or the Pro Tip — their effects need to land in the main checkout.
-8. **Commit with a Conventional Commits subject:**
+6. **Commit with a Conventional Commits subject:**
    ```
    feat: implement <skill-name> skill
    ```

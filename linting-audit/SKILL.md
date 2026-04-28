@@ -26,27 +26,16 @@ The skill never invokes any linter with `--fix` or any other mutating flag. Runn
 ## Usage
 
 ```
-/linting-audit                                              # full two-phase static run
-/linting-audit --with-run                                   # static plus enrichment from a real lint run
-/linting-audit --report-only                                # phase 1 only: write findings, do not ask about a plan
-/linting-audit --plan                                       # skip phase 1 if findings already exist; jump to plan generation
-/linting-audit --layer=configuration-shape                  # restrict the audit to a single layer (repeatable)
-/linting-audit --layer=rule-coverage
-/linting-audit --layer=strictness-and-enforcement
-/linting-audit --layer=suppressions-hygiene
-/linting-audit --include=<check-name>                       # include only the named check (repeatable)
-/linting-audit --exclude=<check-name>                       # skip the named check (repeatable)
-/linting-audit --threshold-suppressions-per-file=10         # override default 5
-/linting-audit --target=<path>                              # operate on this directory instead of cwd (default: cwd)
-/linting-audit --learning                                   # expand Top 5 into mid-level engineer teaching mode
-/linting-audit --teach                                      # alias for --learning
+/linting-audit                                    # default: concise Top 5 + full report saved + ask about plan
+/linting-audit --learn                            # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/linting-audit --teach                            # alias for --learn
+/linting-audit --with-run                         # static plus enrichment from a real lint run
+/linting-audit --threshold-suppressions-per-file=10  # override default 5
 ```
 
+**💡 Pro tip**: Use `/worktree linting` to run this in an isolated worktree.
+
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` linter invocation (`eslint . --format json` or `biome lint --reporter json`) all run scoped to the target. Findings land at `<target>/.architect-audits/linting-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree linting` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=linting` first to detect — and optionally install — the development dependency that makes `--with-run` useful (`eslint` or `@biomejs/biome`, depending on which linter your project uses). Skip if you already know the tooling is wired up.
 
@@ -150,7 +139,7 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 
    On `yes`, writes `.architect-audits/linting-audit/implementation-plan.md` describing exactly which configuration entries to add or change, which plugins to install, which suppressions to clean up first (graph-prioritised when the graph is present), and which continuous-integration steps to tighten — ordered by layer. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

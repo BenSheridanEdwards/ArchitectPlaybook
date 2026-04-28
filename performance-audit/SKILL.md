@@ -37,30 +37,19 @@ The skill **never runs Lighthouse itself**. Spinning up a server and running an 
 ## Usage
 
 ```
-/performance-audit                                                  # full two-phase static run
-/performance-audit --with-lighthouse-results                        # static plus enrichment from existing Lighthouse JSON
-/performance-audit --report-only                                    # phase 1 only: write findings, do not ask about a plan
-/performance-audit --plan                                           # skip phase 1 if findings already exist; jump to plan generation
-/performance-audit --layer=render-performance                       # restrict the audit to a single layer (repeatable)
-/performance-audit --layer=network-and-data
-/performance-audit --layer=assets-media-and-core-web-vitals
-/performance-audit --layer=main-thread-and-measurement
-/performance-audit --include=<check-name>                           # include only the named check (repeatable)
-/performance-audit --exclude=<check-name>                           # skip the named check (repeatable)
-/performance-audit --threshold-virtualization=100                   # override default 50 items
+/performance-audit                                # default: concise Top 5 + full report saved + ask about plan
+/performance-audit --learn                        # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/performance-audit --teach                        # alias for --learn
+/performance-audit --with-lighthouse-results      # static plus enrichment from existing Lighthouse JSON
 /performance-audit --lighthouse-results-path=path/to/lighthouse.json  # override default lighthouse-results.json
-/performance-audit --target=<path>                                    # operate on this directory instead of cwd (default: cwd)
-/performance-audit --learning                                         # expand Top 5 into mid-level engineer teaching mode
-/performance-audit --teach                                            # alias for --learning
+/performance-audit --threshold-virtualization=100 # override default 50 items
 ```
+
+**💡 Pro tip**: Use `/worktree performance` to run this in an isolated worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. The list-virtualization threshold is tunable via flag; all other checks are zero-tolerance or qualitative. The canonical path to evolving the baseline itself is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any reads of `lighthouse-results.json` all run scoped to the target. Findings land at `<target>/.architect-audits/performance-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree performance` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=performance` first to detect — and optionally install — the development dependency that makes `--with-lighthouse-results` useful (`lighthouse` as a development dependency), and to scaffold a minimal `.lighthouserc.json` if one is missing. Skip if you already know the tooling is wired up.
 
@@ -156,7 +145,7 @@ Layer 0 is informational only and has no status.
 
    On `yes`, writes `.architect-audits/performance-audit/implementation-plan.md` describing exactly which components to memoize, which lists to virtualize, which fetch sites to parallelise, which images to mark priority, and which monitoring primitives to wire up — ordered by Core Web Vitals impact (LCP-related and INP-related first, then CLS, then code-quality items). The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

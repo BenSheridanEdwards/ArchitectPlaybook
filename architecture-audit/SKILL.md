@@ -21,36 +21,21 @@ There is no graceful degradation. A misleading half-audit is worse than no audit
 ## Usage
 
 ```
-/architecture-audit                                       # full two-phase run: audit, then ask about a plan
-/architecture-audit --report-only                         # phase 1 only: write findings, do not ask about a plan
-/architecture-audit --plan                                # skip phase 1 if findings already exist; jump to plan generation
-/architecture-audit --layer=module-boundaries             # restrict the audit to a single layer (repeatable)
-/architecture-audit --layer=coupling-and-complexity
-/architecture-audit --layer=state-and-data-flow
-/architecture-audit --layer=convention-adherence
-/architecture-audit --include=<check-name>                # include only the named check (repeatable)
-/architecture-audit --exclude=<check-name>                # skip the named check (repeatable)
-/architecture-audit --pattern=feature-folders             # override the inferred architectural pattern
-/architecture-audit --pattern=layered
-/architecture-audit --pattern=atomic-design
-/architecture-audit --pattern=monorepo-workspaces
-/architecture-audit --pattern=infer                       # default: infer from layout
-/architecture-audit --threshold-god-module=40             # override the default fan-in threshold (default 30)
-/architecture-audit --threshold-god-component=30          # override the default god-component parent threshold (default 25)
-/architecture-audit --threshold-file-size=500             # override the default file-size threshold in lines (default 400)
-/architecture-audit --threshold-fan-out=20                # override the default component fan-out threshold (default 15)
-/architecture-audit --target=<path>                       # operate on this directory instead of cwd (default: cwd)
-/architecture-audit --learning                            # expand Top 5 into mid-level engineer teaching mode
-/architecture-audit --teach                               # alias for --learning
+/architecture-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/architecture-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/architecture-audit --teach                         # alias for --learn
+/architecture-audit --pattern=<feature-folders|layered|atomic-design|monorepo-workspaces|infer>  # override inferred architectural pattern
+/architecture-audit --threshold-god-module=40       # override the default fan-in threshold (default 30)
+/architecture-audit --threshold-god-component=30    # override the default god-component parent threshold (default 25)
+/architecture-audit --threshold-file-size=500       # override the default file-size threshold in lines (default 400)
+/architecture-audit --threshold-fan-out=20          # override the default component fan-out threshold (default 15)
 ```
+
+**💡 Pro tip**: Use `/worktree architecture` to run this in an isolated worktree.
 
 This skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of `<target>/graphify-out/graph.json` all run scoped to the target. Findings land at `<target>/.architect-audits/architecture-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree architecture` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -135,7 +120,7 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 
    On `yes`, writes `.architect-audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

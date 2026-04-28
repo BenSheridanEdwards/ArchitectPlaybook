@@ -40,27 +40,16 @@ If the user wants a fresh real-run capture of hook violations, `/linting-audit -
 ## Usage
 
 ```
-/react-audit                                                   # full two-phase static run
-/react-audit --report-only                                     # phase 1 only: write findings, do not ask about a plan
-/react-audit --plan                                            # skip phase 1 if findings already exist; jump to plan generation
-/react-audit --layer=hooks-correctness                         # restrict the audit to a single layer (repeatable)
-/react-audit --layer=component-design
-/react-audit --layer=state-management
-/react-audit --layer=react-eighteen-and-nineteen-idioms
-/react-audit --include=<check-name>                            # include only the named check (repeatable)
-/react-audit --exclude=<check-name>                            # skip the named check (repeatable)
-/react-audit --target=<path>                                   # operate on this directory instead of cwd (default: cwd)
-/react-audit --learning                                        # expand Top 5 into mid-level engineer teaching mode
-/react-audit --teach                                           # alias for --learning
+/react-audit                                      # default: concise Top 5 + full report saved + ask about plan
+/react-audit --learn                              # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/react-audit --teach                              # alias for --learn
 ```
+
+**💡 Pro tip**: Use `/worktree react` to run this in an isolated worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/.architect-audits/react-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree react` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -156,7 +145,7 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

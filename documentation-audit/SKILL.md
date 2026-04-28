@@ -35,32 +35,21 @@ The skill never modifies any documentation, source, or configuration file.
 ## Usage
 
 ```
-/documentation-audit                                                  # full two-phase static run
-/documentation-audit --with-link-check                                # static plus HEAD-checks of external URLs
-/documentation-audit --report-only                                    # phase 1 only: write findings, do not ask about a plan
-/documentation-audit --plan                                           # skip phase 1 if findings already exist; jump to plan generation
-/documentation-audit --layer=project-entry-and-onboarding             # restrict the audit to a single layer (repeatable)
-/documentation-audit --layer=architectural-and-decision-documentation
-/documentation-audit --layer=code-level-documentation
-/documentation-audit --layer=operational-documentation-and-drift
-/documentation-audit --include=<check-name>                           # include only the named check (repeatable)
-/documentation-audit --exclude=<check-name>                           # skip the named check (repeatable)
-/documentation-audit --threshold-readme-min-lines=50                  # override default 30
-/documentation-audit --threshold-adr-staleness-days=365               # override default 180
-/documentation-audit --threshold-feature-doc-coverage=70              # override default 50 (percent for partial)
-/documentation-audit --threshold-public-api-doc-coverage=80           # override default 60 (percent for present)
-/documentation-audit --threshold-todo-staleness-days=180              # override default 90
-/documentation-audit --threshold-doc-staleness-days=365               # override default 180
-/documentation-audit --target=<path>                                  # operate on this directory instead of cwd (default: cwd)
-/documentation-audit --learning                                       # expand Top 5 into mid-level engineer teaching mode
-/documentation-audit --teach                                          # alias for --learning
+/documentation-audit                                # default: concise Top 5 + full report saved + ask about plan
+/documentation-audit --learn                        # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/documentation-audit --teach                        # alias for --learn
+/documentation-audit --with-link-check              # static plus HEAD-checks of external URLs
+/documentation-audit --threshold-readme-min-lines=50        # override default 30
+/documentation-audit --threshold-adr-staleness-days=365     # override default 180
+/documentation-audit --threshold-feature-doc-coverage=70    # override default 50 (percent for partial)
+/documentation-audit --threshold-public-api-doc-coverage=80 # override default 60 (percent for present)
+/documentation-audit --threshold-todo-staleness-days=180    # override default 90
+/documentation-audit --threshold-doc-staleness-days=365     # override default 180
 ```
 
+**💡 Pro tip**: Use `/worktree documentation` to run this in an isolated worktree.
+
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads (including every Markdown file walk), file globbing, regex searches, `git blame` invocations for TODO age, and external-link HEAD requests under `--with-link-check` all run scoped to the target. Findings land at `<target>/.architect-audits/documentation-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree documentation` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -162,7 +151,7 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 
     On `yes`, writes `.architect-audits/documentation-audit/implementation-plan.md` describing exactly which documents to create, which sections to add to existing docs, which TODOs to address (or close), which links to fix, and which TSDoc/JSDoc blocks to write — ordered by audience: onboarding documentation first (newcomer experience matters most), then architectural and operational, then code-level, then drift cleanup. The plan does not modify any project files.
 
-    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+    On `no`, exits cleanly. 
 
 ## Implementation steps
 

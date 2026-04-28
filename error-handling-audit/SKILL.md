@@ -19,27 +19,16 @@ The actual errors happening in production belong to **observability**, not to an
 ## Usage
 
 ```
-/error-handling-audit                                 # full two-phase static run
-/error-handling-audit --report-only                   # phase 1 only: write findings, do not ask about a plan
-/error-handling-audit --plan                          # skip phase 1 if findings already exist; jump to plan generation
-/error-handling-audit --layer=throw-and-catch-hygiene # restrict the audit to a single layer (repeatable)
-/error-handling-audit --layer=async-and-network
-/error-handling-audit --layer=react-error-boundaries
-/error-handling-audit --layer=logging-and-observability
-/error-handling-audit --include=<check-name>          # include only the named check (repeatable)
-/error-handling-audit --exclude=<check-name>          # skip the named check (repeatable)
-/error-handling-audit --target=<path>                 # operate on this directory instead of cwd (default: cwd)
-/error-handling-audit --learning                      # expand Top 5 into mid-level engineer teaching mode
-/error-handling-audit --teach                         # alias for --learning
+/error-handling-audit                             # default: concise Top 5 + full report saved + ask about plan
+/error-handling-audit --learn                     # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/error-handling-audit --teach                     # alias for --learn
 ```
+
+**💡 Pro tip**: Use `/worktree error-handling` to run this in an isolated worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (an empty catch is an empty catch); the rest report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, and regex searches all run scoped to the target. Findings land at `<target>/.architect-audits/error-handling-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree error-handling` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -129,7 +118,7 @@ Layer 0 is informational only and has no status. Layer 3 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/error-handling-audit/implementation-plan.md` describing exactly which catch blocks to fix, which network call sites to wrap, which React error boundaries to add, and which observability primitives to wire up — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

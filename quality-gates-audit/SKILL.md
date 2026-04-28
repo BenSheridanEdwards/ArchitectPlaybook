@@ -13,24 +13,14 @@ The default mental model is a TypeScript and React frontend project. The detecti
 ## Usage
 
 ```
-/quality-gates-audit                          # full two-phase run: audit, then ask about a plan
-/quality-gates-audit --report-only            # phase 1 only: audit and write findings, do not ask about a plan
-/quality-gates-audit --plan                   # skip phase 1 if findings already exist; jump to plan generation
-/quality-gates-audit --stage=pre-commit       # restrict the audit to a single stage (repeatable)
-/quality-gates-audit --stage=pre-push
-/quality-gates-audit --stage=continuous-integration
-/quality-gates-audit --include=<gate-name>    # include only the named gate (repeatable)
-/quality-gates-audit --exclude=<gate-name>    # skip the named gate (repeatable)
-/quality-gates-audit --target=<path>          # operate on this directory instead of cwd (default: cwd)
-/quality-gates-audit --learning               # expand Top 5 into mid-level engineer teaching mode
-/quality-gates-audit --teach                  # alias for --learning
+/quality-gates-audit                            # default: concise Top 5 + full report saved + ask about plan
+/quality-gates-audit --learn                    # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/quality-gates-audit --teach                    # alias for --learn
 ```
 
+**💡 Pro tip**: Use `/worktree quality-gates` to run this in an isolated worktree.
+
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/quality-gates-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree quality-gates` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -87,7 +77,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 
    On `yes`, writes `.architect-audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
 
-   On `no`, exits cleanly. The user can re-run later with `--plan` to skip phase 1 and jump straight to plan generation.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

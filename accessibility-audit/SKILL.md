@@ -13,25 +13,15 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 ## Usage
 
 ```
-/accessibility-audit                                 # full two-phase run: audit, then ask about a plan
-/accessibility-audit --report-only                   # phase 1 only: write findings, do not ask about a plan
-/accessibility-audit --plan                          # skip phase 1 if findings already exist; jump to plan generation
-/accessibility-audit --layer=tooling                 # restrict the audit to a single layer (repeatable)
-/accessibility-audit --layer=component-patterns
-/accessibility-audit --layer=application-shell
-/accessibility-audit --include=<check-name>          # include only the named check (repeatable)
-/accessibility-audit --exclude=<check-name>          # skip the named check (repeatable)
-/accessibility-audit --severity=error                # report only violations and missing-required checks
-/accessibility-audit --target=<path>                 # operate on this directory instead of cwd (default: cwd)
-/accessibility-audit --learning                      # expand Top 5 into mid-level engineer teaching mode
-/accessibility-audit --teach                         # alias for --learning
+/accessibility-audit                    # default: concise Top 5 + full report saved + ask about plan
+/accessibility-audit --learn            # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/accessibility-audit --teach            # alias for --learn
+/accessibility-audit --severity=error   # report only violations and missing-required checks
 ```
 
+**💡 Pro tip**: Use `/worktree accessibility` to run this in an isolated worktree.
+
 This skill never accepts `--apply`. Mutating the codebase is the responsibility of a separate fix step. The implementation plan is descriptive Markdown.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/accessibility-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree accessibility` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 ## The opinionated baseline
 
@@ -100,7 +90,7 @@ These checks require reading components. Use the knowledge graph to find the rig
 
    On `yes`, writes `.architect-audits/accessibility-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, which application-shell elements to wire up, and which component-pattern violations to remediate — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 
@@ -241,7 +231,7 @@ The plan is descriptive, not executable. It does not install packages and it doe
 
 - Re-running with no flags overwrites `findings.md`, `findings.json`, and `metadata.json` in place.
 - `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it.
-- Filters (`--layer`, `--include`, `--exclude`, `--severity`) are recorded in `metadata.json` so a partial run can be reproduced.
+- The `--severity` flag is recorded in `metadata.json` so a filtered run can be reproduced.
 
 ## Failure modes and remediation
 

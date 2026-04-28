@@ -68,31 +68,20 @@ The skill **never modifies any test, configuration, or source file**, and **neve
 ## Usage
 
 ```
-/testing-audit                                                   # full two-phase static run
-/testing-audit --with-run                                        # static plus enrichment from Vitest/Jest coverage run
-/testing-audit --report-only                                     # phase 1 only: write findings, do not ask about a plan
-/testing-audit --plan                                            # skip phase 1 if findings already exist; jump to plan generation
-/testing-audit --layer=test-runner-and-tooling                   # restrict the audit to a single layer (repeatable)
-/testing-audit --layer=query-priority-and-selector-hygiene
-/testing-audit --layer=interaction-and-async-patterns
-/testing-audit --layer=test-design-and-coverage
-/testing-audit --include=<check-name>                            # include only the named check (repeatable)
-/testing-audit --exclude=<check-name>                            # skip the named check (repeatable)
-/testing-audit --threshold-priority-one-ratio=80                 # override default 70 (percent)
-/testing-audit --threshold-testid-ratio=5                        # override default 10 (percent, ceiling)
-/testing-audit --threshold-by-role-ratio=60                      # override default 50 (percent of Priority 1)
-/testing-audit --threshold-user-event-ratio=90                   # override default 80 (percent)
-/testing-audit --threshold-snapshot-lines=50                     # override default 100 (lines, ceiling for partial)
-/testing-audit --target=<path>                                   # operate on this directory instead of cwd (default: cwd)
-/testing-audit --learning                                        # expand Top 5 into mid-level engineer teaching mode
-/testing-audit --teach                                           # alias for --learning
+/testing-audit                                    # default: concise Top 5 + full report saved + ask about plan
+/testing-audit --learn                            # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/testing-audit --teach                            # alias for --learn
+/testing-audit --with-run                         # static plus enrichment from Vitest/Jest coverage run
+/testing-audit --threshold-priority-one-ratio=80  # override default 70 (percent)
+/testing-audit --threshold-testid-ratio=5         # override default 10 (percent, ceiling)
+/testing-audit --threshold-by-role-ratio=60       # override default 50 (percent of Priority 1)
+/testing-audit --threshold-user-event-ratio=90    # override default 80 (percent)
+/testing-audit --threshold-snapshot-lines=50      # override default 100 (lines, ceiling for partial)
 ```
 
+**💡 Pro tip**: Use `/worktree testing` to run this in an isolated worktree.
+
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any test-runner subprocess (`vitest run --coverage`, `jest --coverage`) all run scoped to the target. Findings land at `<target>/.architect-audits/testing-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree testing` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=testing` first to detect — and optionally install — the development dependency that makes `--with-run` useful (`vitest` or `jest`, with their coverage configuration in place). Skip if you already know the tooling is wired up.
 
@@ -200,7 +189,7 @@ This layer encodes the testing philosophy stated above.
 
    On `yes`, writes `.architect-audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

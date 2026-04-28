@@ -22,33 +22,22 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 ## Usage
 
 ```
-/bundle-build-audit                                              # full two-phase static run
-/bundle-build-audit --with-stats                                 # static plus enrichment from existing stats artefact
-/bundle-build-audit --report-only                                # phase 1 only: write findings, do not ask about a plan
-/bundle-build-audit --plan                                       # skip phase 1 if findings already exist; jump to plan generation
-/bundle-build-audit --layer=build-configuration                  # restrict the audit to a single layer (repeatable)
-/bundle-build-audit --layer=bundle-composition-and-size
-/bundle-build-audit --layer=asset-and-dependency-hygiene
-/bundle-build-audit --layer=build-performance
-/bundle-build-audit --include=<check-name>                       # include only the named check (repeatable)
-/bundle-build-audit --exclude=<check-name>                       # skip the named check (repeatable)
-/bundle-build-audit --threshold-initial-bundle=300kb             # override default 250kb (gzipped)
-/bundle-build-audit --threshold-total-bundle=1.5mb               # override default 1mb (gzipped)
-/bundle-build-audit --threshold-build-time=90s                   # override default 60s (clean build)
-/bundle-build-audit --threshold-incremental-build-time=15s       # override default 10s
-/bundle-build-audit --stats-path=path/to/stats.json              # override the auto-detected stats artefact location
-/bundle-build-audit --target=<path>                              # operate on this directory instead of cwd (default: cwd)
-/bundle-build-audit --learning                                   # expand Top 5 into mid-level engineer teaching mode
-/bundle-build-audit --teach                                      # alias for --learning
+/bundle-build-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/bundle-build-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/bundle-build-audit --teach                         # alias for --learn
+/bundle-build-audit --with-stats                    # static plus enrichment from existing stats artefact
+/bundle-build-audit --stats-path=path/to/stats.json # override the auto-detected stats artefact location
+/bundle-build-audit --threshold-initial-bundle=300kb   # override default 250kb (gzipped)
+/bundle-build-audit --threshold-total-bundle=1.5mb     # override default 1mb (gzipped)
+/bundle-build-audit --threshold-build-time=90s         # override default 60s (clean build)
+/bundle-build-audit --threshold-incremental-build-time=15s  # override default 10s
 ```
+
+**💡 Pro tip**: Use `/worktree bundle-build` to run this in an isolated worktree.
 
 Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interpreted as base-2 kilobytes, etc.); `s`, `ms`, `m` for time. The skill never accepts `--apply`.
 
 The defaults baked into the skill are the recommended baseline for a typical modern React and TypeScript application. Threshold flags exist as an escape hatch for projects with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and reads of bundle-stats artefacts all run scoped to the target. Findings land at `<target>/.architect-audits/bundle-build-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree bundle-build` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=bundle-build` first to detect — and optionally install — the development dependency that makes `--with-stats` useful (a bundle analyser matching your build tool: `webpack-bundle-analyzer`, `@next/bundle-analyzer`, `rollup-plugin-visualizer`, or `vite-bundle-visualizer`). Skip if you already know the tooling is wired up.
 
@@ -141,7 +130,7 @@ Defaults in parentheses; every threshold overridable via flags. Checks marked **
 
    On `yes`, writes `.architect-audits/bundle-build-audit/implementation-plan.md` describing exactly which configuration entries to add, which dependencies to swap, which dynamic imports to introduce, and which continuous-integration steps to add — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

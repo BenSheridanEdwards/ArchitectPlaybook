@@ -37,30 +37,19 @@ This skill is read-only and never modifies anything. Two modes:
 ## Usage
 
 ```
-/typescript-audit                                                 # full two-phase static run
-/typescript-audit --with-run                                      # static plus enrichment from tsc --noEmit
-/typescript-audit --report-only                                   # phase 1 only: write findings, do not ask about a plan
-/typescript-audit --plan                                          # skip phase 1 if findings already exist; jump to plan generation
-/typescript-audit --layer=compiler-configuration                  # restrict the audit to a single layer (repeatable)
-/typescript-audit --layer=type-quality-in-source
-/typescript-audit --layer=type-system-usage
-/typescript-audit --layer=type-safety-at-boundaries
-/typescript-audit --include=<check-name>                          # include only the named check (repeatable)
-/typescript-audit --exclude=<check-name>                          # skip the named check (repeatable)
-/typescript-audit --threshold-any-per-file=5                      # override default 3
-/typescript-audit --threshold-as-per-file=10                      # override default 5 (excluding `as const`)
-/typescript-audit --threshold-non-null-assertion-per-file=5       # override default 3
-/typescript-audit --threshold-conditional-type-depth=4            # override default 3
-/typescript-audit --target=<path>                                 # operate on this directory instead of cwd (default: cwd)
-/typescript-audit --learning                                      # expand Top 5 into mid-level engineer teaching mode
-/typescript-audit --teach                                         # alias for --learning
+/typescript-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/typescript-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/typescript-audit --teach                         # alias for --learn
+/typescript-audit --with-run                      # static plus enrichment from tsc --noEmit
+/typescript-audit --threshold-any-per-file=5      # override default 3
+/typescript-audit --threshold-as-per-file=10      # override default 5 (excluding `as const`)
+/typescript-audit --threshold-non-null-assertion-per-file=5  # override default 3
+/typescript-audit --threshold-conditional-type-depth=4       # override default 3
 ```
 
+**💡 Pro tip**: Use `/worktree typescript` to run this in an isolated worktree.
+
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and the `--with-run` invocation of `tsc --noEmit` all run scoped to the target. Findings land at `<target>/.architect-audits/typescript-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree typescript` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=typescript` first to detect — and optionally install — the development dependency that makes `--with-run` useful (`typescript`, which provides `tsc --noEmit`). Skip if you already know the tooling is wired up.
 
@@ -162,7 +151,7 @@ Layer 0 is informational only and has no status.
 
     On `yes`, writes `.architect-audits/typescript-audit/implementation-plan.md` describing exactly which compiler flags to flip on, which files to clean up (graph-prioritised when Graphify is present), which type-system patterns to introduce, and which IO boundaries to wrap with validation. The plan does not modify any project files.
 
-    On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+    On `no`, exits cleanly. 
 
 ## Implementation steps
 

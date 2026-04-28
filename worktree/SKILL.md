@@ -1,12 +1,12 @@
 ---
 name: worktree
-description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Smart-handoff: if an audit was just run in this chat without --target and findings are recent, /worktree creates the worktree, copies the existing findings, and offers to generate the implementation plan against the worktree — no audit re-run. Lenient prefix matching on the skill name; bare /worktree opens a picker (or auto-resolves to the just-run audit when smart-handoff fires). The chat stays in the original project; the audit operates on the worktree via the audit's --target flag.
+description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Smart-handoff: if an audit was just run in this chat and findings are recent, /worktree creates the worktree, copies the existing findings, and offers to generate the implementation plan against the worktree — no audit re-run. Lenient prefix matching on the skill name; bare /worktree opens a picker (or auto-resolves to the just-run audit when smart-handoff fires). The chat stays in the original project; the audit operates on the worktree via the audit's internal --target flag.
 trigger: /worktree
 ---
 
 # /worktree
 
-Create a Git worktree and run the named audit against it, in the same chat. The chat stays in the original project — Claude Code chats are bound to the directory they were opened in — but the audit operates on the worktree because every audit accepts a `--target=<path>` flag that overrides its working directory.
+Create a Git worktree and run the named audit against it, in the same chat. The chat stays in the original project — Claude Code chats are bound to the directory they were opened in — but the audit operates on the worktree because every audit accepts an internal `--target=<path>` flag that overrides its working directory. This flag is not documented in any audit's Usage table; `/worktree` is the only user-facing way to set it.
 
 The skill has two modes:
 

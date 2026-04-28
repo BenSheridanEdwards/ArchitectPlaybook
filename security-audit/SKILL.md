@@ -41,28 +41,17 @@ The skill never invokes any tool with `--fix` or any other mutating flag.
 ## Usage
 
 ```
-/security-audit                                                     # full two-phase static run
-/security-audit --with-scan                                         # static plus enrichment from installed scanners
-/security-audit --report-only                                       # phase 1 only: write findings, do not ask about a plan
-/security-audit --plan                                              # skip phase 1 if findings already exist; jump to plan generation
-/security-audit --layer=authentication-and-sessions                 # restrict the audit to a single layer (repeatable)
-/security-audit --layer=input-handling-and-xss
-/security-audit --layer=transport-headers-and-cookies
-/security-audit --layer=secrets-data-and-third-party
-/security-audit --include=<check-name>                              # include only the named check (repeatable)
-/security-audit --exclude=<check-name>                              # skip the named check (repeatable)
-/security-audit --target=<path>                                     # operate on this directory instead of cwd (default: cwd)
-/security-audit --learning                                          # expand Top 5 into mid-level engineer teaching mode
-/security-audit --teach                                             # alias for --learning
+/security-audit                                   # default: concise Top 5 + full report saved + ask about plan
+/security-audit --learn                           # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/security-audit --teach                           # alias for --learn
+/security-audit --with-scan                       # static plus enrichment from installed scanners
 ```
+
+**💡 Pro tip**: Use `/worktree security` to run this in an isolated worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (any open redirect, any `eval`, any unsandboxed third-party iframe is a finding); soft checks report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands all run scoped to the target. Findings land at `<target>/.architect-audits/security-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree security` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=security` first to detect — and optionally install — the development dependencies that make `--with-scan` useful (`eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security`). Skip if you already know the tooling is wired up.
 
@@ -170,7 +159,7 @@ Layer 0 is informational only and has no status.
 
    On `yes`, writes `.architect-audits/security-audit/implementation-plan.md` describing exactly which configuration entries to add (security headers, Content Security Policy directives, cookie flags), which source-level changes to make (sanitization wrapping, redirect allowlists, SRI hashes), and which third-party integrations to harden. The plan is ordered by **severity** rather than by layer, because security findings cross layers and the user wants to fix the highest-impact issues first.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 

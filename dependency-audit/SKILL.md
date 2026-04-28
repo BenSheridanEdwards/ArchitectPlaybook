@@ -34,31 +34,20 @@ The skill detects which tier is available and records it in the diagnostic snaps
 ## Usage
 
 ```
-/dependency-audit                                              # full two-phase static run (tier 1 or 2)
-/dependency-audit --with-network                               # tier 3: enrich with audit and outdated registry data
-/dependency-audit --report-only                                # phase 1 only: write findings, do not ask about a plan
-/dependency-audit --plan                                       # skip phase 1 if findings already exist; jump to plan generation
-/dependency-audit --layer=security                             # restrict the audit to a single layer (repeatable)
-/dependency-audit --layer=health
-/dependency-audit --layer=compliance
-/dependency-audit --layer=hygiene
-/dependency-audit --include=<check-name>                       # include only the named check (repeatable)
-/dependency-audit --exclude=<check-name>                       # skip the named check (repeatable)
-/dependency-audit --threshold-major-versions-behind=3          # override default 2
-/dependency-audit --threshold-abandonment-months=18            # override default 24
-/dependency-audit --security-critical-packages=react,next,@remix-run/react   # override the default critical-package list
-/dependency-audit --target=<path>                                            # operate on this directory instead of cwd (default: cwd)
-/dependency-audit --learning                                                 # expand Top 5 into mid-level engineer teaching mode
-/dependency-audit --teach                                                    # alias for --learning
+/dependency-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/dependency-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/dependency-audit --teach                         # alias for --learn
+/dependency-audit --with-network                  # tier 3: enrich with audit and outdated registry data
+/dependency-audit --threshold-major-versions-behind=3    # override default 2
+/dependency-audit --threshold-abandonment-months=18      # override default 24
+/dependency-audit --security-critical-packages=react,next,@remix-run/react  # override the default critical-package list
 ```
+
+**💡 Pro tip**: Use `/worktree dependency` to run this in an isolated worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
 The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch; the canonical path to evolving the defaults themselves is `/system-self-improve`.
-
-When `--target=<path>` is set, the skill operates on that path instead of the current working directory. File reads, file globbing, regex searches, and any subprocess commands (including `npm audit` and `npm outdated` under `--with-network`) all run scoped to the target. Findings land at `<target>/.architect-audits/dependency-audit/`. The default is the current working directory. This is the building block that lets `/worktree <name>` create a worktree and audit it from a chat opened elsewhere — all in one chat.
-
-**💡 Pro tip**: Use `/worktree dependency` to run this against a Git worktree (creates the worktree and runs the audit in this same chat). Useful for branch isolation and for running multiple audits in true parallel across separate chats.
 
 **💡 Pro tip**: Run `/preflight --audit=dependency` first to confirm the package manager and lockfile are detected — `--with-network` calls the package manager's audit subcommand (`npm audit`, `pnpm audit`, `yarn audit`, or `bun pm audit`), so no install is needed, but a missing or unrecognised lockfile will silently degrade the enrichment.
 
@@ -147,7 +136,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 
    On `yes`, writes `.architect-audits/dependency-audit/implementation-plan.md` describing exactly which packages to upgrade, which to remove, which to relocate between `dependencies` and `devDependencies`, which licenses to review with a human, and which continuous-integration steps to add. The plan does not modify any project files.
 
-   On `no`, exits cleanly. The user can re-run with `--plan` later to skip phase 1.
+   On `no`, exits cleanly. 
 
 ## Implementation steps
 
