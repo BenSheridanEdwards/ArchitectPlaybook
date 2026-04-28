@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: Audit a TypeScript and React frontend against an opinionated security baseline spanning authentication/sessions, input handling and XSS prevention, transport/headers/cookies, and secrets/data protection/third-party integrations. Frontend-only in v1. Static-first with optional --with-scan enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit a TypeScript and React frontend against an opinionated security baseline spanning authentication/sessions, input handling and XSS prevention, transport/headers/cookies, and secrets/data protection/third-party integrations. Frontend-only. Static-first with optional --with-scan enrichment. Optionally generates an implementation plan for the gaps.
 trigger: /security-audit
 ---
 
@@ -8,7 +8,7 @@ trigger: /security-audit
 
 Audit a TypeScript and React frontend against an opinionated security baseline organised in four layers — **authentication, authorization, and sessions**, **input handling and XSS prevention**, **transport, headers, and cookies**, **secrets, data protection, and third-party integrations** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-## Scope: frontend-only in v1
+## Scope: frontend-only
 
 This skill targets browser-shipped code and the frontend-relevant infrastructure that surrounds it. It is **deliberately not** a full-stack security audit. The user should know exactly what they are getting before they trust the report.
 
@@ -212,7 +212,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/security-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.

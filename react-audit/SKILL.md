@@ -214,7 +214,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/react-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.
@@ -322,5 +322,5 @@ When React is below 18, the layer 4 summary becomes `"reactEighteenAndNineteenId
 - Create, modify, or delete any file outside `.architect-audits/react-audit/`.
 - Modify components, hooks, or configuration.
 - Open pull requests or commit anything to git.
-- Audit non-React frontends. Vue, Svelte, Angular, and Solid are out of scope for v1.
+- Audit non-React frontends. Vue, Svelte, Angular, and Solid are out of scope.
 - Replace human review of nuanced React design decisions. The audit catches structural patterns; trade-offs like "should this be a custom hook or a child component" still require judgement.

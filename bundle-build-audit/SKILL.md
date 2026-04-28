@@ -8,7 +8,7 @@ trigger: /bundle-build-audit
 
 Audit a TypeScript frontend's build pipeline and bundle output against an opinionated baseline organised in four layers — **build configuration**, **bundle composition and size**, **asset and dependency hygiene**, **build performance** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-The default mental model is TypeScript and React. The skill works across Vite, Next.js (App Router and Pages Router), Remix, Create React App, plain Webpack, plain Rollup, and Turbopack. Parcel and direct esbuild app builds are out of scope for v1.
+The default mental model is TypeScript and React. The skill works across Vite, Next.js (App Router and Pages Router), Remix, Create React App, plain Webpack, plain Rollup, and Turbopack. Parcel and direct esbuild app builds are out of scope.
 
 ## Static-first design with optional stats enrichment
 
@@ -190,7 +190,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/bundle-build-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.
@@ -282,7 +282,7 @@ The plan is descriptive, not executable. It does not install packages and it doe
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| No supported build tool detected | The project uses Parcel, esbuild directly, or a custom build script. | Stop. Inform the user that v1 supports Vite, Next.js, Remix, Create React App, Webpack, Rollup, and Turbopack only. |
+| No supported build tool detected | The project uses Parcel, esbuild directly, or a custom build script. | Stop. Inform the user that the skill currently supports Vite, Next.js, Remix, Create React App, Webpack, Rollup, and Turbopack only. |
 | `--with-stats` set but no stats artefact found | The user has not installed a bundle analyser, or has not run `npm run build` (or equivalent with the bundle analyser enabled) recently. | Continue running. Mark stats-required checks as `partial` with the gap "stats artefact not present at <searched paths>". **Recovery:** run `/preflight --audit=bundle-build --install` to install a bundle analyser if missing, then run the build to produce the artefact and re-run with `--with-stats`. |
 | Stats artefact present but unreadable | Corrupt or unrecognised format. | Treat the artefact as missing. Record the parse error in the snapshot. Continue with degraded checks. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in `metadata.json`. The implementation plan loses the community-derived split-plane suggestions; everything else is unaffected. |
@@ -295,6 +295,6 @@ The plan is descriptive, not executable. It does not install packages and it doe
 - Create, modify, or delete any file outside `.architect-audits/bundle-build-audit/`.
 - Modify configuration, source files, or continuous-integration workflows.
 - Open pull requests or commit anything to git.
-- Audit Parcel, raw esbuild, or custom build pipelines. Those are out of scope for v1.
+- Audit Parcel, raw esbuild, or custom build pipelines.
 - Measure runtime performance. That is the responsibility of `/performance-audit`. This skill stops at the bytes shipped and the time taken to ship them.
 - Make build-tool migration recommendations (Webpack to Vite, Pages Router to App Router). Migration is a project-shaping decision, not an audit finding.

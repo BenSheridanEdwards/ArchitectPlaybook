@@ -8,7 +8,7 @@ trigger: /testing-audit
 
 Audit a TypeScript and React project's tests against an opinionated baseline organised in four layers — **test runner and tooling**, **query priority and selector hygiene**, **interaction and async patterns**, **test design and coverage** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-The default mental model is React component tests written with `@testing-library/react`, plus end-to-end tests in Playwright or Cypress. Vitest and Jest are both supported as the test runner. Mocha and other runners are out of scope for v1.
+The default mental model is React component tests written with `@testing-library/react`, plus end-to-end tests in Playwright or Cypress. Vitest and Jest are both supported as the test runner. Mocha and other runners are out of scope.
 
 ## How this differs from neighbouring audits
 
@@ -273,7 +273,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/testing-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.
@@ -388,8 +388,8 @@ The plan is descriptive, not executable. It does not edit tests, install package
 - Install any package or dependency.
 - Open pull requests or commit anything to git.
 - Audit JavaScript-only projects.
-- Audit non-React frontends. The query-priority and interaction layers use React Testing Library conventions; Vue Testing Library and others are out of scope for v1.
-- Audit Mocha, AVA, Tap, or Node's built-in test runner. Vitest and Jest are the only supported runners in v1.
+- Audit non-React frontends. The query-priority and interaction layers use React Testing Library conventions; Vue Testing Library and others are out of scope.
+- Audit Mocha, AVA, Tap, or Node's built-in test runner. Vitest and Jest are the only supported runners.
 - Audit utility-first CSS itself. Tailwind, UnoCSS, and similar frameworks are perfectly fine in components — the audit's only stance on utility classes is in *test assertions*, where they make tests brittle. Component code is `/architecture-audit`'s and `/react-audit`'s domain.
 - Replace human review of nuanced test design decisions. The audit catches structural patterns; trade-offs like "should this be a unit test or an integration test" still require judgement.
 

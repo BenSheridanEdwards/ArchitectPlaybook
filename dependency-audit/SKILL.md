@@ -200,7 +200,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/dependency-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.
@@ -288,7 +288,7 @@ The plan is descriptive, not executable. It does not run any install, upgrade, o
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Stop. Inform the user that v1 supports npm, pnpm, yarn, and bun only. |
+| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Stop. Inform the user that the skill currently supports npm, pnpm, yarn, and bun only. |
 | `node_modules` absent | The user has not run install, or `node_modules` is in a non-standard location. | Continue at tier 1. Record `tier: 1` in metadata. Tier-2 checks degrade to `partial` with the gap "needs tier 2 — run install first". |
 | `--with-network` set but network command fails | Registry unreachable, authentication required, audit endpoint rate-limited. | Record the failure and the command output in metadata. Tier-3 checks degrade to `partial`. Do not crash. |
 | Multiple lockfiles present | Mid-migration between package managers, or accidental commit. | Pick the lockfile referenced by the `packageManager` field if set; otherwise the most recently modified. Record the conflict in the snapshot. The package-manager-mixing hygiene check will report `violation`. |
@@ -302,6 +302,6 @@ The plan is descriptive, not executable. It does not run any install, upgrade, o
 - Encode or enforce a license policy. Compliance findings surface signals; the human (and, where appropriate, legal counsel) makes the decision.
 - Make registry calls beyond the package manager's own read-only audit and outdated commands.
 - Open pull requests or commit anything to git.
-- Audit non-Node.js ecosystems. Python, Go, Rust, and Ruby dependency audits are out of scope for v1.
+- Audit non-Node.js ecosystems. Python, Go, Rust, and Ruby dependency audits are out of scope.
 - Audit individual workspaces in a monorepo separately. The skill audits the repository root and reports cross-workspace duplication; per-workspace deep-dives are recommended as follow-up.
 - Run any kind of supply-chain analysis beyond what the package manager's audit and the local installation surface — full provenance, signature verification, and attestations are out of scope for this version.

@@ -237,7 +237,7 @@ Print a human-first, scannable summary in the chat. Do not print the full layere
    - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
 3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/documentation-audit/findings.md`
 
-When `--learning` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
+When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
 - For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
 - Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
 - Include a short "What you'll learn from fixing this" section for each recommendation.
@@ -349,4 +349,4 @@ The plan is descriptive, not executable. It does not write documentation, edit s
 - Audit the *quality* of writing beyond structural and drift checks. Whether a paragraph is clear is a human judgement call.
 - Replace human review of operational documentation. The audit verifies presence; whether the runbook would actually work in a real incident is a tabletop-exercise concern.
 - Audit `@typescript-eslint` documentation rules (`require-jsdoc`, `valid-jsdoc`). That is owned by `/linting-audit`.
-- Audit non-Markdown documentation formats (ReStructuredText, AsciiDoc, plain text). Markdown and MDX only in v1.
+- Audit non-Markdown documentation formats (ReStructuredText, AsciiDoc, plain text). Markdown and MDX only.
