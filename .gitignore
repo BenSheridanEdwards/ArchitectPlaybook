@@ -12,7 +12,6 @@ Thumbs.db
 !.claude/skills/install-skills-globally
 graphify-out/
 .architect-audits/*
-!.architect-audits/documentation-audit/
 
 # Node and package-manager output (in case a future skill produces any)
 node_modules/
