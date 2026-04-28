@@ -8,7 +8,7 @@ trigger: /linting-audit
 
 Audit a TypeScript project's lint configuration against an opinionated baseline organised in four layers — **configuration shape**, **rule coverage**, **strictness and enforcement**, **suppressions hygiene** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-The default mental model is TypeScript and React. The skill auto-detects and supports both ESLint (with the modern flat config) and Biome. It audits the linter actually in use; dual-installation is itself a Layer 1 violation.
+The default mental model is TypeScript and React. The skill auto-detects and supports both ESLint (with the modern flat configuration format) and Biome. It audits the linter actually in use; dual-installation is itself a Layer 1 violation.
 
 ## How this differs from `/quality-gates-audit`
 
@@ -213,7 +213,7 @@ After printing, ask the single yes-or-no question: *"Generate an implementation 
 When the user agrees, build `implementation-plan.md`:
 
 1. **Header** — repository name, baseline version, detected linter, React-detected flag, timestamp, total counts per layer.
-2. **Layer 1 — configuration shape plan**: linter installation/removal commands when dual-installed; migration snippet from legacy to flat config; TypeScript parser wiring snippet.
+2. **Layer 1 — configuration shape plan**: linter installation/removal commands when dual-installed; migration snippet from legacy to flat configuration format; TypeScript parser wiring snippet.
 3. **Layer 2 — rule coverage plan**: per missing rule set, the install command and the configuration entry to add. Recommendation order respects layer 1 dependencies (parser before type-aware rules, etc.).
 4. **Layer 3 — strictness and enforcement plan**: continuous-integration step snippets, `package.json` script edits, type-aware-rule activation snippet.
 5. **Layer 4 — suppressions hygiene plan**: list of files to clean up, prioritised by graph centrality when the Graphify graph is present (god nodes first), then by suppression count. Per file, suggested next steps (annotate justifications, narrow blanket disables, or fix the underlying issue).

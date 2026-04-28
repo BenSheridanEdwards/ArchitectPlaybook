@@ -70,7 +70,7 @@ Layer 0 is informational only and has no status.
 
 - Detected authentication library: NextAuth/Auth.js, Clerk, Auth0 SDK, Supabase Auth, AWS Cognito, Firebase Auth, custom, or none.
 - Detected sanitization library: DOMPurify, sanitize-html, isomorphic-dompurify, or none.
-- Content Security Policy: detected yes/no, source location (header, meta tag, framework config), summary of directives.
+- Content Security Policy: detected yes/no, source location (header, meta tag, framework configuration), summary of directives.
 - Security headers detected with source location: X-Frame-Options or `frame-ancestors`, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Strict-Transport-Security.
 - Cookie-handling primitive: framework session helpers, `cookies-next`, `js-cookie`, manual `document.cookie`, or none.
 - `dangerouslySetInnerHTML` usage count and file references.
