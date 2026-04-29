@@ -17,7 +17,6 @@ This skill is also the canonical reference for any audit's preflight needs. Audi
 ```
 /preflight                                # detect across every audit; report only
 /preflight --audit=<name>                 # scope to one audit (lenient prefix match)
-/preflight --target=<path>                # operate on a different project root
 /preflight --install                      # prompt and install missing development dependencies
 /preflight --scaffold-configs             # prompt and scaffold missing project configuration
 /preflight --install --scaffold-configs   # both

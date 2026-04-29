@@ -12,11 +12,12 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 
 ## Usage
 
-/accessibility-audit # default: concise Top 5 + full report saved + ask about plan
-/accessibility-audit --learn # mid-level engineer teaching mode (detailed explanations + file/line examples)
-/accessibility-audit --teach # alias for --learn
-**Audit-specific flag**  
-`/accessibility-audit --severity=error` — report only violations and missing-required checks.
+```
+/accessibility-audit                              # default: concise Top 5 + full report saved + ask about plan
+/accessibility-audit --learn                      # mid-level engineer teaching mode (detailed explanations + file/line examples)
+/accessibility-audit --teach                      # alias for --learn
+/accessibility-audit --severity=error             # report only violations and missing-required checks
+```
 
 **💡 Pro tip**: Use `/worktree accessibility` to run this in an isolated worktree.
 

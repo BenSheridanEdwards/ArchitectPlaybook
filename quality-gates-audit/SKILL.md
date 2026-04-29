@@ -70,6 +70,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 5. **Writes phase 1 outputs** to `.architect-audits/quality-gates-audit/`:
    - `findings.md` — grouped by stage, one section per gate.
    - `findings.json` — machine-readable, see schema below.
+   - `snapshot.md` — the diagnostic snapshot of the project's quality-gates posture, on its own.
    - `metadata.json` — skill version, run timestamp, graphify revision hash, ecosystem.
 6. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
 
@@ -111,16 +112,17 @@ Capture every matching path or configuration key in the `evidence` array so the 
 
 ### Step 4 — Write phase 1 outputs
 
-Create `.architect-audits/quality-gates-audit/` if it does not exist. Write the three files:
+Create `.architect-audits/quality-gates-audit/` if it does not exist. Write the four files:
 
 ```
 .architect-audits/quality-gates-audit/
   findings.md
   findings.json
+  snapshot.md
   metadata.json
 ```
 
-If a previous run exists, overwrite the three files. Phase 2's `implementation-plan.md` is preserved unless the user agrees to regenerate it.
+If a previous run exists, overwrite the four files. Phase 2's `implementation-plan.md` is preserved unless the user agrees to regenerate it.
 
 ### Step 5 — Print the concise chat summary and offer phase 2
 
@@ -206,7 +208,7 @@ The plan is descriptive, not executable. It does not run the install commands an
 
 ## Idempotency rules
 
-- Re-running with no flags overwrites `findings.md`, `findings.json`, and `metadata.json` in place. The previous report is not preserved — the audit is intended to reflect current state.
+- Re-running with no flags overwrites `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` in place. The previous report is not preserved — the audit is intended to reflect current state.
 - `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it. This is to avoid losing notes the user may have added.
 - Filters (`--stage`, `--include`, `--exclude`) are recorded in `metadata.json` so a partial run can be reproduced.
 

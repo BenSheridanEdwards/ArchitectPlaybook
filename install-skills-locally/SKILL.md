@@ -32,7 +32,7 @@ Copy every skill folder from this architect-playbook repository into `<current-p
 
 ```bash
 # This skill file lives at <playbook-root>/install-skills-locally/SKILL.md when running
-# from the source repo. Detect that case first.
+# from the source repository. Detect that case first.
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null || pwd)"
 PLAYBOOK_ROOT="$(dirname "$SKILL_DIR")"
 

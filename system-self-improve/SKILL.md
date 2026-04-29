@@ -31,7 +31,7 @@ Three input modes, in priority order. The skill scans for them in this order and
 
 ## Where `/system-self-improve` operates
 
-The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repo and be re-installed via `/install-skills-locally` or `/install-skills-globally`.
+The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repository and be re-installed via `/install-skills-locally` or `/install-skills-globally`.
 
 When the gap report lives in a target project (`<some-project>/.architect-audits/<audit>/review-gap-report.md`) and the playbook clone is elsewhere, the user passes both `--gap-report=<path>` and `--playbook-path=<path>`.
 
@@ -241,11 +241,11 @@ Print the commit suggestion and the modified-file list. Do not commit.
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:08Z",
   "runMode": "dry-run",
-  "playbookPath": "/Users/bense/Coding/Consulting/Global/architect-playbook",
+  "playbookPath": "<absolute path to the architect-playbook clone>",
   "playbookCommit": "08a38d8",
   "inputSource": {
     "type": "review-gap-report",
-    "path": "/Users/bense/Coding/Consulting/some-project/.architect-audits/security-audit/review-gap-report.md"
+    "path": "<absolute path to the project>/.architect-audits/security-audit/review-gap-report.md"
   },
   "snapshot": {
     "skillCounts": { "ready": 14, "stub": 1 },
@@ -326,7 +326,7 @@ Print the commit suggestion and the modified-file list. Do not commit.
 - Commit any change to git. The skill prints the suggested Conventional Commits message and the modified-file list; the user commits.
 - Push, open a pull request, or otherwise interact with any remote.
 - Skip the confirmation prompt under `--apply`. There is no flag to bypass it.
-- Operate on globally-installed skill copies under `~/.claude/skills/`. Improvements must land in the source repo and be re-installed.
+- Operate on globally-installed skill copies under `~/.claude/skills/`. Improvements must land in the source repository and be re-installed.
 - Run any code, including the audits whose findings it might be analysing.
 - Decide on its own that an audit's threshold is wrong without an input gap. Pattern-based suggestions from `--from-audit-history` are surfaced as candidates only, not as automatic edits.
 

@@ -16,11 +16,11 @@ The architect-playbook deliberately keeps audit boundaries tight so a single con
 
 | Concern | Owner |
 | --- | --- |
-| Hook correctness (Rules of Hooks, deps arrays, custom hook design) | `/react-audit` |
+| Hook correctness (Rules of Hooks, dependency arrays, custom hook design) | `/react-audit` |
 | Component-shape patterns (function components, forwardRef, displayName, naming) | `/react-audit` |
 | State strategy at the React-API level (when to lift, when to derive, form/server/URL/component split) | `/react-audit` |
 | React 18+ primitives usage (`useTransition`, `useId`, Suspense, `'use client'`, server actions, `useOptimistic`) | `/react-audit` |
-| Memoization for **runtime cost** (perf-driven `useMemo`/`React.memo`/virtualization) | `/performance-audit` |
+| Memoization for **runtime cost** (performance-driven `useMemo`/`React.memo`/virtualization) | `/performance-audit` |
 | Memoization for **correctness** (referential stability that downstream code depends on) | `/react-audit` |
 | God components, file size, fan-out as architectural invariants | `/architecture-audit` |
 | Single state-management library (Redux vs Zustand vs Jotai chosen once) | `/architecture-audit` |
@@ -81,13 +81,13 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 | --- | --- | --- |
 | `eslint-plugin-react-hooks` recommended set enabled | The hooks plugin's recommended rules are enabled in the active ESLint configuration (or the equivalent Biome rules for projects on Biome). Overlap with `/linting-audit`; both surface. | Plugin missing, or recommended set off. |
 | No silenced exhaustive-deps without justification | `// eslint-disable-next-line react-hooks/exhaustive-deps` lines have a justification comment on the same or adjacent line. Soft check — reported as `partial`. | Suppressions of `exhaustive-deps` with no surrounding explanation. |
-| No empty deps arrays where deps exist | `useEffect(() => { ... }, [])` is not used when the body legitimately closes over rendered values that change. | Effects with empty deps that read state, props, or context that varies across renders. |
+| No empty dependency arrays where dependencies exist | `useEffect(() => { ... }, [])` is not used when the body legitimately closes over rendered values that change. | Effects with empty dependency arrays that read state, props, or context that varies across renders. |
 | No data fetching in effects when a query library exists | When TanStack Query, SWR, RTK Query, Apollo Client, or framework-native loaders are available, components fetch via the data layer rather than `useEffect` plus `fetch`. (Overlap with `/performance-audit`'s "server state in data layer" check.) | `useEffect` calling `fetch`/`axios` in a project with a query layer installed. |
 | No state synchronisation | State is derived from props or other state, not stored in `useState` and re-synchronised by `useEffect`. | Patterns where a `useEffect` does `setX(propX)` to mirror props into state. |
 | Status enums over multiple booleans | When a component tracks multi-stage state, a single status enum is used (`'idle' | 'loading' | 'success' | 'error'`) rather than separate `isLoading`, `isError`, `isSuccess` booleans that can drift. Soft check — reported as `partial`. | Three or more boolean state variables that represent a single conceptual lifecycle. |
 | `useRef` for mutable non-render state | Mutable values that don't trigger re-renders use `useRef`, not `useState`. | `useState` used to hold a value that is never read in render but mutated frequently. |
 | Cleanup functions present for side effects | `useEffect` returns a cleanup for subscriptions, timers, observers, async-cancellation, and event listeners. | Side-effect setup with no matching teardown. |
-| Memoization for correctness, not just performance | When a callback or value appears in another hook's dependency array and that downstream hook depends on referential stability for correctness (typically a `useEffect` deps list), the callback or value is wrapped in `useCallback`/`useMemo`. Distinct from `/performance-audit`'s perf-driven memoization: this catches infinite-re-run bugs, not slow renders. | A `useEffect` whose deps include an inline callback created on each render. |
+| Memoization for correctness, not just performance | When a callback or value appears in another hook's dependency array and that downstream hook depends on referential stability for correctness (typically a `useEffect` dependency list), the callback or value is wrapped in `useCallback`/`useMemo`. Distinct from `/performance-audit`'s performance-driven memoization: this catches infinite-re-run bugs, not slow renders. | A `useEffect` whose dependencies include an inline callback created on each render. |
 | Custom hook design | Custom hooks have a single responsibility, are named `useFoo`, and return a consistent shape across the codebase (single value for one return, tuple for two, object for three or more). Soft check — reported as `partial` when adherence is mixed. | Custom hooks returning mixed shapes inconsistently, or named without the `use` prefix. |
 
 ### Layer 2 — Component design
@@ -312,7 +312,7 @@ When React is below 18, the layer 4 summary becomes `"reactEighteenAndNineteenId
 ## What this skill explicitly does NOT do
 
 - Execute any code or run any test.
-- Audit runtime cost (memoization-for-perf, virtualization, render thrashing). Those are owned by `/performance-audit`.
+- Audit runtime cost (memoization-for-performance, virtualization, render thrashing). Those are owned by `/performance-audit`.
 - Audit god components, file size, fan-out, or single-state-library architectural concerns. Those are owned by `/architecture-audit` (state-library overlap is intentionally surfaced in both).
 - Audit accessibility patterns inside components. Those are owned by `/accessibility-audit`.
 - Audit React error boundaries or Suspense + boundary pairing. Those are owned by `/error-handling-audit`.
