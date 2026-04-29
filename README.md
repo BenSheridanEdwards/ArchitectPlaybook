@@ -120,6 +120,7 @@ The concise Top 5 recommendations you see by default in chat focus on **missing*
 | [`/bundle-build-audit`](bundle-build-audit/SKILL.md) | Build pipeline and bundle output. |
 | [`/error-handling-audit`](error-handling-audit/SKILL.md) | Error hygiene and observability. |
 | [`/documentation-audit`](documentation-audit/SKILL.md) | Documentation quality across multiple lenses. |
+| [`/agentic-audit`](agentic-audit/SKILL.md) | Agentic instruction files (`CLAUDE.md`, `AGENTS.md`, Cursor rules) and `.claude/settings.json` hygiene. |
 
 ### Meta
 
