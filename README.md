@@ -15,13 +15,17 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 1. **Get the playbook.**
    ```bash
    git clone <this-repository> ~/architect-playbook
+   cd ~/architect-playbook
+   claude       # open this directory in Claude Code
    ```
+   The clone ships with `.claude/skills/install-architect-playbook-globally` already committed, so the bootstrap slash command is available the moment you open the cloned repo in Claude Code — no manual copy step needed.
 
-2. **Install the skills.**
+2. **Install the rest of the skills.**
    ```
-   /install-architect-playbook-globally     # once, machine-wide
+   /install-architect-playbook-globally     # once, machine-wide — copies every skill into ~/.claude/skills/
    /install-architect-playbook-locally      # per project, pinned in version control
    ```
+   Run `/install-architect-playbook-globally` from inside the cloned playbook directory. After it finishes, every audit slash command is available in every Claude Code session on the machine. Switch to your target project and use `/install-architect-playbook-locally` instead (or in addition) if you want the skills pinned alongside that project.
 
 3. **Prepare the project.**
    ```
