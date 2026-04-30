@@ -12,38 +12,37 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 
 ## The workflow
 
-1. **Get the playbook.**
+1. **Get the playbook and install the skills.**
    ```bash
    git clone <this-repository> ~/architect-playbook
    cd ~/architect-playbook
    claude       # open this directory in Claude Code
    ```
-   The clone ships with `.claude/skills/install-architect-playbook-globally` already committed, so the bootstrap slash command is available the moment you open the cloned repo in Claude Code — no manual copy step needed.
-
-2. **Install the rest of the skills.**
+   Then, in the Claude Code chat:
    ```
-   /install-architect-playbook-globally     # once, machine-wide — copies every skill into ~/.claude/skills/
-   /install-architect-playbook-locally      # per project, pinned in version control
+   /install-architect-playbook-globally
    ```
-   Run `/install-architect-playbook-globally` from inside the cloned playbook directory. After it finishes, every audit slash command is available in every Claude Code session on the machine. Switch to your target project and use `/install-architect-playbook-locally` instead (or in addition) if you want the skills pinned alongside that project.
+   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally` already committed so this one bootstrap command is available the moment you open the cloned repo — no manual copy step needed.
 
-3. **Prepare the project.**
+   *(Optional, for teams: once you `cd` into a target project, you can also run `/install-architect-playbook-locally` to pin the skills alongside that project in version control. Most users don't need this.)*
+
+2. **Prepare the project.**
    ```
    /pre-audit-setup
    ```
 
-4. **Run audits.**
+3. **Run audits.**
    ```
    /security-audit              # concise Top 5 recommendations + full report saved to disk
    /worktree security           # run in an isolated worktree (recommended for parallel audits)
    ```
    Open multiple chats and use `/worktree` in each for true parallel execution.
 
-5. **Fix the findings** in the same chat that produced them.
+4. **Fix the findings** in the same chat that produced them.
 
-6. **Re-run the audit** to review the fix (best done in a fresh chat or worktree).
+5. **Re-run the audit** to review the fix (best done in a fresh chat or worktree).
 
-7. **Evolve the playbook** if a gap is found:
+6. **Evolve the playbook** if a gap is found:
    ```
    /system-self-improve
    ```
