@@ -31,7 +31,7 @@ Three input modes, in priority order. The skill scans for them in this order and
 
 ## Where `/system-self-improve` operates
 
-The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repository and be re-installed via `/install-skills-locally` or `/install-skills-globally`.
+The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repository and be re-installed via `/install-architect-playbook-locally` or `/install-architect-playbook-globally`.
 
 When the gap report lives in a target project (`<some-project>/.architect-audits/<audit>/review-gap-report.md`) and the playbook clone is elsewhere, the user passes both `--gap-report=<path>` and `--playbook-path=<path>`.
 

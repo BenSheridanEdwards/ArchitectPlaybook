@@ -19,8 +19,8 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 
 2. **Install the skills.**
    ```
-   /install-skills-globally     # once, machine-wide
-   /install-skills-locally      # per project, pinned in version control
+   /install-architect-playbook-globally     # once, machine-wide
+   /install-architect-playbook-locally      # per project, pinned in version control
    ```
 
 3. **Prepare the project.**
@@ -97,8 +97,8 @@ The concise Top 5 recommendations you see by default in chat focus on **missing*
 
 | Trigger | Purpose |
 | --- | --- |
-| [`/install-skills-locally`](install-skills-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
-| [`/install-skills-globally`](install-skills-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
+| [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
+| [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify, build the knowledge graph, merge the PreToolUse hook. |
 | [`/worktree`](worktree/SKILL.md) | Create a Git worktree and run the named audit against it. |
 | [`/preflight`](preflight/SKILL.md) | Detect optional enrichment tooling for `--with-*` flags. |

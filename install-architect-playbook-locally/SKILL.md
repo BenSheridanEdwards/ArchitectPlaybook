@@ -1,28 +1,28 @@
 ---
-name: install-skills-locally
+name: install-architect-playbook-locally
 description: Copy every architect-playbook skill into the current project's .claude/skills/ directory so the slash commands are available inside this project only.
-trigger: /install-skills-locally
+trigger: /install-architect-playbook-locally
 ---
 
-# /install-skills-locally
+# /install-architect-playbook-locally
 
 Copy every skill folder from this architect-playbook repository into `<current-project>/.claude/skills/`. After running this, every architect-playbook slash command works inside the current project, and only inside the current project. Other projects on the machine are untouched.
 
 ## Usage
 
 ```
-/install-skills-locally                 # install or update every skill into .claude/skills/
-/install-skills-locally --dry-run       # print the plan without copying anything
-/install-skills-locally --force         # overwrite destinations even if they appear newer
-/install-skills-locally --include=name  # install only one named skill (repeatable)
-/install-skills-locally --exclude=name  # skip a named skill (repeatable)
+/install-architect-playbook-locally                 # install or update every skill into .claude/skills/
+/install-architect-playbook-locally --dry-run       # print the plan without copying anything
+/install-architect-playbook-locally --force         # overwrite destinations even if they appear newer
+/install-architect-playbook-locally --include=name  # install only one named skill (repeatable)
+/install-architect-playbook-locally --exclude=name  # skip a named skill (repeatable)
 ```
 
 ## What this skill does
 
-1. **Resolves the playbook root.** Locate the architect-playbook repository the user wants to install from. The playbook root is the directory that contains this skill's parent folder (`install-skills-locally/SKILL.md`). If the skill is being run from inside `~/.claude/skills/install-skills-locally/SKILL.md` (already globally installed), ask the user for the path to the playbook clone.
+1. **Resolves the playbook root.** Locate the architect-playbook repository the user wants to install from. The playbook root is the directory that contains this skill's parent folder (`install-architect-playbook-locally/SKILL.md`). If the skill is being run from inside `~/.claude/skills/install-architect-playbook-locally/SKILL.md` (already globally installed), ask the user for the path to the playbook clone.
 2. **Resolves the destination.** `<current-working-directory>/.claude/skills/`. Create it if it does not exist.
-3. **Enumerates source skills.** Every direct sub-folder of the playbook root that contains a `SKILL.md`, except `install-skills-locally` and `install-skills-globally` themselves (those should not be installed into target projects — they belong to the playbook).
+3. **Enumerates source skills.** Every direct sub-folder of the playbook root that contains a `SKILL.md`, except `install-architect-playbook-locally` and `install-architect-playbook-globally` themselves (those should not be installed into target projects — they belong to the playbook).
 4. **Copies each skill folder** with `cp -R <source>/<skill> <destination>/<skill>`. The destination becomes a complete, self-contained copy. Subsequent edits to the playbook do not propagate; re-run this skill to refresh.
 5. **Reports the result** with one line per skill: `installed`, `updated`, `skipped (stub)`, or `skipped (newer at destination)`.
 
@@ -31,12 +31,12 @@ Copy every skill folder from this architect-playbook repository into `<current-p
 ### Step 1 — Resolve the playbook root
 
 ```bash
-# This skill file lives at <playbook-root>/install-skills-locally/SKILL.md when running
+# This skill file lives at <playbook-root>/install-architect-playbook-locally/SKILL.md when running
 # from the source repository. Detect that case first.
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null || pwd)"
 PLAYBOOK_ROOT="$(dirname "$SKILL_DIR")"
 
-if [ ! -f "$PLAYBOOK_ROOT/install-skills-locally/SKILL.md" ]; then
+if [ ! -f "$PLAYBOOK_ROOT/install-architect-playbook-locally/SKILL.md" ]; then
   echo "Could not auto-detect the architect-playbook root."
   echo "Re-run from inside a clone of architect-playbook, or pass --from=<path>."
   exit 1
@@ -56,8 +56,8 @@ mkdir -p "$DEST"
 
 For each direct sub-folder of `$PLAYBOOK_ROOT` that contains a `SKILL.md`, build a list. Exclude:
 
-- `install-skills-locally`
-- `install-skills-globally`
+- `install-architect-playbook-locally`
+- `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
 Apply `--include` and `--exclude` filters from the command line.
@@ -105,7 +105,7 @@ Open a new Claude Code chat in this directory to pick up the new slash commands.
 
 - Re-running with no flags is safe. Files only change if the source is newer (or `--force` is set).
 - This skill never deletes a destination skill that is not in the source — manual cleanup only.
-- This skill never touches `~/.claude/skills/`. For machine-wide install, use `/install-skills-globally`.
+- This skill never touches `~/.claude/skills/`. For machine-wide install, use `/install-architect-playbook-globally`.
 
 ## Safety
 

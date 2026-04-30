@@ -14,7 +14,7 @@ Skills fall into three categories with deliberately different shapes:
 
 ### Setup utilities
 
-`install-skills-locally`, `install-skills-globally`, `pre-audit-setup`, `worktree`. One-shot helpers that prepare a project (or the whole machine) for running audits. They have side effects (file copies, configuration merges, worktree creation) but those side effects are bounded and idempotent. Setup utilities do *not* follow the four-layer audit shape — that structure is reserved for audits.
+`install-architect-playbook-locally`, `install-architect-playbook-globally`, `pre-audit-setup`, `worktree`. One-shot helpers that prepare a project (or the whole machine) for running audits. They have side effects (file copies, configuration merges, worktree creation) but those side effects are bounded and idempotent. Setup utilities do *not* follow the four-layer audit shape — that structure is reserved for audits.
 
 ### Audits
 

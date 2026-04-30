@@ -96,7 +96,7 @@ git rev-parse --is-inside-work-tree > /dev/null 2>&1 || { echo "/worktree must b
 
 Walk `.claude/skills/` (when running in a target project) or the playbook clone (when running there) for every directory whose `SKILL.md` does not contain the literal `**Status:** stub`. From each, read the `name:` from the frontmatter. Build the candidate list.
 
-Skills that do not benefit from worktrees — `pre-audit-setup`, `install-skills-locally`, `install-skills-globally` — are excluded from the candidate list. Their effects need to land in the main checkout, not in a worktree, so a worktree wrapper around them would mislead.
+Skills that do not benefit from worktrees — `pre-audit-setup`, `install-architect-playbook-locally`, `install-architect-playbook-globally` — are excluded from the candidate list. Their effects need to land in the main checkout, not in a worktree, so a worktree wrapper around them would mislead.
 
 ### Step 3 — Resolve the requested skill
 
@@ -200,10 +200,10 @@ The skill does not run cleanup automatically — the user might still be applyin
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `/worktree must be run inside a Git repository` | The current working directory is not under any `.git` tree. | `cd` into the project root and re-run. |
-| No candidate skills found | `.claude/skills/` is empty or missing. | Run `/install-skills-locally` (or `/install-skills-globally`) first. |
-| Argument matches a known skill name but not in the candidates | The skill is one of the install/setup skills (`pre-audit-setup`, `install-skills-locally`, `install-skills-globally`). | These skills don't benefit from worktrees. Run them in the main checkout. |
+| No candidate skills found | `.claude/skills/` is empty or missing. | Run `/install-architect-playbook-locally` (or `/install-architect-playbook-globally`) first. |
+| Argument matches a known skill name but not in the candidates | The skill is one of the install/setup skills (`pre-audit-setup`, `install-architect-playbook-locally`, `install-architect-playbook-globally`). | These skills don't benefit from worktrees. Run them in the main checkout. |
 | `git worktree add` fails because the branch is checked out elsewhere | A previous worktree for the same branch wasn't cleaned up. | Run `git worktree list` to find it; `git worktree remove` to clean up; re-run `/worktree <skill>`. |
-| The user runs `/worktree security` and `security-audit` does not exist in the project | The audit skill hasn't been installed yet. | Run `/install-skills-locally` to refresh, then re-run. |
+| The user runs `/worktree security` and `security-audit` does not exist in the project | The audit skill hasn't been installed yet. | Run `/install-architect-playbook-locally` to refresh, then re-run. |
 | Audit reads or writes the wrong directory | The audit body did not respect `--target=<path>`. | Bug in the audit. Report via `/system-self-improve` with a `review-gap-report.md` describing the path-resolution failure. |
 | Smart-handoff fired but the user wanted a fresh re-run | The user made changes between the original audit and the `/worktree` invocation, and the existing findings are stale. | Re-run the audit first (`/<audit>` again, no `--target`), which overwrites the findings and resets the mtime. Then run `/worktree` — the handoff picks up the fresh findings. Or delete `.architect-audits/<audit>/findings.md` before invoking `/worktree`, which forces Normal mode. |
 | Smart-handoff did not fire and the user expected it to | The findings are older than 30 minutes, or `--target` was used in the recent run, or the conversation history doesn't include a recent `/<audit>` invocation that this `/worktree` call could match. | Confirm the recent invocation was in *this* chat (a different chat doesn't share history) and ran against the main checkout. If everything looks right but the handoff still doesn't fire, the trigger heuristic may need tuning — file a review gap report. |
@@ -215,4 +215,4 @@ The skill does not run cleanup automatically — the user might still be applyin
 - Modify any source file or configuration (beyond creating the worktree directory and branch).
 - Commit, push, or merge anything. The created branch starts as a copy of the current HEAD; the user does the actual work inside the worktree.
 - Clean up old worktrees. The user runs `git worktree remove` and `git branch -d` when finished.
-- Worktree the install or setup skills (`pre-audit-setup`, `install-skills-locally`, `install-skills-globally`). Their effects need to land in the main checkout.
+- Worktree the install or setup skills (`pre-audit-setup`, `install-architect-playbook-locally`, `install-architect-playbook-globally`). Their effects need to land in the main checkout.

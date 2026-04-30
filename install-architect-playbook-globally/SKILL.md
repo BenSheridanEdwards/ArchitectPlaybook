@@ -1,23 +1,23 @@
 ---
-name: install-skills-globally
+name: install-architect-playbook-globally
 description: Copy every architect-playbook skill into ~/.claude/skills/ so the slash commands are available in every Claude Code session on this machine.
-trigger: /install-skills-globally
+trigger: /install-architect-playbook-globally
 ---
 
-# /install-skills-globally
+# /install-architect-playbook-globally
 
 Copy every skill folder from this architect-playbook repository into `~/.claude/skills/`. After running this, every architect-playbook slash command works in every Claude Code session on the machine, regardless of which project is open.
 
-This skill is the machine-wide counterpart to [`/install-skills-locally`](../install-skills-locally/SKILL.md). The mechanics are the same; only the destination differs.
+This skill is the machine-wide counterpart to [`/install-architect-playbook-locally`](../install-architect-playbook-locally/SKILL.md). The mechanics are the same; only the destination differs.
 
 ## Usage
 
 ```
-/install-skills-globally                 # install or update every skill into ~/.claude/skills/
-/install-skills-globally --dry-run       # print the plan without copying anything
-/install-skills-globally --force         # overwrite destinations even if they appear newer
-/install-skills-globally --include=name  # install only one named skill (repeatable)
-/install-skills-globally --exclude=name  # skip a named skill (repeatable)
+/install-architect-playbook-globally                 # install or update every skill into ~/.claude/skills/
+/install-architect-playbook-globally --dry-run       # print the plan without copying anything
+/install-architect-playbook-globally --force         # overwrite destinations even if they appear newer
+/install-architect-playbook-globally --include=name  # install only one named skill (repeatable)
+/install-architect-playbook-globally --exclude=name  # skip a named skill (repeatable)
 ```
 
 ## When to choose this over the local install
@@ -27,17 +27,17 @@ Use this skill when:
 - You audit lots of different codebases and you do not want to re-install per project.
 - You want a single canonical version of every skill on disk.
 
-Prefer `/install-skills-locally` when:
+Prefer `/install-architect-playbook-locally` when:
 
 - You want different projects to pin different versions of the playbook.
 - You want the installed skills to live alongside the project in version control.
 
 ## What this skill does
 
-1. **Resolves the playbook root** the same way `/install-skills-locally` does.
+1. **Resolves the playbook root** the same way `/install-architect-playbook-locally` does.
 2. **Resolves the destination** as `$HOME/.claude/skills/`. Creates it if missing.
 3. **Asks for confirmation** before overwriting any existing skill of the same name in `~/.claude/skills/`. Global installs affect every Claude Code session on the machine, so the bar for overwriting must be higher than for a project-local install.
-4. **Enumerates source skills** (every sub-folder with a `SKILL.md` except `install-skills-locally` and `install-skills-globally`).
+4. **Enumerates source skills** (every sub-folder with a `SKILL.md` except `install-architect-playbook-locally` and `install-architect-playbook-globally`).
 5. **Copies each skill folder** with `cp -R`. The destination becomes a complete, self-contained copy.
 6. **Reports the result** with the same format as the local installer.
 
@@ -45,7 +45,7 @@ Prefer `/install-skills-locally` when:
 
 ### Step 1 — Resolve the playbook root
 
-Same logic as `/install-skills-locally`. The skill file's parent of parent is the playbook root.
+Same logic as `/install-architect-playbook-locally`. The skill file's parent of parent is the playbook root.
 
 ### Step 2 — Resolve destination
 
@@ -60,8 +60,8 @@ Refuse to proceed if `$HOME` is unset or empty.
 
 Same as the local installer. Exclude:
 
-- `install-skills-locally`
-- `install-skills-globally`
+- `install-architect-playbook-locally`
+- `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
 ### Step 4 — Confirmation gate for overwrites
