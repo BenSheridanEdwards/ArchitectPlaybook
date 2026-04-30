@@ -57,7 +57,7 @@ No audit ever mutates the codebase. The implementation plan is descriptive Markd
 
 Default mode prints a concise summary: a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks.
 
-When `--learn` or `--teach` is set, each recommendation expands into mid-level engineer teaching mode: specific file references, line numbers, educational language ("Here's why this pattern bites teams…"), and a "What you'll learn from fixing this" section. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
+When `--learn` or `--teach` is set, each recommendation expands into engineer teaching mode: specific file references, line numbers, educational language ("Here's why this pattern bites teams…"), and a "What you'll learn from fixing this" section. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
 
 ### Flag philosophy
 

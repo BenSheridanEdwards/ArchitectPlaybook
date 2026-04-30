@@ -54,7 +54,7 @@ Every audit supports the same minimal set:
 
 ```
 /<skill-name>                    # default: concise Top 5 + full report saved + ask about plan
-/<skill-name> --learn            # mid-level engineer teaching mode
+/<skill-name> --learn            # engineer teaching mode
 /<skill-name> --teach            # alias for --learn
 ```
 
