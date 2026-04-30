@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Smart-handoff: if an audit was just run in this chat and findings are recent, /worktree creates the worktree, copies the existing findings, and offers to generate the implementation plan against the worktree — no audit re-run. Lenient prefix matching on the skill name; bare /worktree opens a picker (or auto-resolves to the just-run audit when smart-handoff fires). The chat stays in the original project; the audit operates on the worktree via the audit's internal --target flag.
+description: Create a Git worktree for the named architect-playbook audit and run the audit against it, all in this same chat. Smart-handoff: if an audit was just run in this chat and findings are recent, /worktree creates the worktree, copies the existing findings, and offers to generate the implementation plan against the worktree — no audit re-run. Two affirmative shapes are supported. Bare /worktree creates the worktree, copies findings, and asks once whether to generate the plan (preserves the "look first, decide after" flow). "yes /worktree" or "/worktree yes" is a single-turn shortcut: it counts as the affirmative answer to the audit's phase-2 question and the plan is generated against the worktree without a second confirmation. Lenient prefix matching on the skill name. The chat stays in the original project; the audit operates on the worktree via the audit's internal --target flag.
 trigger: /worktree
 ---
 
@@ -11,7 +11,19 @@ Create a Git worktree and run the named audit against it, in the same chat. The 
 The skill has two modes:
 
 - **Normal mode (default).** Open a fresh chat in your project, run `/worktree security`, and the chat creates `../wt-security`, then runs `/security-audit --target=../wt-security`, then drops findings at `../wt-security/.architect-audits/security-audit/`. One chat, one command, audit done.
-- **Smart-handoff mode.** If an audit was just run in this chat against the main checkout (no `--target`) and the findings are still recent, `/worktree` skips the audit re-run, copies the existing findings into the worktree, and asks whether to generate the implementation plan against the worktree. Useful when you ran the audit first to look at the findings, then decided you wanted a clean branch to apply the fixes on.
+- **Smart-handoff mode.** If an audit was just run in this chat against the main checkout (no `--target`) and the findings are still recent, `/worktree` skips the audit re-run and copies the existing findings into the worktree. From here, two shapes are supported:
+  - **Bare `/worktree`** — copies the findings and asks once: *"Generate an implementation plan against the worktree? (yes/no)"*. Use this when you want to look at the worktree state before committing to plan generation, or when you might want to point the plan at a different audit.
+  - **`yes /worktree` or `/worktree yes`** — single-turn shortcut. The `yes` token is consumed as the affirmative answer to the audit's pending phase-2 question, the plan is generated against the worktree directly, and no second confirmation is asked. Use this when you've already decided you want the plan and the worktree, and you'd rather not be asked twice.
+
+### Quick reference
+
+| Invocation | When | Audit run? | Phase-2 question? |
+| --- | --- | --- | --- |
+| `/worktree security` | fresh start | yes, in the worktree | **yes** — the audit itself asks |
+| `/worktree` | after `/security-audit` ran in this chat (bare, no `yes`) | no — findings copied | **yes** — smart-handoff asks once |
+| `yes /worktree` or `/worktree yes` | after `/security-audit` ran in this chat | no — findings copied | **no** — plan generated directly |
+
+End state is the same in all three rows: findings (plus optionally `implementation-plan.md`) land in `../wt-<slug>/.architect-audits/<audit>/`.
 
 ## Usage
 
@@ -19,6 +31,9 @@ The skill has two modes:
 /worktree <skill-name>          # one-shot: create worktree and run the named audit against it
 /worktree <prefix>              # lenient prefix matching: /worktree sec → security-audit
 /worktree                       # no argument: print the list of audits and ask which one
+                                # (or, if an audit just finished in this chat, smart-handoff fires)
+yes /worktree                   # at an audit's phase-2 prompt: affirmative + hand off to worktree
+/worktree yes                   # same — equivalent affirmative form
 ```
 
 The argument accepts any of these forms for a skill named `<short>-audit`:
@@ -42,7 +57,7 @@ When the argument is ambiguous (matches multiple skills), the skill prints the c
 5. **Creates the worktree.** Runs `git worktree add ../wt-<slug> -b wt-<slug>`. When the branch already exists, runs `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, skips creation and notes "worktree already exists at `../wt-<slug>`".
 6. **Branches on mode:**
    - **Normal mode**: invokes the resolved audit against the worktree with `--target=../wt-<slug>`. All file reads, globbing, searches, and subprocess invocations run scoped to the worktree. Findings land at `../wt-<slug>/.architect-audits/<skill-name>/`. The audit's two-phase flow (report → ask about implementation plan) runs as usual.
-   - **Smart-handoff mode**: copies `.architect-audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/.architect-audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Asks the user the standard phase-2 question: *"Generate an implementation plan against the worktree? (yes/no)"*. On yes, writes `../wt-<slug>/.architect-audits/<skill-name>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`.
+   - **Smart-handoff mode**: copies `.architect-audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/.architect-audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Then, if the invocation included an explicit affirmative (`yes /worktree` or `/worktree yes`), writes `../wt-<slug>/.architect-audits/<skill-name>/implementation-plan.md` directly with no further confirmation; otherwise asks the standard phase-2 question *"Generate an implementation plan against the worktree? (yes/no)"* and writes the plan only on `yes`.
 7. **Reports the result inline** in the chat. The audit prints a concise summary: short header, Top 5 Highest-Leverage Recommendations, and a one-line pointer to the full report at `../wt-<slug>/.architect-audits/<skill-name>/findings.md`. The chat is now positioned to apply fixes against the worktree if the user asks — Claude reads `../wt-<slug>/.architect-audits/<skill-name>/findings.json` and edits files under `../wt-<slug>/`.
 
 The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that does the work. Once the audit (or handoff) and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
@@ -73,10 +88,11 @@ When the handoff fires, after the worktree is created:
    - `originalRunStartedAt`: preserved from the original metadata
    - `originalRunFinishedAt`: preserved from the original metadata
 3. **Print a short summary.** "Smart-handoff: picked up findings for `<audit>` (originally run at `<timestamp>`). Worktree created at `../wt-<slug>`. The findings have been copied; no audit re-run."
-4. **Run phase 2 against the worktree.** Ask the user the same yes/no question the audit asks:
-   > "Generate an implementation plan against the worktree? (yes/no)"
-   On yes, write `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md` describing fixes against files at `../wt-<slug>/...`. The plan can reference graph centrality from `../wt-<slug>/graphify-out/graph.json` if it exists in the worktree (which it does only if `/pre-audit-setup` was run on the worktree separately — most of the time it won't be, and the plan will note `noGraphify: true`).
-5. **Suggest the natural next step.** "If you'd like to apply the plan now, ask me to read `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md` and start editing files under `../wt-<slug>/`. The chat will stay in this directory; the edits land in the worktree via absolute paths."
+4. **Run phase 2 against the worktree.** Branch on whether the invocation carried an explicit affirmative:
+   - **Affirmative form** (`yes /worktree` or `/worktree yes`, with or without a skill argument): write `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md` directly, describing fixes against files at `../wt-<slug>/...`. Do not ask. The user already opted in.
+   - **Bare form** (`/worktree` with or without a skill argument, no `yes` token): ask once — *"Generate an implementation plan against the worktree? (yes/no)"*. On `yes`, write the plan as above. On `no`, exit with the cleanup hint from Step 8.
+   The plan can reference graph centrality from `../wt-<slug>/graphify-out/graph.json` if it exists in the worktree (which it does only if `/pre-audit-setup` was run on the worktree separately — most of the time it won't be, and the plan will note `noGraphify: true`).
+5. **Suggest the natural next step.** "Implementation plan written to `../wt-<slug>/.architect-audits/<audit>/implementation-plan.md`. If you'd like to apply it now, ask me to read it and start editing files under `../wt-<slug>/`. The chat will stay in this directory; the edits land in the worktree via absolute paths."
 
 ### When the user wants a fresh re-run instead
 
@@ -100,7 +116,16 @@ Skills that do not benefit from worktrees — `pre-audit-setup`, `install-archit
 
 ### Step 3 — Resolve the requested skill
 
-If `/worktree` was called with no argument, **first** scan the chat's conversation history for a recent slash-command invocation matching `/<some-audit>` that ran without `--target`. If found, use that audit's name as the resolved name (this is the smart-handoff inference). If multiple recent audits ran in the same chat, take the most recent one.
+The `/worktree` invocation may be bare, may carry a skill name, or may carry an affirmative token (`yes`) plus a skill name. The skill accepts these forms equivalently:
+
+- `/worktree` — bare.
+- `/worktree <skill>` — with a skill argument.
+- `yes /worktree` or `/worktree yes` — affirmative + bare. The `yes` is consumed as the answer to a pending audit phase-2 question, not as a skill name.
+- `yes /worktree <skill>` or `/worktree yes <skill>` — affirmative + skill argument.
+
+When `yes` is present, record `affirmative=true` and continue with the remaining argument (or no argument).
+
+If `/worktree` was called with no skill argument, **first** scan the chat's conversation history for a recent slash-command invocation matching `/<some-audit>` that ran without `--target`. If found, use that audit's name as the resolved name (this is the smart-handoff inference). If multiple recent audits ran in the same chat, take the most recent one.
 
 If `/worktree` was called with an argument, resolve it via the matching ladder:
 
@@ -174,11 +199,10 @@ Worktree created at <worktree_path>.
 The findings have been copied; no audit re-run.
 ```
 
-Then ask the user the standard phase-2 question:
+Then branch on the invocation form:
 
-> "Generate an implementation plan against the worktree? (yes/no)"
-
-On `yes`, write `<worktree_path>/.architect-audits/<skill-name>/implementation-plan.md` describing fixes against files at `<worktree_path>/...`. On `no`, exit with the cleanup hint from Step 8.
+- If the invocation included `yes` (`yes /worktree` or `/worktree yes`, with or without a skill argument), proceed straight to phase 2 without asking. Write `<worktree_path>/.architect-audits/<skill-name>/implementation-plan.md` describing fixes against files at `<worktree_path>/...`.
+- Otherwise (bare `/worktree`, no `yes` token), ask once: *"Generate an implementation plan against the worktree? (yes/no)"*. On `yes`, write the plan as above. On `no`, exit with the cleanup hint from Step 8.
 
 When the user asks Claude to apply the plan, Claude reads `<worktree_path>/.architect-audits/<skill-name>/implementation-plan.md` and edits files under `<worktree_path>/` — all from this same chat, all using absolute or worktree-relative paths.
 
