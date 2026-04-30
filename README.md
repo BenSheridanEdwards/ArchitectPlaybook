@@ -108,22 +108,24 @@ The concise Top 5 recommendations you see by default in chat focus on **missing*
 
 ### Audits
 
-| Trigger | Purpose |
-| --- | --- |
-| [`/quality-gates-audit`](quality-gates-audit/SKILL.md) | Pre-commit, pre-push, and CI/CD lifecycle gates. |
-| [`/security-audit`](security-audit/SKILL.md) | Frontend security: auth, XSS, headers, secrets. |
-| [`/accessibility-audit`](accessibility-audit/SKILL.md) | WCAG 2.2 AA across tooling, components, and shell. |
-| [`/dependency-audit`](dependency-audit/SKILL.md) | Dependency tree across security, health, and hygiene. |
-| [`/performance-audit`](performance-audit/SKILL.md) | Runtime cost and Core Web Vitals. |
-| [`/architecture-audit`](architecture-audit/SKILL.md) | Module boundaries, coupling, and conventions. |
-| [`/testing-audit`](testing-audit/SKILL.md) | Testing Library philosophy and best practices. |
-| [`/react-audit`](react-audit/SKILL.md) | Idiomatic React patterns and React 19 idioms. |
-| [`/linting-audit`](linting-audit/SKILL.md) | Linting configuration quality. |
-| [`/typescript-audit`](typescript-audit/SKILL.md) | Type system quality and IO validation. |
-| [`/bundle-build-audit`](bundle-build-audit/SKILL.md) | Build pipeline and bundle output. |
-| [`/error-handling-audit`](error-handling-audit/SKILL.md) | Error hygiene and observability. |
-| [`/documentation-audit`](documentation-audit/SKILL.md) | Documentation quality across multiple lenses. |
-| [`/agentic-audit`](agentic-audit/SKILL.md) | Agentic instruction files (`CLAUDE.md`, `AGENTS.md`, Cursor rules) and `.claude/settings.json` hygiene. |
+Every audit also accepts the universal `--learn` / `--teach` flags for engineer teaching mode. The "Additional flags" column lists per-audit enrichment flags on top of those. Per-audit `--threshold-*` flags also exist as escape hatches and are documented in each `SKILL.md`.
+
+| Trigger | Purpose | Additional flags | Description |
+| --- | --- | --- | --- |
+| [`/quality-gates-audit`](quality-gates-audit/SKILL.md) | Pre-commit, pre-push, and CI/CD lifecycle gates. | — | Static-only audit; no enrichment flags. |
+| [`/security-audit`](security-audit/SKILL.md) | Frontend security: auth, XSS, headers, secrets. | `--with-scan` | Enrich the static report with findings from installed security scanners (`eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security`). |
+| [`/accessibility-audit`](accessibility-audit/SKILL.md) | WCAG 2.2 AA across tooling, components, and shell. | `--severity=error` | Filter chat output down to violations and missing-required checks only. |
+| [`/dependency-audit`](dependency-audit/SKILL.md) | Dependency tree across security, health, and hygiene. | `--with-network` | Pull live `npm`/`pnpm`/`yarn`/`bun` audit and outdated data from the registry. |
+| [`/performance-audit`](performance-audit/SKILL.md) | Runtime cost and Core Web Vitals. | `--with-lighthouse-results`, `--lighthouse-results-path` | Enrich with an existing Lighthouse JSON report; override its path. |
+| [`/architecture-audit`](architecture-audit/SKILL.md) | Module boundaries, coupling, and conventions. | `--pattern` | Override the inferred architectural pattern (`feature-folders`, `layered`, `atomic-design`, `monorepo-workspaces`, `infer`). |
+| [`/testing-audit`](testing-audit/SKILL.md) | Testing Library philosophy and best practices. | `--with-run` | Run Vitest/Jest coverage to enrich findings. |
+| [`/react-audit`](react-audit/SKILL.md) | Idiomatic React patterns and React 19 idioms. | — | Static-only by design; no enrichment flags. |
+| [`/linting-audit`](linting-audit/SKILL.md) | Linting configuration quality. | `--with-run` | Run the configured linter (ESLint or Biome) for real findings. |
+| [`/typescript-audit`](typescript-audit/SKILL.md) | Type system quality and IO validation. | `--with-run` | Run `tsc --noEmit` for real type errors. |
+| [`/bundle-build-audit`](bundle-build-audit/SKILL.md) | Build pipeline and bundle output. | `--with-stats`, `--stats-path` | Enrich with an existing bundle-stats artefact; override its path. |
+| [`/error-handling-audit`](error-handling-audit/SKILL.md) | Error hygiene and observability. | — | Static-only by design; no enrichment flags. |
+| [`/documentation-audit`](documentation-audit/SKILL.md) | Documentation quality across multiple lenses. | `--with-link-check` | HEAD-check external URLs in documentation. |
+| [`/agentic-audit`](agentic-audit/SKILL.md) | Agentic instruction files (`CLAUDE.md`, `AGENTS.md`, Cursor rules) and `.claude/settings.json` hygiene. | — | Static-only audit; no enrichment flags. |
 
 ### Meta
 
