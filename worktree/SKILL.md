@@ -47,20 +47,20 @@ When the argument is ambiguous (matches multiple skills), the skill prints the c
 ## What this skill does
 
 1. **Confirms the working directory is a Git repository.** Stops with a friendly message if not.
-2. **Resolves the target skill name.**
-   - With an argument, attempts an exact match first, then a `<arg>-audit` match, then a prefix match against every audit-style skill in the current `.claude/skills/` directory (or the playbook clone, when run from inside one).
+2. **Resolves the target skill name with the helper.**
+   - With an argument, run the packaged helper (`worktree/scripts/architect-worktree.py` from a playbook checkout, or `.claude/skills/worktree/scripts/architect-worktree.py` from an installed project). The helper attempts an exact match first, then a `<argument>-audit` match, then a prefix match against every audit-style skill in the current `.claude/skills/` directory (or the playbook clone, when run from inside one).
    - With no argument, *first* checks the chat's conversation history for a recent audit invocation that ran without `--target`. If found, that audit is the resolved name and smart-handoff mode is enabled.
    - With no argument and no recent audit in chat, lists the available audit-style skills and asks the user to pick.
    - On ambiguity, lists the candidates and asks the user to pick.
 3. **Decides between Normal mode and Smart-handoff mode.** See the "Smart-handoff mode" section below for the trigger conditions. If smart-handoff fires, jumps to step 6. Otherwise, continues to step 4.
-4. **Computes the worktree slug.** For `<short>-audit`, the slug is `<short>` (so `security-audit` → `wt-security`). For non-audit skills like `system-self-improve`, the slug is the full name (so `system-self-improve` → `wt-system-self-improve`).
-5. **Creates the worktree.** Runs `git worktree add ../wt-<slug> -b wt-<slug>`. When the branch already exists, runs `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, skips creation and notes "worktree already exists at `../wt-<slug>`".
+4. **Computes the worktree slug, branch, path, and metadata with the helper.** For `<short>-audit`, the slug is `<short>` (so `security-audit` → `wt-security`). For non-audit skills like `system-self-improve`, the slug is the full name (so `system-self-improve` → `wt-system-self-improve`).
+5. **Creates the worktree with the helper.** First run the helper with `--dry-run` and read its printed metadata. If the current checkout is dirty, stop unless the user explicitly accepts `--allow-dirty`. Then run the same helper command without `--dry-run`. It creates `../wt-<slug>` on branch `wt-<slug>`, reuses an existing branch when present, and skips creation when the worktree path already exists.
 6. **Branches on mode:**
    - **Normal mode**: invokes the resolved audit against the worktree with `--target=../wt-<slug>`. All file reads, globbing, searches, and subprocess invocations run scoped to the worktree. Findings land at `../wt-<slug>/.architect-audits/<skill-name>/`. The audit's two-phase flow (report → ask about implementation plan) runs as usual.
    - **Smart-handoff mode**: copies `.architect-audits/<skill-name>/{findings.md, findings.json, snapshot.md, metadata.json}` from the chat's cwd into `../wt-<slug>/.architect-audits/<skill-name>/`. Updates the copied `metadata.json` with `handedOffFrom: "cwd"` and `handedOffAt: <timestamp>`. Skips the audit re-run. Then, if the invocation included an explicit affirmative (`yes /worktree` or `/worktree yes`), writes `../wt-<slug>/.architect-audits/<skill-name>/implementation-plan.md` directly with no further confirmation; otherwise asks the standard phase-2 question *"Generate an implementation plan against the worktree? (yes/no)"* and writes the plan only on `yes`.
 7. **Reports the result inline** in the chat. The audit prints a concise summary: short header, Top 5 Highest-Leverage Recommendations, and a one-line pointer to the full report at `../wt-<slug>/.architect-audits/<skill-name>/findings.md`. The chat is now positioned to apply fixes against the worktree if the user asks — Claude reads `../wt-<slug>/.architect-audits/<skill-name>/findings.json` and edits files under `../wt-<slug>/`.
 
-The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that does the work. Once the audit (or handoff) and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
+The skill does **not** open a new Claude Code chat. The chat that ran `/worktree` is the chat that does the work. The helper only resolves names, checks dirty state, prints safe commands and metadata, and creates the Git worktree. It never invokes Claude or an audit. Once the audit (or handoff) and any follow-up fixes are done, the user can `git worktree remove ../wt-<slug>` from a terminal when they're finished.
 
 ## Smart-handoff mode
 
@@ -147,31 +147,27 @@ After the resolved skill is in hand, check the smart-handoff trigger conditions:
 
 If all three hold, set `mode=smart-handoff`. Otherwise set `mode=normal`.
 
-### Step 5 — Compute the slug
+### Step 5 — Compute the slug and dry-run metadata with the helper
 
-```
-slug = skill_name
-if slug ends with "-audit":
-  slug = slug without the "-audit" suffix
+```bash
+HELPER="worktree/scripts/architect-worktree.py"
+[ -x "$HELPER" ] || HELPER=".claude/skills/worktree/scripts/architect-worktree.py"
+"$HELPER" <resolved-skill-name> --dry-run
 ```
 
 So `security-audit` → `security`, `bundle-build-audit` → `bundle-build`, `system-self-improve` → `system-self-improve`.
 
-### Step 6 — Create the worktree
+The dry run prints the deterministic branch, worktree path, creation command, audit invocation, cleanup commands, and dirty-state result. Use `--json` when another tool needs machine-readable metadata. If the checkout is dirty, stop and ask the user whether to commit, stash, or explicitly proceed with `--allow-dirty`.
+
+### Step 6 — Create the worktree with the helper
 
 ```bash
-slug="<resolved>"
-worktree_path="../wt-$slug"
-branch="wt-$slug"
-
-if [ -d "$worktree_path" ]; then
-  echo "Worktree already exists at $worktree_path — using it as-is."
-elif git rev-parse --verify "$branch" > /dev/null 2>&1; then
-  git worktree add "$worktree_path" "$branch"
-else
-  git worktree add "$worktree_path" -b "$branch"
-fi
+HELPER="worktree/scripts/architect-worktree.py"
+[ -x "$HELPER" ] || HELPER=".claude/skills/worktree/scripts/architect-worktree.py"
+"$HELPER" <resolved-skill-name>
 ```
+
+The helper derives `slug`, `worktree_path`, and `branch` exactly as shown in the dry run. When the branch already exists, it runs the equivalent of `git worktree add ../wt-<slug> wt-<slug>` (without `-b`). When the worktree path already exists, it skips creation and notes that no creation command is needed.
 
 If `git worktree add` fails (for example, because the branch is checked out elsewhere), surface the error and stop. Do not try to recover automatically — the user needs to clean up the conflicting worktree first.
 

@@ -103,7 +103,7 @@ The concise Top 5 recommendations you see by default in chat focus on **missing*
 | [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify, build the knowledge graph, merge the PreToolUse hook. |
-| [`/worktree`](worktree/SKILL.md) | Create a Git worktree and run the named audit against it. |
+| [`/worktree`](worktree/SKILL.md) | Create a deterministic Git worktree with the helper and run the named audit against it. |
 | [`/preflight`](preflight/SKILL.md) | Detect optional enrichment tooling for `--with-*` flags. |
 
 ### Audits
