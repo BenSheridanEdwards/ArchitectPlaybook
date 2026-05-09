@@ -34,6 +34,14 @@ A check resolves to one of four statuses:
 
 `missing` and `violation` are distinct on purpose. `missing` means "the safety net isn't in place"; `violation` means "the safety net is missing _and_ there is concrete code that the safety net would have caught."
 
+### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
+
+- React version and detected framework variant.
+- Storybook presence and configuration location when present.
+- Continuous-integration provider detected from workflow files.
+- Accessibility-related development dependencies detected in `package.json`.
+- Application-shell entry points found for document language, viewport, landmarks, and route announcements.
+
 ### Layer 1 — Tooling and automation
 
 | Check                              | Expectation                                                                                                                                           | Primary detection signals                                                                                                                                                                                                                      |
@@ -73,6 +81,14 @@ These checks require reading components. Use the knowledge graph to find the rig
 | Landmark roles            | The application shell renders the standard landmarks once per page: `banner`, `main`, `contentinfo`. `navigation` and `complementary` appear when the design has them. | The shell uses `<header>`, `<main>`, `<footer>`, `<nav>` (or the explicit `role` equivalents). No duplicate landmarks of the same role without an `aria-label` differentiating them. |
 | Error and not-found pages | Custom error and 404 pages have a heading, manage focus, and offer a way back to the main application.                                                                 | Presence of an error route (`app/not-found.tsx`, `app/error.tsx`, or framework equivalent). Heading present. A link or button that returns to a known landing route.                 |
 | Authentication pages      | Sign-in and sign-up forms support password-manager autofill, declare input purposes, and do not trap users in modal flows that break with a screen reader.             | Inputs use the correct `autoComplete` values (`username`, `current-password`, `new-password`, `email`). Forms are not nested inside non-dismissible modals.                          |
+
+### Layer 4 — Reporting, severity, and handoff
+
+| Check | Expectation | Primary detection signals |
+| --- | --- | --- |
+| Findings contract followed | The audit writes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` under `.architect-audits/accessibility-audit/`. | The generated output includes the Layer 0 snapshot, layered findings, metadata, and machine-readable check statuses. |
+| Severity filter documented | `--severity=error` includes only `missing` and `violation` findings in chat while preserving the full report on disk. | Chat summary is filtered; `findings.json` still records the complete status taxonomy for downstream skills. |
+| Human-verification boundary stated | Screen-reader behaviour, live focus order, and runtime colour validation are called out as manual verification responsibilities. | The report separates static findings from checks that require assistive technology or a browser. |
 
 ## What this skill does
 

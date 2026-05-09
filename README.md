@@ -79,7 +79,7 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix.
 - **`/system-self-improve`** reads a review's gap report and proposes an edit to the originating audit's `SKILL.md`.
 
-A worked example of this contract — `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` produced by running `/documentation-audit` against the playbook itself — is committed at [`.architect-audits/documentation-audit/`](.architect-audits/documentation-audit/).
+A worked example of this contract is produced by running `/documentation-audit` against the playbook itself; it writes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` under `.architect-audits/documentation-audit/`.
 
 ## How audits grade issues
 
@@ -141,6 +141,16 @@ Every audit also accepts the universal `--learn` / `--teach` flags for engineer 
 - **Frontmatter shape** is fixed: `name`, `description`, `trigger`. The `trigger` value equals `/<folder-name>`.
 - **No hard-coded absolute paths** in skill bodies. Derive from the current working directory or `$HOME`.
 
+## Validation
+
+Run the playbook validator before changing skills or the README index:
+
+```bash
+python3 scripts/validate-playbook.py
+```
+
+The validator uses only the Python standard library. It checks skill frontmatter, required skill sections, README index coverage, internal Markdown links, and the audit layer plus findings-file contract.
+
 The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
@@ -150,7 +160,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. The short version:
 - **Add a new skill:** create a folder named after the slash command (full words, no abbreviations), write a `SKILL.md` following the canonical body structure, add the table row and the per-skill summary in the same commit. Audits also get the worktree Pro Tip block.
 - **Improve an existing skill:** prefer the self-improvement loop. Run the audit, fix the findings, review the fix in a worktree, then run `/system-self-improve` so the patch to the audit body is grounded in a real gap rather than speculation.
 
-The architectural intent behind the playbook's conventions lives in [ARCHITECTURE.md](ARCHITECTURE.md). Foundational decisions are recorded as ADRs in [docs/decisions/](docs/decisions/).
+The architectural intent behind the playbook's conventions lives in [ARCHITECTURE.md](ARCHITECTURE.md). Foundational decisions are recorded as Architecture Decision Records in [docs/decisions/](docs/decisions/).
 
 ## License
 
