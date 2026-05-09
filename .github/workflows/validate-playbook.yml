@@ -51,7 +51,13 @@ jobs:
               except subprocess.CalledProcessError:
                   comparison = 'HEAD'
 
-          changed_files = git('diff', '--name-only', '--diff-filter=ACMRT', comparison).splitlines()
+          try:
+              changed_files = git('diff', '--name-only', '--diff-filter=ACMRT', comparison).splitlines()
+          except subprocess.CalledProcessError:
+              # Force-push events can provide a previous SHA that is no longer
+              # reachable from the checked-out history. Fall back to the latest
+              # commit rather than failing the workflow before validation runs.
+              changed_files = git('diff', '--name-only', '--diff-filter=ACMRT', f'{git("rev-parse", "HEAD^")}..HEAD').splitlines()
           markdown_files = [Path(path) for path in changed_files if path.endswith('.md') and Path(path).is_file()]
 
           failures = []
