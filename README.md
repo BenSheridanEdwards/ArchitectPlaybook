@@ -61,6 +61,12 @@ Some audits expose additional enrichment or threshold flags (`--with-*`, `--thre
 
 **Pro tip**: Use `/worktree <skill-name>` to run audits in isolated Git worktrees.
 
+## Check metadata
+
+Each audit's `SKILL.md` remains the human canonical source for the baseline, narrative guidance, and implementation steps. Audits may also include `checks.json` beside `SKILL.md`; that file is a machine-readable inventory of the checks so validation tools and generated maps can read check identifiers, layers, titles, expectations, violation signals, status values, related audits, and optional enrichment flags without scraping Markdown tables.
+
+Keep `checks.json` aligned with `SKILL.md` whenever a check is added, removed, renamed, or moved between layers. The JSON is supporting metadata, not a replacement for the human-readable audit body.
+
 ## The findings-file contract
 
 Audits, fixes, and reviews each run in different chat sessions, so they cannot share in-memory state. The protocol between them is a deterministic on-disk shape:
