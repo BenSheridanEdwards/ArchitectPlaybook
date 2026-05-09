@@ -1,0 +1,39 @@
+{
+  "reviewType": "dogfood static review",
+  "generatedBySlashCommand": false,
+  "reviewedRevision": "634380d",
+  "summary": {
+    "status": "partial",
+    "topFindings": [
+      "CLAUDE.md gives strong project-local agent rules for commits, audit output, self-improvement, and paths.",
+      ".claude/settings.json is project-local and limited to read/search tools plus a Graphify context hook.",
+      "Stale decision-record references in user-facing documentation were the main agentic hygiene risk because agents may follow active local path references."
+    ]
+  },
+  "checks": [
+    {
+      "id": "instruction-coverage",
+      "status": "present",
+      "evidence": [
+        "CLAUDE.md covers commits, naming, skill structure, audit behavior, cross-session handoff, self-improvement, and paths."
+      ]
+    },
+    {
+      "id": "settings-hygiene",
+      "status": "present",
+      "evidence": [
+        ".claude/settings.json only allows Read, Glob, and Grep.",
+        ".gitignore excludes .claude/settings.local.json.",
+        "CLAUDE.md prohibits writing ~/.claude/settings.json from skills."
+      ]
+    },
+    {
+      "id": "placeholder-style-references",
+      "status": "partial",
+      "evidence": [
+        "Placeholder strings in CLAUDE.md are fenced schema examples and not active links.",
+        "Previously active references to absent decision-record paths in README.md and ARCHITECTURE.md were corrected."
+      ]
+    }
+  ]
+}

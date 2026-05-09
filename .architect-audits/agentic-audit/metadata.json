@@ -1,0 +1,16 @@
+{
+  "reviewType": "dogfood static review",
+  "generatedBySlashCommand": false,
+  "reviewedRevision": "634380d",
+  "timestampPolicy": "No generated timestamp is recorded because no slash command ran.",
+  "artifactContract": [
+    "findings.md",
+    "findings.json",
+    "snapshot.md",
+    "metadata.json"
+  ],
+  "notes": [
+    "This directory is intentionally committed despite .gitignore excluding ordinary audit outputs.",
+    "The artifacts are examples for the handoff contract, not canonical slash-command output."
+  ]
+}

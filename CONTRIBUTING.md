@@ -66,7 +66,7 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - [ ] `--target=<path>` flag is supported (audits only) and the target-resolution paragraph plus worktree Pro Tip are in place.
 - [ ] No abbreviations introduced anywhere.
 - [ ] Conventional Commits subject on every commit in the branch.
-- [ ] If the change touches behaviour shared across skills (boundary tables, status taxonomy, two-phase flow), the change has been justified in an ADR under `docs/decisions/` or via `/system-self-improve` with a real gap report.
+- [ ] If the change touches behaviour shared across skills (boundary tables, status taxonomy, two-phase flow), the change has been justified in an Architecture Decision Record under `docs/decisions/` or via `/system-self-improve` with a real gap report.
 
 ## Reporting a gap
 

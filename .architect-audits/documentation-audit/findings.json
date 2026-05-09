@@ -1,0 +1,35 @@
+{
+  "reviewType": "dogfood static review",
+  "generatedBySlashCommand": false,
+  "reviewedRevision": "634380d",
+  "summary": {
+    "status": "partial",
+    "topFindings": [
+      "README.md linked to a committed documentation-audit example path that was absent on main.",
+      "README.md and ARCHITECTURE.md referenced decision-record paths that did not exist on main.",
+      "The findings-file contract benefits from committed, clearly labelled dogfood artifacts."
+    ]
+  },
+  "checks": [
+    {
+      "id": "documentation-example-path",
+      "status": "present",
+      "evidence": [
+        ".architect-audits/documentation-audit/findings.md",
+        ".architect-audits/documentation-audit/findings.json",
+        ".architect-audits/documentation-audit/snapshot.md",
+        ".architect-audits/documentation-audit/metadata.json"
+      ],
+      "fix": "Committed labelled dogfood static-review artifacts and updated README.md wording."
+    },
+    {
+      "id": "decision-record-links",
+      "status": "partial",
+      "evidence": [
+        "main referenced docs/decisions/ and a first Architecture Decision Record that were absent.",
+        "This stacked branch preserves those references after the Architecture Decision Record branch adds the missing directory and first record."
+      ],
+      "remainingWork": "Keep this branch stacked after the Architecture Decision Record branch, or rebase it after that branch merges, so the links remain true."
+    }
+  ]
+}

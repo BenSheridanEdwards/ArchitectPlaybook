@@ -79,7 +79,7 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix.
 - **`/system-self-improve`** reads a review's gap report and proposes an edit to the originating audit's `SKILL.md`.
 
-A worked example of this contract is produced by running `/documentation-audit` against the playbook itself; it writes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` under `.architect-audits/documentation-audit/`.
+A dogfood static-review example of this contract — `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` shaped like `/documentation-audit` output for the playbook itself — is committed at [`.architect-audits/documentation-audit/`](.architect-audits/documentation-audit/). It is labelled as a static review because no slash command generated it.
 
 ## How audits grade issues
 

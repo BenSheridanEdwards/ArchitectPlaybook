@@ -34,7 +34,7 @@ Layer 0 is informational only — a snapshot of the current state of the audited
 
 Layers 1 through 4 grade specific concerns within the audit's domain. Each layer is a table of checks; each check has an Expectation and a Violation signal. Layers are organised by audit-internal cohesion — for `/security-audit` they're attack classes, for `/performance-audit` they're runtime cost dimensions, for `/architecture-audit` they're invariant categories. Three layers can be skipped silently when a structural prerequisite is absent (e.g., Layer 3 of `/error-handling-audit` skips when React is not detected; Layer 4 of `/react-audit` skips on React below 18).
 
-The decision to standardise on four layers plus Layer 0 is recorded in [ADR 0001](docs/decisions/0001-four-layer-baseline-with-layer-zero-snapshot.md).
+The decision to standardise on four layers plus Layer 0 is recorded in [Architecture Decision Record 0001](docs/decisions/0001-four-layer-baseline-with-layer-zero-snapshot.md).
 
 ### The four-status taxonomy
 
@@ -134,4 +134,4 @@ When proposing a new audit or a substantive change to an existing one:
 
 - If the change is grounded in a real gap surfaced by a review, prefer `/system-self-improve` to direct hand edits.
 - If the change is a brand-new audit, follow the canonical body structure described in [CONTRIBUTING.md](CONTRIBUTING.md).
-- If the change touches the four-layer convention, the status taxonomy, the two-phase flow, the Testing Philosophy, or any other shared convention, write an ADR in [docs/decisions/](docs/decisions/) explaining the rationale before making the change. These conventions are foundational; changing them affects every audit at once.
+- If the change touches the four-layer convention, the status taxonomy, the two-phase flow, the Testing Philosophy, or any other shared convention, write an Architecture Decision Record in [docs/decisions/](docs/decisions/) explaining the rationale before making the change. These conventions are foundational; changing them affects every audit at once.
