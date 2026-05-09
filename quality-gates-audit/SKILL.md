@@ -93,7 +93,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 
    On `yes`, writes `.architect-audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 
