@@ -45,7 +45,8 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
 - A mutating run prints a dry-run summary first and waits for confirmation.
 - **Chat output is human-first and concise.** Every audit prints a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings, snapshot, metadata, and implementation plan are always written to `.architect-audits/<skill-name>/` but never printed in the chat unless the user explicitly asks.
 - **`--learn` or `--teach` expands output into teaching mode.** When set, each recommendation is explained as if teaching an engineer, with specific file references, line numbers, educational language ("Here's why this pattern bites teams…"), and a "What you'll learn from fixing this" section. The numbered/lettered structure is preserved so the user can still reply with "2b" or "1 and 3".
-- **`--target=<path>` is internal only.** It is not documented in the Usage table. Only `/worktree` uses it to redirect audits to a worktree directory.
+- **`--worktree` is the user-facing worktree control.** Worktrees are a flag on each audit, not a separate slash command. When passed, the audit creates or reuses `../wt-<audit-slug>` on branch `wt-<audit-slug>`, then runs the same audit against that checkout.
+- **`--target=<path>` is internal only.** It is not documented in the Usage table. Audit skills use it internally when the user passes `--worktree` to redirect the audit to an isolated Git worktree directory.
 - Every audit writes four files to disk:
   - `.architect-audits/<skill-name>/findings.md` — human-readable report.
   - `.architect-audits/<skill-name>/findings.json` — machine-readable for downstream skills.

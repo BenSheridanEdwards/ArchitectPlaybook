@@ -38,6 +38,7 @@ The skill **never runs Lighthouse itself**. Spinning up a server and running an 
 
 ```
 /performance-audit                                # default: concise Top 5 + full report saved + ask about plan
+/performance-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /performance-audit --learn                        # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /performance-audit --teach                        # alias for --learn
 /performance-audit --with-lighthouse-results      # static plus enrichment from existing Lighthouse JSON
@@ -45,7 +46,7 @@ The skill **never runs Lighthouse itself**. Spinning up a server and running an 
 /performance-audit --threshold-virtualization=100 # override default 50 items
 ```
 
-**💡 Pro tip**: Use `/worktree performance` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

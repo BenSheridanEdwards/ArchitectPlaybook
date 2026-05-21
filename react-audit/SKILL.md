@@ -41,11 +41,12 @@ If the user wants a fresh real-run capture of hook violations, `/linting-audit -
 
 ```
 /react-audit                                      # default: concise Top 5 + full report saved + ask about plan
+/react-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /react-audit --learn                              # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /react-audit --teach                              # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree react` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

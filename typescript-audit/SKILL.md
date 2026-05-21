@@ -38,6 +38,7 @@ This skill is read-only and never modifies anything. Two modes:
 
 ```
 /typescript-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/typescript-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /typescript-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /typescript-audit --teach                         # alias for --learn
 /typescript-audit --with-run                      # static plus enrichment from tsc --noEmit
@@ -47,7 +48,7 @@ This skill is read-only and never modifies anything. Two modes:
 /typescript-audit --threshold-conditional-type-depth=4       # override default 3
 ```
 
-**💡 Pro tip**: Use `/worktree typescript` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

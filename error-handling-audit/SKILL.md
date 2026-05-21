@@ -20,11 +20,12 @@ The actual errors happening in production belong to **observability**, not to an
 
 ```
 /error-handling-audit                             # default: concise Top 5 + full report saved + ask about plan
+/error-handling-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /error-handling-audit --learn                     # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /error-handling-audit --teach                     # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree error-handling` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

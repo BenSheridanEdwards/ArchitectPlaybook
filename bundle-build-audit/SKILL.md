@@ -23,6 +23,7 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 
 ```
 /bundle-build-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/bundle-build-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /bundle-build-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /bundle-build-audit --teach                         # alias for --learn
 /bundle-build-audit --with-stats                    # static plus enrichment from existing stats artefact
@@ -33,7 +34,7 @@ The skill never runs the build itself. Running `npm run build` (or equivalent) i
 /bundle-build-audit --threshold-incremental-build-time=15s  # override default 10s
 ```
 
-**💡 Pro tip**: Use `/worktree bundle-build` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 Threshold values accept human-friendly units: `kb`, `mb`, `gb` for sizes (interpreted as base-2 kilobytes, etc.); `s`, `ms`, `m` for time. The skill never accepts `--apply`.
 
