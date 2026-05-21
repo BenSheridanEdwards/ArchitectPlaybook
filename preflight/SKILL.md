@@ -10,7 +10,7 @@ A pre-audit readiness check. Several audits in the playbook accept optional enri
 
 Run `/preflight` once before launching audits. The default mode is read-only: it prints a status table for every relevant tool and writes findings to `.architect-audits/preflight/`. With explicit flags, it can install missing development dependencies and scaffold minimal project configuration, prompting before every change.
 
-This skill is also the canonical reference for any audit's preflight needs. Audits do not duplicate the detection logic; they link here from a Pro-tip line in their intro, the same way they link to `/worktree` and `/pre-audit-setup`.
+This skill is also the canonical reference for any audit's preflight needs. Audits do not duplicate the detection logic; they link here from a Pro-tip line in their intro, the same way they link to the `--worktree` flag and `/pre-audit-setup`.
 
 ## Usage
 
@@ -22,7 +22,7 @@ This skill is also the canonical reference for any audit's preflight needs. Audi
 /preflight --install --scaffold-configs   # both
 ```
 
-`--audit=<name>` accepts the same forms as `/worktree`:
+`--audit=<name>` accepts the same forms as audit `--worktree` resolution:
 
 - The full skill name: `security-audit`.
 - The short form: `security`.
@@ -100,7 +100,7 @@ If `process.env.CI === 'true'`, or the target is not writable, or the user is ru
 
 ### Step 4 — Resolve `--audit` and read the target's `package.json`
 
-If `--audit=<name>` is set, resolve it via the same matching ladder as `/worktree`: exact match, then `<arg>-audit` match, then unique prefix match across the audits listed in the table above. On ambiguity, print the candidates and ask. With no `--audit` flag, all rows in the table are in scope.
+If `--audit=<name>` is set, resolve it via the same matching ladder as audit `--worktree` handling: exact match, then `<arg>-audit` match, then unique prefix match across the audits listed in the table above. On ambiguity, print the candidates and ask. With no `--audit` flag, all rows in the table are in scope.
 
 Read `<target>/package.json`. Build the lookup of installed packages from the union of `dependencies` and `devDependencies`. If `package.json` is missing, refuse with a clear message.
 

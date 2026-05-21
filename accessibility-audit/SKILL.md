@@ -14,12 +14,13 @@ The default mental model is React (any flavour: Vite, Create React App, Next.js,
 
 ```
 /accessibility-audit                              # default: concise Top 5 + full report saved + ask about plan
+/accessibility-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /accessibility-audit --learn                      # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /accessibility-audit --teach                      # alias for --learn
 /accessibility-audit --severity=error             # report only violations and missing-required checks
 ```
 
-**💡 Pro tip**: Use `/worktree accessibility` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 This skill never accepts `--apply`. Mutating the codebase is the responsibility of a separate fix step. The implementation plan is descriptive Markdown.
 

@@ -27,13 +27,14 @@ The skill never invokes any linter with `--fix` or any other mutating flag. Runn
 
 ```
 /linting-audit                                    # default: concise Top 5 + full report saved + ask about plan
+/linting-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /linting-audit --learn                            # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /linting-audit --teach                            # alias for --learn
 /linting-audit --with-run                         # static plus enrichment from a real lint run
 /linting-audit --threshold-suppressions-per-file=10  # override default 5
 ```
 
-**💡 Pro tip**: Use `/worktree linting` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

@@ -14,11 +14,12 @@ The default mental model is a TypeScript and React frontend project. The detecti
 
 ```
 /quality-gates-audit                            # default: concise Top 5 + full report saved + ask about plan
+/quality-gates-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /quality-gates-audit --learn                    # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /quality-gates-audit --teach                    # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree quality-gates` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
 

@@ -1,6 +1,6 @@
 # Architect Playbook
 
-A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions, fix what they find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
+A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions with `--worktree`, fix what they find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
 
 ## Core principles
 
@@ -34,9 +34,9 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 3. **Run audits.**
    ```
    /security-audit              # concise Top 5 recommendations + full report saved to disk
-   /worktree security           # run in an isolated worktree (recommended for parallel audits)
+   /security-audit --worktree   # run in an isolated worktree (recommended for parallel audits)
    ```
-   Open multiple chats and use `/worktree` in each for true parallel execution.
+   Open multiple chats and add `--worktree` in each for true parallel execution.
 
 4. **Fix the findings** in the same chat that produced them.
 
@@ -53,13 +53,14 @@ Every audit supports the same minimal set:
 
 ```
 /<skill-name>                    # default: concise Top 5 + full report saved + ask about plan
+/<skill-name> --worktree         # create an isolated Git worktree, then run the audit there
 /<skill-name> --learn            # engineer teaching mode
 /<skill-name> --teach            # alias for --learn
 ```
 
 Some audits expose additional enrichment or threshold flags (`--with-*`, `--threshold-*`). See the individual `SKILL.md` for details.
 
-**Pro tip**: Use `/worktree <skill-name>` to run audits in isolated Git worktrees.
+**Pro tip**: Add `--worktree` to any audit to run it in an isolated Git worktree.
 
 ## The findings-file contract
 
@@ -103,12 +104,11 @@ The concise Top 5 recommendations you see by default in chat focus on **missing*
 | [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify, build the knowledge graph, merge the PreToolUse hook. |
-| [`/worktree`](worktree/SKILL.md) | Create a Git worktree and run the named audit against it. |
 | [`/preflight`](preflight/SKILL.md) | Detect optional enrichment tooling for `--with-*` flags. |
 
 ### Audits
 
-Every audit also accepts the universal `--learn` / `--teach` flags for engineer teaching mode. The "Additional flags" column lists per-audit enrichment flags on top of those. Per-audit `--threshold-*` flags also exist as escape hatches and are documented in each `SKILL.md`.
+Every audit also accepts the universal `--worktree`, `--learn`, and `--teach` flags. `--worktree` creates an isolated Git worktree before running the audit; `--learn` and `--teach` enable engineer teaching mode. The "Additional flags" column lists per-audit enrichment flags on top of those. Per-audit `--threshold-*` flags also exist as escape hatches and are documented in each `SKILL.md`.
 
 | Trigger | Purpose | Additional flags | Description |
 | --- | --- | --- | --- |

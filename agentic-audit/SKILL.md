@@ -34,6 +34,7 @@ This skill is read-only. It only reads files in the repository: agentic instruct
 
 ```
 /agentic-audit                                            # default: concise Top 5 + full report saved + ask about plan
+/agentic-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /agentic-audit --learn                                    # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /agentic-audit --teach                                    # alias for --learn
 /agentic-audit --threshold-instruction-min-lines=40       # override default 25
@@ -42,7 +43,7 @@ This skill is read-only. It only reads files in the repository: agentic instruct
 /agentic-audit --threshold-context-coverage=70            # override default 60 (percent of essential context items present)
 ```
 
-**💡 Pro tip**: Use `/worktree agentic` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 

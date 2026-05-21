@@ -14,7 +14,7 @@ Skills fall into three categories with deliberately different shapes:
 
 ### Setup utilities
 
-`install-architect-playbook-locally`, `install-architect-playbook-globally`, `pre-audit-setup`, `worktree`. One-shot helpers that prepare a project (or the whole machine) for running audits. They have side effects (file copies, configuration merges, worktree creation) but those side effects are bounded and idempotent. Setup utilities do *not* follow the four-layer audit shape — that structure is reserved for audits.
+`install-architect-playbook-locally`, `install-architect-playbook-globally`, `pre-audit-setup`, and `preflight`. One-shot helpers that prepare a project (or the whole machine) for running audits. They have side effects (file copies, configuration merges, dependency detection) but those side effects are bounded and idempotent. Setup utilities do *not* follow the four-layer audit shape — that structure is reserved for audits.
 
 ### Audits
 
@@ -61,13 +61,14 @@ When `--learn` or `--teach` is set, each recommendation expands into engineer te
 
 ### Flag philosophy
 
-Every audit has exactly three user-facing flags:
+Every audit has these universal user-facing flags:
 
 - (no flag) → Default: concise Top 5 + full report saved to disk + ask about plan
+- `--worktree` → Create an isolated Git worktree, then run the audit there
 - `--learn` → Mid-level engineer teaching mode
 - `--teach` → Alias for `--learn`
 
-`--target=<path>` exists but is internal — only `/worktree` uses it. The old universal flags (`--report-only`, `--plan`, `--layer`, `--include`, `--exclude`) have been removed as redundant with the new default behavior. Audit-specific flags (`--with-*`, `--threshold-*`, `--pattern`, `--severity`, `--stats-path`, `--lighthouse-results-path`, `--security-critical-packages`) remain only where they add value.
+`--worktree` is the only user-facing worktree control. It creates or reuses `../wt-<audit-slug>` on branch `wt-<audit-slug>`, then reruns the same audit against that checkout. `--target=<path>` exists but is internal — audit skills use it when `--worktree` is passed and never document it in their Usage tables. The old universal flags (`--report-only`, `--plan`, `--layer`, `--include`, `--exclude`) have been removed as redundant with the new default behavior. Audit-specific flags (`--with-*`, `--threshold-*`, `--pattern`, `--severity`, `--stats-path`, `--lighthouse-results-path`, `--security-critical-packages`) remain only where they add value.
 
 ### Static-first with optional enrichment
 
