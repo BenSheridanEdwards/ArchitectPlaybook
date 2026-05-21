@@ -152,7 +152,7 @@ Layer 0 is informational only and has no status.
 
     On `yes`, writes `.architect-audits/typescript-audit/implementation-plan.md` describing exactly which compiler flags to flip on, which files to clean up (graph-prioritised when Graphify is present), which type-system patterns to introduce, and which IO boundaries to wrap with validation. The plan does not modify any project files.
 
-    On `no`, exits cleanly. 
+    On `no`, exits cleanly.
 
 ## Implementation steps
 

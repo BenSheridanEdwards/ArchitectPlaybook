@@ -146,7 +146,7 @@ Layer 0 is informational only and has no status.
 
    On `yes`, writes `.architect-audits/performance-audit/implementation-plan.md` describing exactly which components to memoize, which lists to virtualize, which fetch sites to parallelise, which images to mark priority, and which monitoring primitives to wire up — ordered by Core Web Vitals impact (LCP-related and INP-related first, then CLS, then code-quality items). The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

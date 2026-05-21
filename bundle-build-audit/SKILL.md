@@ -131,7 +131,7 @@ Defaults in parentheses; every threshold overridable via flags. Checks marked **
 
    On `yes`, writes `.architect-audits/bundle-build-audit/implementation-plan.md` describing exactly which configuration entries to add, which dependencies to swap, which dynamic imports to introduce, and which continuous-integration steps to add — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

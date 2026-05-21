@@ -1,0 +1,50 @@
+{
+  "runStartedAt": "2026-05-21T22:53:56.102236Z",
+  "runFinishedAt": "2026-05-21T22:59:36.636224Z",
+  "repository": "BenSheridanEdwards/ArchitectPlaybook",
+  "gitCommit": "a709947335cc1129b97f13afbe5449ea48950f5a",
+  "graphifyRevision": null,
+  "mode": "static-inspector",
+  "skillName": "architecture-audit",
+  "skillVersion": "1.0.0",
+  "summary": "Architecture is coherent after the worktree-flag fix; executable contracts now preserve bootstrap truth, worktree flag semantics, skill shape, and audit report shape.",
+  "snapshot": {
+    "skillCount": 19,
+    "auditSkillCount": 14,
+    "graphifyPresent": false
+  },
+  "checks": [
+    {
+      "id": "architecture.skill-contracts",
+      "status": "present",
+      "expectation": "Every skill folder matches its slash command trigger and required body sections.",
+      "evidence": "scripts/validate-playbook.py enforces frontmatter, section, README index, and findings-file references.",
+      "gap": "None after this branch.",
+      "remediation": "Extend the validator whenever CLAUDE.md adds a repository rule."
+    },
+    {
+      "id": "architecture.bootstrap-truth",
+      "status": "present",
+      "expectation": "The README install flow works immediately after opening the cloned repository in Claude Code.",
+      "evidence": ".claude/skills/install-architect-playbook-globally/SKILL.md is committed as the bootstrap skill.",
+      "gap": "None after this branch.",
+      "remediation": "If the root installer changes, update the bootstrap copy in the same commit."
+    },
+    {
+      "id": "architecture.worktree-flag",
+      "status": "present",
+      "expectation": "Worktrees are a per-audit flag, not a separate slash command.",
+      "evidence": "CLAUDE.md and ARCHITECTURE.md define --worktree; validator blocks worktree/SKILL.md and requires --worktree in audit Usage.",
+      "gap": "None after this branch.",
+      "remediation": "Reject future branches that reintroduce /worktree without updating the architecture decision first."
+    },
+    {
+      "id": "architecture.graphify-dependency",
+      "status": "partial",
+      "expectation": "Pre-audit setup can build graphify-out/graph.json before deep architecture audits.",
+      "evidence": "graphify is not installed in this environment.",
+      "gap": "Graph centrality/community analysis could not run.",
+      "remediation": "Install graphify and rerun /pre-audit-setup for a higher-confidence architecture pass."
+    }
+  ]
+}

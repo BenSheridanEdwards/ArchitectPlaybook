@@ -160,7 +160,7 @@ Layer 0 is informational only and has no status.
 
    On `yes`, writes `.architect-audits/security-audit/implementation-plan.md` describing exactly which configuration entries to add (security headers, Content Security Policy directives, cookie flags), which source-level changes to make (sanitization wrapping, redirect allowlists, SRI hashes), and which third-party integrations to harden. The plan is ordered by **severity** rather than by layer, because security findings cross layers and the user wants to fix the highest-impact issues first.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

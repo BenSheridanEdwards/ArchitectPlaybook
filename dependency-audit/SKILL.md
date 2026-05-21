@@ -137,7 +137,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 
    On `yes`, writes `.architect-audits/dependency-audit/implementation-plan.md` describing exactly which packages to upgrade, which to remove, which to relocate between `dependencies` and `devDependencies`, which licenses to review with a human, and which continuous-integration steps to add. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

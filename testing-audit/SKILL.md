@@ -190,7 +190,7 @@ This layer encodes the testing philosophy stated above.
 
    On `yes`, writes `.architect-audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

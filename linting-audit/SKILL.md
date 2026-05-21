@@ -140,7 +140,7 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 
    On `yes`, writes `.architect-audits/linting-audit/implementation-plan.md` describing exactly which configuration entries to add or change, which plugins to install, which suppressions to clean up first (graph-prioritised when the graph is present), and which continuous-integration steps to tighten — ordered by layer. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

@@ -121,7 +121,7 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 
    On `yes`, writes `.architect-audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 
