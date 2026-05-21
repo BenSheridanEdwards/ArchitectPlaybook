@@ -119,7 +119,7 @@ Layer 0 is informational only and has no status. Layer 3 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/error-handling-audit/implementation-plan.md` describing exactly which catch blocks to fix, which network call sites to wrap, which React error boundaries to add, and which observability primitives to wire up — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

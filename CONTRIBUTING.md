@@ -53,6 +53,7 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - **Subject lines use the imperative present tense.** "Add X" not "Added X".
 - **No abbreviations.** Spell every word out: Documentation (not docs), Performance (not perf), Accessibility (not a11y), Configuration (not config in prose), Repository (not repo). Filenames may keep their canonical form (`.gitignore`, `tsconfig.json`).
 - **Stage files explicitly.** Avoid `git add -A` and `git add .` in committed examples and recommendations.
+- **Run the repository gates.** `python3 scripts/validate-playbook.py` is the canonical test suite for this Markdown skill repository. Run `python3 scripts/install-git-hooks.py` once per clone to install the local `commit-msg`, `pre-commit`, and `pre-push` hooks.
 - **Read-only by default.** Audits never mutate code. The only skill with an `--apply` mode is `/system-self-improve`, and it always prompts for explicit confirmation.
 - **No hard-coded absolute paths** in skill bodies. Derive from the current working directory or `$HOME`.
 - **The four-layer convention is non-negotiable.** Audits use four layers plus Layer 0. Variations are reserved for the meta layer (`/system-self-improve` uses four sequential stages instead of layers).

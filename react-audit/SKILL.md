@@ -146,7 +146,7 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

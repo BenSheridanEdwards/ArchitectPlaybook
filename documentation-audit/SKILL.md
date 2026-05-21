@@ -152,7 +152,7 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 
     On `yes`, writes `.architect-audits/documentation-audit/implementation-plan.md` describing exactly which documents to create, which sections to add to existing docs, which TODOs to address (or close), which links to fix, and which TSDoc/JSDoc blocks to write — ordered by audience: onboarding documentation first (newcomer experience matters most), then architectural and operational, then code-level, then drift cleanup. The plan does not modify any project files.
 
-    On `no`, exits cleanly. 
+    On `no`, exits cleanly.
 
 ## Implementation steps
 
