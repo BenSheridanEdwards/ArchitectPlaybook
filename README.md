@@ -2,6 +2,33 @@
 
 A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions with `--worktree`, fix what they find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
 
+## Audit types
+
+**[Quality Gates](quality-gates-audit/SKILL.md)** · **[Security](security-audit/SKILL.md)** · **[Accessibility](accessibility-audit/SKILL.md)** · **[Dependency Health](dependency-audit/SKILL.md)**
+
+**[Performance](performance-audit/SKILL.md)** · **[Architecture](architecture-audit/SKILL.md)** · **[Testing](testing-audit/SKILL.md)** · **[React](react-audit/SKILL.md)**
+
+**[Linting](linting-audit/SKILL.md)** · **[TypeScript](typescript-audit/SKILL.md)** · **[Bundle and Build Health](bundle-build-audit/SKILL.md)** · **[Error Handling](error-handling-audit/SKILL.md)**
+
+**[Documentation](documentation-audit/SKILL.md)** · **[Agentic Setup](agentic-audit/SKILL.md)**
+
+## Table of contents
+
+- [Audit types](#audit-types)
+- [Core principles](#core-principles)
+- [The workflow](#the-workflow)
+- [Flags](#flags)
+- [The findings-file contract](#the-findings-file-contract)
+- [How audits grade issues](#how-audits-grade-issues)
+- [The full skill list](#the-full-skill-list)
+  - [Setup utilities](#setup-utilities)
+  - [Audits](#audits)
+  - [Meta](#meta)
+- [Conventions](#conventions)
+- [Contributing](#contributing)
+- [License](#license)
+- [Related](#related)
+
 ## Core principles
 
 - **Opinionated baselines.** Each audit grades against a specific opinionated baseline, not whatever happens to be in the codebase.
