@@ -7,22 +7,21 @@ on:
 permissions:
   contents: read
 
+env:
+  RUNNER_TOOL_CACHE: /Users/agents/Agents/Shared/local-ci/toolcache
+  AGENT_TOOLSDIRECTORY: /Users/agents/Agents/Shared/local-ci/toolcache
+
 jobs:
   validate:
     name: Validate playbook
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, chief-mac-mini, ArchitectPlaybook]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Run validator tests
-        run: python3 -m unittest discover -s tests -p 'test_*.py'
+        run: /opt/homebrew/bin/python3 -m unittest discover -s tests -p 'test_*.py'
 
       - name: Run playbook validator
-        run: python3 scripts/validate-playbook.py
+        run: /opt/homebrew/bin/python3 scripts/validate-playbook.py
