@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RUNNER_TOOL_CACHE: /Users/agents/Agents/Shared/local-ci/toolcache
+  AGENT_TOOLSDIRECTORY: /Users/agents/Agents/Shared/local-ci/toolcache
+
 jobs:
   validate:
     name: Validate playbook
