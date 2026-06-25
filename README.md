@@ -9,6 +9,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - **Risk:** **[Security](security-audit/SKILL.md)** — app and browser security · **[Dependency Health](dependency-audit/SKILL.md)** — package and lockfile risk.
 - **Experience:** **[Accessibility](accessibility-audit/SKILL.md)** — WCAG and usability · **[Performance](performance-audit/SKILL.md)** — speed and rendering cost · **[Error Handling](error-handling-audit/SKILL.md)** — failure states and recovery.
 - **Code:** **[Architecture](architecture-audit/SKILL.md)** — boundaries and coupling · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
+- **Review:** **[Ben Architect Review](ben-architect-review/SKILL.md)** — principles-based architectural pull request reviews using Ben's judgement.
 - **Knowledge:** **[Documentation](documentation-audit/SKILL.md)** — docs and drift · **[Agentic Setup](agentic-audit/SKILL.md)** — agent instructions and safety rails.
 
 ## Table of contents
@@ -21,6 +22,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - [The full skill list](#the-full-skill-list)
   - [Setup utilities](#setup-utilities)
   - [Audits](#audits)
+  - [Review](#review)
   - [Meta](#meta)
 - [Conventions](#conventions)
 - [Contributing](#contributing)
@@ -151,6 +153,12 @@ Every audit also accepts the universal `--worktree`, `--learn`, and `--teach` fl
 | [`/error-handling-audit`](error-handling-audit/SKILL.md) | Error hygiene and observability. | — | Static-only by design; no enrichment flags. |
 | [`/documentation-audit`](documentation-audit/SKILL.md) | Documentation quality across multiple lenses. | `--with-link-check` | HEAD-check external URLs in documentation. |
 | [`/agentic-audit`](agentic-audit/SKILL.md) | Agentic instruction files (`CLAUDE.md`, `AGENTS.md`, Cursor rules) and `.claude/settings.json` hygiene. | — | Static-only audit; no enrichment flags. |
+
+### Review
+
+| Trigger | Purpose |
+| --- | --- |
+| [`/ben-architect-review`](ben-architect-review/SKILL.md) | Perform a principles-based architectural pull request review using Ben's judgement, then ask whether to post it as pending or submit it on GitHub. |
 
 ### Meta
 
