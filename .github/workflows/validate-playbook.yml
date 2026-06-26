@@ -7,10 +7,6 @@ on:
 permissions:
   contents: read
 
-env:
-  RUNNER_TOOL_CACHE: ${{ runner.tool_cache }}
-  AGENT_TOOLSDIRECTORY: ${{ runner.tool_cache }}
-
 jobs:
   validate:
     name: Validate playbook
