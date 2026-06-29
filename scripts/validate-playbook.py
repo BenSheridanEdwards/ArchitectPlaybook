@@ -9,6 +9,7 @@ installable, auditable, and safe to run in parallel sessions.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -23,6 +24,8 @@ REQUIRED_SECTIONS = (
     "What this skill explicitly does NOT do",
 )
 FINDINGS_FILES = ("findings.md", "findings.json", "snapshot.md", "metadata.json")
+CHECK_REQUIRED_FIELDS = ("checkId", "layer", "title", "expectation", "violationSignal")
+VALID_STATUSES = {"present", "partial", "missing", "violation"}
 IGNORED_SKILL_DIRECTORIES = {".git", ".claude", ".architect-audits", "scripts", "docs"}
 LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 HTML_ANCHOR_PATTERN = re.compile(r"<a\s+[^>]*name=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
@@ -166,6 +169,71 @@ def validate_audit_contract(skill_path: Path, body: str, findings: list[Finding]
             findings.append(Finding("error", skill_path, f"audit skill missing findings-file reference: {filename}"))
 
 
+def audit_layer_slugs(body: str) -> set[str]:
+    slugs: set[str] = set()
+    for line in body.splitlines():
+        match = re.match(r"^###\s+Layer\s+[1-4]\s+\S+\s+(.+?)\s*$", line)
+        if match:
+            slugs.add(github_anchor(match.group(1)))
+    return slugs
+
+
+def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
+    for directory in audit_directories(root):
+        checks_path = directory / "checks.json"
+        if not checks_path.exists():
+            continue
+        try:
+            data = json.loads(checks_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            findings.append(Finding("error", checks_path, f"checks.json is invalid JSON: {error.msg}"))
+            continue
+        if not isinstance(data, dict):
+            findings.append(Finding("error", checks_path, "checks.json root must be an object"))
+            continue
+        audit_name = directory.name
+        if data.get("skillName") != audit_name:
+            findings.append(Finding("error", checks_path, f"skillName must be {audit_name!r}"))
+        if data.get("humanCanonicalSource") != "SKILL.md":
+            findings.append(Finding("error", checks_path, "humanCanonicalSource must be 'SKILL.md'"))
+        status_taxonomy = data.get("statusTaxonomy")
+        if not isinstance(status_taxonomy, dict) or not VALID_STATUSES.issubset(status_taxonomy):
+            findings.append(Finding("error", checks_path, "statusTaxonomy must define present, partial, missing, and violation"))
+        checks = data.get("checks")
+        if not isinstance(checks, list) or not checks:
+            findings.append(Finding("error", checks_path, "checks must be a non-empty list"))
+            continue
+        skill_text = (directory / "SKILL.md").read_text(encoding="utf-8")
+        _, _, body = parse_frontmatter(skill_text)
+        layer_slugs = audit_layer_slugs(body)
+        seen_ids: set[str] = set()
+        for index, check in enumerate(checks, start=1):
+            if not isinstance(check, dict):
+                findings.append(Finding("error", checks_path, f"check {index} must be an object"))
+                continue
+            for field in CHECK_REQUIRED_FIELDS:
+                if not isinstance(check.get(field), str) or not check[field].strip():
+                    findings.append(Finding("error", checks_path, f"check {index} missing non-empty {field}"))
+            check_id = check.get("checkId")
+            if isinstance(check_id, str):
+                if not check_id.startswith(f"{audit_name}."):
+                    findings.append(Finding("error", checks_path, f"checkId must start with {audit_name}.: {check_id}"))
+                if check_id in seen_ids:
+                    findings.append(Finding("error", checks_path, f"duplicate checkId: {check_id}"))
+                seen_ids.add(check_id)
+            layer = check.get("layer")
+            if isinstance(layer, str) and layer not in layer_slugs:
+                findings.append(Finding("error", checks_path, f"unknown layer for {check_id or f'check {index}'}: {layer}"))
+            allowed_statuses = check.get("allowedStatuses")
+            if allowed_statuses is not None:
+                if not isinstance(allowed_statuses, list) or not all(isinstance(status, str) for status in allowed_statuses):
+                    findings.append(Finding("error", checks_path, f"allowedStatuses must be a list of strings for {check_id or f'check {index}'}"))
+                else:
+                    invalid = sorted(set(allowed_statuses) - VALID_STATUSES)
+                    if invalid:
+                        findings.append(Finding("error", checks_path, f"invalid allowedStatuses for {check_id}: {', '.join(invalid)}"))
+
+
 def validate_no_standalone_worktree(root: Path, findings: list[Finding]) -> None:
     worktree_skill = root / "worktree" / "SKILL.md"
     if worktree_skill.exists():
@@ -289,6 +357,7 @@ def main() -> int:
     root = args.root.resolve()
     findings: list[Finding] = []
     validate_skills(root, findings)
+    validate_check_metadata(root, findings)
     validate_no_standalone_worktree(root, findings)
     validate_readme_index(root, findings)
     validate_bootstrap_contract(root, findings)
