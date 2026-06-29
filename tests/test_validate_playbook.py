@@ -45,6 +45,30 @@ Reports findings.md, findings.json, snapshot.md, and metadata.json. It supports 
 It does not mutate the repository.
 """
 
+VALID_SKILL_WITH_LAYER = VALID_SKILL + "\n### Layer 1 - Test runner\n\n"
+
+VALID_CHECKS_JSON = """{
+  "schemaVersion": "1.0.0",
+  "skillName": "example-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "statusTaxonomy": {
+    "present": "Fully satisfied.",
+    "partial": "Partly satisfied.",
+    "missing": "Absent.",
+    "violation": "Broken."
+  },
+  "checks": [
+    {
+      "checkId": "example-audit.single-test-runner",
+      "layer": "test-runner",
+      "title": "Single test runner",
+      "expectation": "Exactly one test runner is configured.",
+      "violationSignal": "Multiple test runners are configured."
+    }
+  ]
+}
+"""
+
 
 class ValidatePlaybookTests(unittest.TestCase):
     def test_parse_frontmatter_reads_expected_keys_and_body(self) -> None:
@@ -99,6 +123,44 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_skills(root, findings)
             self.assertTrue(any("must not document internal --target" in finding.message for finding in findings))
+
+    def test_check_metadata_accepts_valid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+            (skill_dir / "checks.json").write_text(VALID_CHECKS_JSON, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_check_metadata_rejects_duplicate_ids_and_unknown_layers(self) -> None:
+        broken = VALID_CHECKS_JSON.replace('"test-runner"', '"missing-layer"')
+        broken = broken.replace(
+            "  ]\n}",
+            """,
+    {
+      "checkId": "example-audit.single-test-runner",
+      "layer": "test-runner",
+      "title": "Duplicate",
+      "expectation": "Unique identifiers are required.",
+      "violationSignal": "The identifier repeats."
+    }
+  ]
+}
+""",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+            (skill_dir / "checks.json").write_text(broken, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("duplicate checkId" in finding.message for finding in findings))
+            self.assertTrue(any("unknown layer" in finding.message for finding in findings))
 
     def test_markdown_links_ignore_code_fences(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
