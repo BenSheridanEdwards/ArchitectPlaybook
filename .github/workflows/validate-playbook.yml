@@ -1,0 +1,23 @@
+name: Validate playbook
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate playbook
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run validator tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Run playbook validator
+        run: python3 scripts/validate-playbook.py

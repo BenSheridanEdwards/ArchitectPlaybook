@@ -22,6 +22,7 @@ There is no graceful degradation. A misleading half-audit is worse than no audit
 
 ```
 /architecture-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/architecture-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /architecture-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /architecture-audit --teach                         # alias for --learn
 /architecture-audit --pattern=<feature-folders|layered|atomic-design|monorepo-workspaces|infer>  # override inferred architectural pattern
@@ -31,7 +32,7 @@ There is no graceful degradation. A misleading half-audit is worse than no audit
 /architecture-audit --threshold-fan-out=20          # override the default component fan-out threshold (default 15)
 ```
 
-**💡 Pro tip**: Use `/worktree architecture` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 This skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -120,7 +121,7 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 
    On `yes`, writes `.architect-audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

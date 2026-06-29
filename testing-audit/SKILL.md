@@ -69,6 +69,7 @@ The skill **never modifies any test, configuration, or source file**, and **neve
 
 ```
 /testing-audit                                    # default: concise Top 5 + full report saved + ask about plan
+/testing-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /testing-audit --learn                            # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /testing-audit --teach                            # alias for --learn
 /testing-audit --with-run                         # static plus enrichment from Vitest/Jest coverage run
@@ -79,7 +80,7 @@ The skill **never modifies any test, configuration, or source file**, and **neve
 /testing-audit --threshold-snapshot-lines=50      # override default 100 (lines, ceiling for partial)
 ```
 
-**💡 Pro tip**: Use `/worktree testing` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -189,7 +190,7 @@ This layer encodes the testing philosophy stated above.
 
    On `yes`, writes `.architect-audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

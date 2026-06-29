@@ -9,9 +9,18 @@ Thumbs.db
 # Local Claude Code state created when this playbook is itself audited
 .claude/settings.local.json
 .claude/skills/*
-!.claude/skills/install-architect-playbook-globally
+!.claude/skills/install-architect-playbook-globally/
+!.claude/skills/install-architect-playbook-globally/**
 graphify-out/
 .architect-audits/*
+!.architect-audits/pre-audit-setup/
+!.architect-audits/pre-audit-setup/**
+!.architect-audits/quality-gates-audit/
+!.architect-audits/quality-gates-audit/**
+!.architect-audits/testing-audit/
+!.architect-audits/testing-audit/**
+!.architect-audits/architecture-audit/
+!.architect-audits/architecture-audit/**
 
 # Node and package-manager output (in case a future skill produces any)
 node_modules/

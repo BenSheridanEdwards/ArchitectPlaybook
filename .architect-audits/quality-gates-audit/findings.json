@@ -1,0 +1,66 @@
+{
+  "runStartedAt": "2026-05-21T22:53:56.102236Z",
+  "runFinishedAt": "2026-05-21T22:59:36.636224Z",
+  "repository": "BenSheridanEdwards/ArchitectPlaybook",
+  "gitCommit": "a709947335cc1129b97f13afbe5449ea48950f5a",
+  "graphifyRevision": null,
+  "mode": "static-inspector",
+  "skillName": "quality-gates-audit",
+  "skillVersion": "1.0.0",
+  "summary": "Quality gates are implemented for this Markdown skill repository through validator tests, a standard-library repository validator, local Git hook templates, a hook installer, and GitHub Actions.",
+  "snapshot": {
+    "skillCount": 19,
+    "auditSkillCount": 14,
+    "graphifyPresent": false
+  },
+  "checks": [
+    {
+      "id": "quality.validator",
+      "status": "present",
+      "expectation": "Repository has an executable validation command.",
+      "evidence": "scripts/validate-playbook.py validates frontmatter, skill index, bootstrap contract, markdown links, worktree flag contract, and whitespace.",
+      "gap": "None after this branch.",
+      "remediation": "Run python3 scripts/validate-playbook.py locally and in continuous integration."
+    },
+    {
+      "id": "quality.local-hooks",
+      "status": "present",
+      "expectation": "Local pre-commit, pre-push, and commit-message gates exist without requiring Node tooling.",
+      "evidence": "scripts/git-hooks/pre-commit, pre-push, commit-msg plus scripts/install-git-hooks.py.",
+      "gap": "Contributors must install hooks once per clone.",
+      "remediation": "Run python3 scripts/install-git-hooks.py after cloning."
+    },
+    {
+      "id": "quality.continuous-integration",
+      "status": "present",
+      "expectation": "Pull requests and pushes rerun validation on a clean checkout.",
+      "evidence": ".github/workflows/validate-playbook.yml runs python3 scripts/validate-playbook.py.",
+      "gap": "None after this branch.",
+      "remediation": "Watch the Validate playbook workflow on the pull request."
+    },
+    {
+      "id": "quality.conventional-commits",
+      "status": "present",
+      "expectation": "Commit subjects are machine-parseable Conventional Commits.",
+      "evidence": "scripts/validate-commit-message.py and scripts/git-hooks/commit-msg enforce allowed types.",
+      "gap": "GitHub Actions does not yet check pull request titles.",
+      "remediation": "Optional follow-up: add pull request title validation."
+    },
+    {
+      "id": "testing.validator-unit-tests",
+      "status": "present",
+      "expectation": "Validator behavior has direct tests and CI runs them.",
+      "evidence": "tests/test_validate_playbook.py covers frontmatter parsing, valid repository acceptance, missing sections, standalone worktree rejection, hidden --target rejection, code-fence link ignoring, and current-repository CLI acceptance.",
+      "gap": "None after this branch.",
+      "remediation": "Run python3 -m unittest discover -s tests -p 'test_*.py'."
+    },
+    {
+      "id": "quality.hook-installer-safety",
+      "status": "present",
+      "expectation": "Local hook installation does not silently destroy contributor hooks and works from linked worktrees.",
+      "evidence": "scripts/install-git-hooks.py resolves hooks with git rev-parse --git-path hooks, refuses to overwrite different existing hooks unless --force is passed, and writes a .architect-playbook-backup copy before replacement.",
+      "gap": "None after this branch.",
+      "remediation": "Run python3 scripts/install-git-hooks.py; use --force only after reviewing existing hooks."
+    }
+  ]
+}

@@ -36,6 +36,7 @@ The skill never modifies any documentation, source, or configuration file.
 
 ```
 /documentation-audit                                # default: concise Top 5 + full report saved + ask about plan
+/documentation-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /documentation-audit --learn                        # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /documentation-audit --teach                        # alias for --learn
 /documentation-audit --with-link-check              # static plus HEAD-checks of external URLs
@@ -47,7 +48,7 @@ The skill never modifies any documentation, source, or configuration file.
 /documentation-audit --threshold-doc-staleness-days=365     # override default 180
 ```
 
-**💡 Pro tip**: Use `/worktree documentation` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -151,7 +152,7 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 
     On `yes`, writes `.architect-audits/documentation-audit/implementation-plan.md` describing exactly which documents to create, which sections to add to existing docs, which TODOs to address (or close), which links to fix, and which TSDoc/JSDoc blocks to write — ordered by audience: onboarding documentation first (newcomer experience matters most), then architectural and operational, then code-level, then drift cleanup. The plan does not modify any project files.
 
-    On `no`, exits cleanly. 
+    On `no`, exits cleanly.
 
 ## Implementation steps
 

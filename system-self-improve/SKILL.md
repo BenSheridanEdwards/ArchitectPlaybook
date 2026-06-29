@@ -58,7 +58,7 @@ This is the only skill in the playbook with a meaningful `--apply` mode. Two mod
 
 The skill never accepts any flag that bypasses the confirmation prompt under `--apply`. It also never operates on a target project's source files; it only reads gap reports and edits the playbook clone.
 
-**💡 Pro tip**: Use `/worktree system-self-improve` to run this against a Git worktree of the playbook (creates the worktree and runs the meta-improve pass in this same chat). Useful for staging proposed edits on a separate branch before merging into `main`.
+**💡 Pro tip**: Create a normal Git worktree for playbook edits before running `/system-self-improve`. Worktrees are no longer a separate slash command; audits expose them with `--worktree`, while this meta skill should be run from the checkout you want to edit.
 
 ## The four stages plus Layer 0
 

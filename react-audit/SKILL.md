@@ -41,11 +41,12 @@ If the user wants a fresh real-run capture of hook violations, `/linting-audit -
 
 ```
 /react-audit                                      # default: concise Top 5 + full report saved + ask about plan
+/react-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /react-audit --learn                              # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /react-audit --teach                              # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree react` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -145,7 +146,7 @@ Layer 0 is informational only and has no status. Layer 4 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

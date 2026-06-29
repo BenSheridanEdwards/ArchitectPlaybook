@@ -20,11 +20,12 @@ The actual errors happening in production belong to **observability**, not to an
 
 ```
 /error-handling-audit                             # default: concise Top 5 + full report saved + ask about plan
+/error-handling-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /error-handling-audit --learn                     # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /error-handling-audit --teach                     # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree error-handling` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -118,7 +119,7 @@ Layer 0 is informational only and has no status. Layer 3 reports `skipped: "reac
 
    On `yes`, writes `.architect-audits/error-handling-audit/implementation-plan.md` describing exactly which catch blocks to fix, which network call sites to wrap, which React error boundaries to add, and which observability primitives to wire up — ordered by layer and then by severity. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

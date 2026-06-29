@@ -8,17 +8,18 @@ trigger: /quality-gates-audit
 
 Compare the current project against an opinionated baseline of quality gates organised by lifecycle stage (pre-commit, pre-push, continuous integration), report what is present, missing, or misconfigured, and then offer to generate an implementation plan for closing the gaps. The skill is read-only — it never modifies the project. The implementation plan is a Markdown document, not an applied change set.
 
-The default mental model is a TypeScript and React frontend project. The detection logic is structured per ecosystem so it can be extended later, but the baked-in baseline below assumes Node.js and the npm-style tooling family.
+The default mental model is a TypeScript and React frontend project, but the audit must not hard-stop when a repository is a Markdown skill repository like ArchitectPlaybook. If `package.json` is absent, switch to documentation-or-skill-repository mode and audit executable repository contracts instead: skill validation, Markdown link integrity, bootstrap install truth, local Git hooks, Conventional Commit enforcement, and continuous integration validation.
 
 ## Usage
 
 ```
 /quality-gates-audit                            # default: concise Top 5 + full report saved + ask about plan
+/quality-gates-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /quality-gates-audit --learn                    # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /quality-gates-audit --teach                    # alias for --learn
 ```
 
-**💡 Pro tip**: Use `/worktree quality-gates` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 This skill never accepts `--apply`. Applying a plan is a separate concern — the user reviews the generated `implementation-plan.md` and either implements it manually or runs a fix-oriented skill against it.
 
@@ -64,7 +65,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
 ## What this skill does
 
 1. **Reads the knowledge graph first.** If `graphify-out/graph.json` exists, read `graphify-out/GRAPH_REPORT.md` to orient before searching raw files. The PreToolUse hook installed by `/pre-audit-setup` reminds you of this on every Glob and Grep — respect it.
-2. **Detects ecosystem.** Confirms a Node.js project by checking for `package.json`. If absent, the skill stops and tells the user it currently supports Node.js only.
+2. **Detects ecosystem.** Checks `package.json` for Node.js projects. If absent, switches to documentation-or-skill-repository mode instead of stopping, then audits repository-native gates such as validators, Markdown link checks, local Git hooks, Conventional Commit enforcement, bootstrap install truth, and continuous integration workflows.
 3. **Enumerates gates.** Walks the baseline above, applying any `--stage`, `--include`, or `--exclude` filters.
 4. **Resolves each gate's status** by inspecting the project for the signals listed in the baseline tables. Never executes any gate — this is a static audit.
 5. **Writes phase 1 outputs** to `.architect-audits/quality-gates-audit/`:
@@ -78,18 +79,32 @@ The skill audits against this exact list. A gate is **present** if every detecti
 
    On `yes`, writes `.architect-audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 
 ### Step 1 — Confirm the working directory and graph
 
 ```bash
-test -f package.json || { echo "quality-gates-audit: no package.json detected. This skill currently supports Node.js projects only."; exit 1; }
+if test -f package.json; then
+  echo "ecosystem: node"
+elif test -d .claude || test -f CLAUDE.md || ls */SKILL.md >/dev/null 2>&1; then
+  echo "ecosystem: documentation-or-skill-repository"
+else
+  echo "ecosystem: unknown-static"
+fi
 test -f graphify-out/graph.json && echo "graphify: knowledge graph present" || echo "graphify: knowledge graph missing — run /pre-audit-setup first for richer context"
 ```
 
 The skill does not require the knowledge graph, but the audit is more accurate when it exists. If absent, recommend running `/pre-audit-setup` and continue with reduced confidence.
+
+When `package.json` is absent, do **not** stop. Switch to documentation-or-skill-repository mode and resolve quality gates against repository-native signals:
+
+- Executable validator scripts, for example `scripts/validate-playbook.py`.
+- Local Git hook templates and an installer, for example `scripts/git-hooks/*` and `scripts/install-git-hooks.py`.
+- Conventional Commit validation, for example `scripts/validate-commit-message.py` plus a `commit-msg` hook.
+- Continuous integration workflows that run the repository validator.
+- README/bootstrap claims that are validated by automation.
 
 ### Step 2 — Detect the package manager and hook runner
 
@@ -216,7 +231,7 @@ The plan is descriptive, not executable. It does not run the install commands an
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `no package.json detected` | The skill is being run outside a Node.js project root. | Change directory into the project root and re-run. |
+| `no package.json detected` | The repository is not a Node.js project, or the command is being run from the wrong directory. | If the repository has `SKILL.md`, `CLAUDE.md`, or `.claude/`, switch to documentation-or-skill-repository mode; otherwise change directory into the project root and re-run. |
 | Workflow file present but cannot be parsed | Malformed YAML, or a templating system the skill does not understand. | Treat every gate that depends on workflow detection as `misconfigured` and record the parse error in the gate's evidence field. Do not crash. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue, but tag every gate's evidence with a `noGraphify: true` flag so the user knows the audit ran with reduced context. |
 | Monorepo with multiple workspaces | One `package.json` at the root plus several inside `packages/*` or `apps/*`. | Resolve the root manager and root-level gates as usual. Recommend a follow-up audit per workspace and surface the recommendation in `findings.md`. |

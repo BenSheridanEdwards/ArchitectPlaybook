@@ -19,7 +19,7 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - Purpose paragraph.
    - "How this differs from neighbouring skills" with a verbatim boundary table mapping cross-cutting concerns to their owning skill.
    - Posture statement (static-only, static-with-`--with-X`, etc.).
-   - `## Usage` with the slash command and its flags. Every audit uses the standard format: default, `--learn`, `--teach`, plus any audit-specific flags. End with the worktree Pro Tip: `**💡 Pro tip**: Use '/worktree <short-name>' to run this in an isolated worktree.`
+   - `## Usage` with the slash command and its flags. Every audit uses the standard format: default, `--worktree`, `--learn`, `--teach`, plus any audit-specific flags. End with the worktree Pro Tip: "**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree."
    - The opinionated baseline organised in **four layers plus a Layer 0 diagnostic snapshot**. Layer 0 is informational only and has no status; layers 1–4 grade against the four-status taxonomy (`present | partial | missing | violation`).
    - "What this skill does" — a numbered walk through the skill's behaviour.
    - "Implementation steps" — the concrete steps Claude follows when invoked.
@@ -53,6 +53,7 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - **Subject lines use the imperative present tense.** "Add X" not "Added X".
 - **No abbreviations.** Spell every word out: Documentation (not docs), Performance (not perf), Accessibility (not a11y), Configuration (not config in prose), Repository (not repo). Filenames may keep their canonical form (`.gitignore`, `tsconfig.json`).
 - **Stage files explicitly.** Avoid `git add -A` and `git add .` in committed examples and recommendations.
+- **Run the repository gates.** `python3 scripts/validate-playbook.py` is the canonical test suite for this Markdown skill repository. Run `python3 scripts/install-git-hooks.py` once per clone to install the local `commit-msg`, `pre-commit`, and `pre-push` hooks.
 - **Read-only by default.** Audits never mutate code. The only skill with an `--apply` mode is `/system-self-improve`, and it always prompts for explicit confirmation.
 - **No hard-coded absolute paths** in skill bodies. Derive from the current working directory or `$HOME`.
 - **The four-layer convention is non-negotiable.** Audits use four layers plus Layer 0. Variations are reserved for the meta layer (`/system-self-improve` uses four sequential stages instead of layers).
@@ -63,7 +64,7 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - [ ] SKILL.md follows the canonical body structure.
 - [ ] README skill index has a row for the skill in the right sub-table.
 - [ ] README "Why each skill exists" has a 2–3 sentence entry.
-- [ ] `--target=<path>` flag is supported (audits only) and the target-resolution paragraph plus worktree Pro Tip are in place.
+- [ ] `--worktree` is documented as the user-facing worktree control; `--target=<path>` remains internal-only and undocumented in the Usage table.
 - [ ] No abbreviations introduced anywhere.
 - [ ] Conventional Commits subject on every commit in the branch.
 - [ ] If the change touches behaviour shared across skills (boundary tables, status taxonomy, two-phase flow), the change has been justified in an ADR under `docs/decisions/` or via `/system-self-improve` with a real gap report.

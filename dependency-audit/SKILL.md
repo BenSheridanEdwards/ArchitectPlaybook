@@ -35,6 +35,7 @@ The skill detects which tier is available and records it in the diagnostic snaps
 
 ```
 /dependency-audit                                 # default: concise Top 5 + full report saved + ask about plan
+/dependency-audit --worktree                          # create an isolated Git worktree, then run the audit there
 /dependency-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
 /dependency-audit --teach                         # alias for --learn
 /dependency-audit --with-network                  # tier 3: enrich with audit and outdated registry data
@@ -43,7 +44,7 @@ The skill detects which tier is available and records it in the diagnostic snaps
 /dependency-audit --security-critical-packages=react,next,@remix-run/react  # override the default critical-package list
 ```
 
-**💡 Pro tip**: Use `/worktree dependency` to run this in an isolated worktree.
+**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
 
 The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
 
@@ -136,7 +137,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 
    On `yes`, writes `.architect-audits/dependency-audit/implementation-plan.md` describing exactly which packages to upgrade, which to remove, which to relocate between `dependencies` and `devDependencies`, which licenses to review with a human, and which continuous-integration steps to add. The plan does not modify any project files.
 
-   On `no`, exits cleanly. 
+   On `no`, exits cleanly.
 
 ## Implementation steps
 

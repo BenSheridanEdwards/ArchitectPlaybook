@@ -1,0 +1,58 @@
+{
+  "runStartedAt": "2026-05-21T22:53:56.102236Z",
+  "runFinishedAt": "2026-05-21T22:59:36.636224Z",
+  "repository": "BenSheridanEdwards/ArchitectPlaybook",
+  "gitCommit": "a709947335cc1129b97f13afbe5449ea48950f5a",
+  "graphifyRevision": null,
+  "mode": "static-inspector",
+  "skillName": "testing-audit",
+  "skillVersion": "1.0.0",
+  "summary": "Testing is implemented as validator behavior tests plus executable repository-contract validation, matching ArchitectPlaybook\u2019s Markdown skill corpus instead of pretending it is an app framework project.",
+  "snapshot": {
+    "skillCount": 19,
+    "auditSkillCount": 14,
+    "graphifyPresent": false
+  },
+  "checks": [
+    {
+      "id": "testing.repository-contracts",
+      "status": "present",
+      "expectation": "Skill contracts and README index are executable tests.",
+      "evidence": "scripts/validate-playbook.py scans all top-level SKILL.md files and README links.",
+      "gap": "None after this branch.",
+      "remediation": "Keep validator checks close to CLAUDE.md rules."
+    },
+    {
+      "id": "testing.worktree-contract",
+      "status": "present",
+      "expectation": "Worktrees are a flag on each audit, not a standalone slash command.",
+      "evidence": "Validator fails if worktree/SKILL.md exists or audit Usage omits /<audit> --worktree.",
+      "gap": "None after this branch.",
+      "remediation": "Leave standalone worktree helpers out unless the architecture docs change first."
+    },
+    {
+      "id": "testing.bootstrap-contract",
+      "status": "present",
+      "expectation": "README bootstrap claim matches committed files.",
+      "evidence": ".claude/skills/install-architect-playbook-globally/SKILL.md is committed and validator checks it.",
+      "gap": "None after this branch.",
+      "remediation": "Keep bootstrap installer synchronized with the root installer skill."
+    },
+    {
+      "id": "testing.validator-unit-tests",
+      "status": "present",
+      "expectation": "Validator behavior has direct tests and CI runs them.",
+      "evidence": "tests/test_validate_playbook.py covers frontmatter parsing, valid repository acceptance, missing sections, standalone worktree rejection, hidden --target rejection, code-fence link ignoring, and current-repository CLI acceptance.",
+      "gap": "None after this branch.",
+      "remediation": "Run python3 -m unittest discover -s tests -p 'test_*.py'."
+    },
+    {
+      "id": "quality.hook-installer-safety",
+      "status": "present",
+      "expectation": "Local hook installation does not silently destroy contributor hooks and works from linked worktrees.",
+      "evidence": "scripts/install-git-hooks.py resolves hooks with git rev-parse --git-path hooks, refuses to overwrite different existing hooks unless --force is passed, and writes a .architect-playbook-backup copy before replacement.",
+      "gap": "None after this branch.",
+      "remediation": "Run python3 scripts/install-git-hooks.py; use --force only after reviewing existing hooks."
+    }
+  ]
+}
