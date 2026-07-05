@@ -33,3 +33,8 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+
+# Claude Code agent tooling (GitNexus index, Graphify output, local settings)
+.gitnexus/
+!.claude/skills/gitnexus/
+!.claude/skills/gitnexus/**
