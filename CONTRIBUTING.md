@@ -79,3 +79,11 @@ If you find a gap in an existing audit but don't want to run the full self-impro
 - A minimal repro if possible.
 
 Gaps reported this way feed directly into `/system-self-improve --gap` later.
+
+## Licensing of contributions
+
+Unless you explicitly state otherwise, any contribution you intentionally
+submit for inclusion in this project shall be licensed under the MIT
+License (see the LICENSE file), without any additional terms or
+conditions, and you confirm that you have the right to submit it under
+that license.
