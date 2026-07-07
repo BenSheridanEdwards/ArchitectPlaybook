@@ -2,6 +2,7 @@ name: Validate playbook
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
 
 permissions:
@@ -21,3 +22,36 @@ jobs:
 
       - name: Run playbook validator
         run: python3 scripts/validate-playbook.py
+
+  pr-contract:
+    name: Pull-request contract
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate pull-request title and body
+        env:
+          PR_TITLE: ${{ toJSON(github.event.pull_request.title) }}
+          PR_BODY: ${{ toJSON(github.event.pull_request.body) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          # The title and body arrive JSON-encoded via toJSON so untrusted text
+          # is never interpolated into this script. Decode them here and pass
+          # them to the validator through the environment.
+          title = json.loads(os.environ["PR_TITLE"])
+          body = json.loads(os.environ["PR_BODY"]) or ""
+          environment = dict(os.environ, PR_TITLE=title, PR_BODY=body)
+          result = subprocess.run(
+              [sys.executable, "scripts/validate_pr_body.py"],
+              env=environment,
+          )
+          sys.exit(result.returncode)
+          PY
