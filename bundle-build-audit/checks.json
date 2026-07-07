@@ -1,0 +1,233 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "bundle-build-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of bundle-and-build audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or a stats-required check runs without stats input.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete configuration or output breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-stats",
+      "description": "Consume a build-stats file so size and build-time checks can measure real output instead of degrading to partial."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-initial-bundle",
+    "--threshold-total-bundle",
+    "--threshold-build-time",
+    "--threshold-incremental-build-time"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "performance-audit",
+      "relationship": "Owns runtime and rendering cost; this audit owns build output and bundle size."
+    },
+    {
+      "audit": "dependency-audit",
+      "relationship": "Owns dependency health; duplicate-package detection overlaps."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "bundle-build-audit.build-tool-present-and-pinned",
+      "layer": "build-configuration-soundness",
+      "title": "Build tool present and pinned",
+      "expectation": "A build tool is installed and its version is pinned in package.json.",
+      "violationSignal": "The build tool is missing, or pinned with a caret or tilde range."
+    },
+    {
+      "checkId": "bundle-build-audit.browserslist-explicit",
+      "layer": "build-configuration-soundness",
+      "title": "Browserslist explicit",
+      "expectation": "A browserslist field exists in package.json, or a .browserslistrc file is present.",
+      "violationSignal": "No browserslist configuration anywhere."
+    },
+    {
+      "checkId": "bundle-build-audit.production-mode-enforced",
+      "layer": "build-configuration-soundness",
+      "title": "Production mode enforced",
+      "expectation": "The build script invokes the framework's production-build command and continuous integration runs it with NODE_ENV=production.",
+      "violationSignal": "NODE_ENV is not set, or the build script invokes a development command."
+    },
+    {
+      "checkId": "bundle-build-audit.source-maps-configured-deliberately",
+      "layer": "build-configuration-soundness",
+      "title": "Source maps configured deliberately",
+      "expectation": "Production builds emit source maps in an explicitly chosen mode.",
+      "violationSignal": "No source-map configuration whatsoever; the build tool's default is silently in use."
+    },
+    {
+      "checkId": "bundle-build-audit.build-output-ignored-from-git",
+      "layer": "build-configuration-soundness",
+      "title": "Build output ignored from git",
+      "expectation": "The build output directory is in .gitignore.",
+      "violationSignal": "Build output is committed or not ignored."
+    },
+    {
+      "checkId": "bundle-build-audit.production-dependencies-separated",
+      "layer": "build-configuration-soundness",
+      "title": "Production dependencies separated",
+      "expectation": "No development-only packages appear in dependencies.",
+      "violationSignal": "Development packages in dependencies."
+    },
+    {
+      "checkId": "bundle-build-audit.deterministic-build",
+      "layer": "build-configuration-soundness",
+      "title": "Deterministic build",
+      "expectation": "The build script does not depend on environment-specific flags or interactive input.",
+      "violationSignal": "Scripts containing --watch, interactive prompts, or non-deterministic timestamps in output filenames."
+    },
+    {
+      "checkId": "bundle-build-audit.initial-bundle-size-budget",
+      "layer": "bundle-composition-and-size",
+      "title": "Initial bundle size budget",
+      "expectation": "The initial JavaScript payload is under the threshold.",
+      "violationSignal": "The initial payload exceeds the threshold.",
+      "thresholdFlag": "--threshold-initial-bundle",
+      "enrichmentFlags": ["--with-stats"],
+      "allowedStatuses": ["present", "partial", "missing", "violation"]
+    },
+    {
+      "checkId": "bundle-build-audit.total-bundle-size-budget",
+      "layer": "bundle-composition-and-size",
+      "title": "Total bundle size budget",
+      "expectation": "The full client-side JavaScript payload across all chunks is under the threshold.",
+      "violationSignal": "The total exceeds the threshold.",
+      "thresholdFlag": "--threshold-total-bundle",
+      "enrichmentFlags": ["--with-stats"],
+      "allowedStatuses": ["present", "partial", "missing", "violation"]
+    },
+    {
+      "checkId": "bundle-build-audit.route-level-code-splitting",
+      "layer": "bundle-composition-and-size",
+      "title": "Route-level code splitting",
+      "expectation": "The build splits per route or per page.",
+      "violationSignal": "Single-bundle output, or the framework's automatic route-splitting has been turned off."
+    },
+    {
+      "checkId": "bundle-build-audit.no-duplicate-dependencies",
+      "layer": "bundle-composition-and-size",
+      "title": "No duplicate dependencies",
+      "expectation": "Each dependency appears exactly once in the bundle.",
+      "violationSignal": "Multiple copies detected in stats, or multiple incompatible major versions in the lockfile.",
+      "relatedAudits": ["dependency-audit"]
+    },
+    {
+      "checkId": "bundle-build-audit.large-library-hygiene",
+      "layer": "bundle-composition-and-size",
+      "title": "Large-library hygiene",
+      "expectation": "Large libraries are imported with named imports or per-method paths so tree-shaking can remove what is unused.",
+      "violationSignal": "Namespace or default imports of large libraries in source."
+    },
+    {
+      "checkId": "bundle-build-audit.dynamic-imports-for-heavy-features",
+      "layer": "bundle-composition-and-size",
+      "title": "Dynamic imports for heavy features",
+      "expectation": "Heavy non-critical features are loaded with React.lazy or framework-equivalent dynamic imports.",
+      "violationSignal": "Heavy libraries imported synchronously at the top level of an entry-reachable module."
+    },
+    {
+      "checkId": "bundle-build-audit.no-development-only-code-in-production",
+      "layer": "bundle-composition-and-size",
+      "title": "No development-only code in production",
+      "expectation": "No unguarded console.log, DevTools shim, or debug-only code path is reachable in production builds.",
+      "violationSignal": "Such patterns present without an environment guard, or detected in built output when stats are available."
+    },
+    {
+      "checkId": "bundle-build-audit.image-optimisation",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "Image optimisation",
+      "expectation": "Images use modern formats where the framework supports them, and the framework's image primitive is used.",
+      "violationSignal": "Multi-megabyte PNGs or JPEGs in public assets, or a framework project not using its image primitive for content imagery."
+    },
+    {
+      "checkId": "bundle-build-audit.font-handling",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "Font handling",
+      "expectation": "Fonts are subset, self-hosted or served with font-display: swap, and preloaded for above-the-fold text.",
+      "violationSignal": "Loading entire web-font families with no font-display, or sourcing fonts from a script-blocking external host."
+    },
+    {
+      "checkId": "bundle-build-audit.css-extraction",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "CSS extraction",
+      "expectation": "CSS is extracted into separate files in production builds, except above-the-fold critical CSS.",
+      "violationSignal": "A CSS-in-JS configuration that ships styles inside JS chunks unconditionally without extraction."
+    },
+    {
+      "checkId": "bundle-build-audit.static-assets-cacheable",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "Static assets cacheable",
+      "expectation": "Build output produces hashed filenames so long-cache headers can be set safely.",
+      "violationSignal": "Filenames without content hashes."
+    },
+    {
+      "checkId": "bundle-build-audit.no-vendored-dependencies",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "No vendored dependencies",
+      "expectation": "No copies of third-party packages live under src/ or vendor/.",
+      "violationSignal": "Files matching the signature of a known package present in src/."
+    },
+    {
+      "checkId": "bundle-build-audit.side-effects-field-declared",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "sideEffects field declared",
+      "expectation": "package.json declares a sideEffects field so tree-shaking can remove unused exports.",
+      "violationSignal": "The sideEffects field is absent."
+    },
+    {
+      "checkId": "bundle-build-audit.bundle-analyser-available",
+      "layer": "asset-and-dependency-hygiene",
+      "title": "Bundle analyser available",
+      "expectation": "A bundle-analysis tool is installed and runnable.",
+      "violationSignal": "No bundle-analysis tool present."
+    },
+    {
+      "checkId": "bundle-build-audit.build-cache-enabled",
+      "layer": "build-performance",
+      "title": "Build cache enabled",
+      "expectation": "The build tool's cache is enabled.",
+      "violationSignal": "The cache is disabled or configured to a discarded location."
+    },
+    {
+      "checkId": "bundle-build-audit.typescript-incremental-mode",
+      "layer": "build-performance",
+      "title": "TypeScript incremental mode",
+      "expectation": "tsconfig.json has incremental: true, or the project uses composite project references.",
+      "violationSignal": "Neither is enabled."
+    },
+    {
+      "checkId": "bundle-build-audit.continuous-integration-cache",
+      "layer": "build-performance",
+      "title": "Continuous-integration cache",
+      "expectation": "The continuous-integration workflow caches the package-manager store and the build cache between runs.",
+      "violationSignal": "No cache step, or a cache key not derived from the lockfile hash."
+    },
+    {
+      "checkId": "bundle-build-audit.bundle-size-budget-enforced-in-continuous-integration",
+      "layer": "build-performance",
+      "title": "Bundle-size budget enforced in continuous integration",
+      "expectation": "A bundle-size check runs in continuous integration and fails the build when the budget is exceeded.",
+      "violationSignal": "No such step detected.",
+      "relatedAudits": ["performance-audit"]
+    },
+    {
+      "checkId": "bundle-build-audit.build-time-budget",
+      "layer": "build-performance",
+      "title": "Build-time budget",
+      "expectation": "Reported clean-build and incremental-rebuild times are under their thresholds.",
+      "violationSignal": "Measurements exceed the thresholds.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-build-time",
+      "enrichmentFlags": ["--with-stats"],
+      "allowedStatuses": ["present", "partial", "missing", "violation"]
+    }
+  ]
+}

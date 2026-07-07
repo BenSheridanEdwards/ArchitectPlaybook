@@ -172,9 +172,13 @@ def validate_audit_contract(skill_path: Path, body: str, findings: list[Finding]
 def audit_layer_slugs(body: str) -> set[str]:
     slugs: set[str] = set()
     for line in body.splitlines():
-        match = re.match(r"^###\s+Layer\s+[1-4]\s+\S+\s+(.+?)\s*$", line)
-        if match:
-            slugs.add(github_anchor(match.group(1)))
+        layer_match = re.match(r"^###\s+Layer\s+[1-4]\s+\S+\s+(.+?)\s*$", line)
+        if layer_match:
+            slugs.add(github_anchor(layer_match.group(1)))
+            continue
+        stage_match = re.match(r"^###\s+Stage\s+[0-9]+\s+\S+\s+(.+?)\s*(?:\(|$)", line)
+        if stage_match:
+            slugs.add(github_anchor(stage_match.group(1)))
     return slugs
 
 

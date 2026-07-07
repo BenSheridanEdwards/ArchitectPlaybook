@@ -1,0 +1,318 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "typescript-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of TypeScript audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete code or configuration breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-run",
+      "description": "Run tsc --noEmit and use the compiler output to enrich the static findings."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-any-per-file",
+    "--threshold-as-per-file",
+    "--threshold-non-null-assertion-per-file",
+    "--threshold-conditional-type-depth"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "error-handling-audit",
+      "relationship": "Owns error redaction and catch-variable typing; useUnknownInCatchVariables overlaps."
+    },
+    {
+      "audit": "react-audit",
+      "relationship": "Owns component and form-level patterns; state-machine and form-validation checks overlap."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "typescript-audit.strict-true",
+      "layer": "compiler-configuration",
+      "title": "strict: true",
+      "expectation": "The strict family is enabled wholesale via the strict flag.",
+      "violationSignal": "strict is false, or strict is absent and individual strict-family flags are missing."
+    },
+    {
+      "checkId": "typescript-audit.no-unchecked-indexed-access",
+      "layer": "compiler-configuration",
+      "title": "noUncheckedIndexedAccess enabled",
+      "expectation": "noUncheckedIndexedAccess distinguishes array[i]: T from array[i]: T | undefined.",
+      "violationSignal": "The flag is missing or false."
+    },
+    {
+      "checkId": "typescript-audit.exact-optional-property-types",
+      "layer": "compiler-configuration",
+      "title": "exactOptionalPropertyTypes enabled",
+      "expectation": "exactOptionalPropertyTypes distinguishes prop?: T from prop: T | undefined.",
+      "violationSignal": "The flag is missing or false.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.no-implicit-returns",
+      "layer": "compiler-configuration",
+      "title": "noImplicitReturns enabled",
+      "expectation": "noImplicitReturns catches functions that fall off the end without returning when their type says they should.",
+      "violationSignal": "The flag is missing or false."
+    },
+    {
+      "checkId": "typescript-audit.no-fallthrough-cases-in-switch",
+      "layer": "compiler-configuration",
+      "title": "noFallthroughCasesInSwitch enabled",
+      "expectation": "noFallthroughCasesInSwitch catches missing break or return in switch cases.",
+      "violationSignal": "The flag is missing or false."
+    },
+    {
+      "checkId": "typescript-audit.use-unknown-in-catch-variables",
+      "layer": "compiler-configuration",
+      "title": "useUnknownInCatchVariables enabled",
+      "expectation": "Catch variables default to unknown, not any.",
+      "violationSignal": "The flag is missing or false.",
+      "relatedAudits": ["error-handling-audit"]
+    },
+    {
+      "checkId": "typescript-audit.no-implicit-override",
+      "layer": "compiler-configuration",
+      "title": "noImplicitOverride enabled",
+      "expectation": "Class methods that override a parent must use the override keyword.",
+      "violationSignal": "The flag is missing in a class-using codebase.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.isolated-modules",
+      "layer": "compiler-configuration",
+      "title": "isolatedModules enabled",
+      "expectation": "isolatedModules is enabled for projects using a per-file-transpiling bundler such as Vite, esbuild, swc, or Bun.",
+      "violationSignal": "The flag is missing or false in a project using one of those bundlers."
+    },
+    {
+      "checkId": "typescript-audit.skip-lib-check-deliberate",
+      "layer": "compiler-configuration",
+      "title": "skipLibCheck is a deliberate choice",
+      "expectation": "skipLibCheck is set explicitly to true or false, showing the choice was made.",
+      "violationSignal": "The flag is absent and the version-dependent default applies.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.target-and-module-appropriate",
+      "layer": "compiler-configuration",
+      "title": "target and module appropriate",
+      "expectation": "target matches the runtime and module is ESNext, NodeNext, or Preserve rather than CommonJS for browser code.",
+      "violationSignal": "target is ES5 or older for a modern-only project, or module is mismatched against the resolution model."
+    },
+    {
+      "checkId": "typescript-audit.module-resolution-explicit",
+      "layer": "compiler-configuration",
+      "title": "moduleResolution set explicitly",
+      "expectation": "moduleResolution is Bundler or NodeNext, set explicitly rather than defaulting.",
+      "violationSignal": "The flag is absent."
+    },
+    {
+      "checkId": "typescript-audit.project-references-for-monorepos",
+      "layer": "compiler-configuration",
+      "title": "Composite or project references for monorepos",
+      "expectation": "Monorepos use TypeScript project references so type-checks scale across packages.",
+      "violationSignal": "A multi-package project has no project references.",
+      "skipWhenAbsent": "The project is not a monorepo.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.any-usage-rare",
+      "layer": "type-quality-in-source",
+      "title": "any usage is rare",
+      "expectation": "The total any annotation count per file is at or below the threshold.",
+      "violationSignal": "Files exceed the per-file threshold.",
+      "thresholdFlag": "--threshold-any-per-file",
+      "defaultThreshold": 3
+    },
+    {
+      "checkId": "typescript-audit.unknown-preferred-over-any",
+      "layer": "type-quality-in-source",
+      "title": "unknown preferred over any for opaque values",
+      "expectation": "unknown appears as the safe alternative to any when typing genuinely opaque shapes.",
+      "violationSignal": "A codebase with substantial any usage and zero unknown.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.ts-expect-error-with-description",
+      "layer": "type-quality-in-source",
+      "title": "@ts-ignore replaced by @ts-expect-error with description",
+      "expectation": "No @ts-ignore directives remain; all suppressions are @ts-expect-error with a justification on the same or adjacent line.",
+      "violationSignal": "Any @ts-ignore in source."
+    },
+    {
+      "checkId": "typescript-audit.no-ts-nocheck",
+      "layer": "type-quality-in-source",
+      "title": "No @ts-nocheck at file level",
+      "expectation": "No file disables type checking entirely.",
+      "violationSignal": "Any @ts-nocheck at the top of a source file."
+    },
+    {
+      "checkId": "typescript-audit.type-assertions-rare",
+      "layer": "type-quality-in-source",
+      "title": "Type assertions are rare",
+      "expectation": "The total as assertion count per file is at or below the threshold, excluding as const.",
+      "violationSignal": "Files exceed the per-file threshold.",
+      "thresholdFlag": "--threshold-as-per-file",
+      "defaultThreshold": 5
+    },
+    {
+      "checkId": "typescript-audit.non-null-assertions-rare",
+      "layer": "type-quality-in-source",
+      "title": "Non-null assertions are rare",
+      "expectation": "The total non-null assertion count per file is at or below the threshold.",
+      "violationSignal": "Files exceed the per-file threshold.",
+      "thresholdFlag": "--threshold-non-null-assertion-per-file",
+      "defaultThreshold": 3
+    },
+    {
+      "checkId": "typescript-audit.no-function-type",
+      "layer": "type-quality-in-source",
+      "title": "No Function type",
+      "expectation": "Specific function signatures are used rather than the unsafe Function type.",
+      "violationSignal": "Any Function annotation in source."
+    },
+    {
+      "checkId": "typescript-audit.no-object-type",
+      "layer": "type-quality-in-source",
+      "title": "No Object type",
+      "expectation": "Record<string, unknown>, a specific shape, or lowercase object is used rather than the Object type.",
+      "violationSignal": "Any Object annotation in source."
+    },
+    {
+      "checkId": "typescript-audit.no-primitive-wrapper-types",
+      "layer": "type-quality-in-source",
+      "title": "No primitive wrapper types",
+      "expectation": "string, number, and boolean are used rather than the wrapper-object types String, Number, Boolean.",
+      "violationSignal": "Any wrapper-type annotation in source."
+    },
+    {
+      "checkId": "typescript-audit.no-empty-interfaces",
+      "layer": "type-quality-in-source",
+      "title": "No empty interfaces",
+      "expectation": "Interfaces declare at least one member or extend another type.",
+      "violationSignal": "interface Foo {} declarations."
+    },
+    {
+      "checkId": "typescript-audit.discriminated-unions-for-state-machines",
+      "layer": "type-system-usage",
+      "title": "Discriminated unions for state machines",
+      "expectation": "Multi-stage state is modelled as a discriminated union rather than multiple booleans or wide objects with optional fields.",
+      "violationSignal": "Multi-state shapes hand-rolled with several optional fields and no discriminant.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["react-audit"]
+    },
+    {
+      "checkId": "typescript-audit.branded-types-for-ids",
+      "layer": "type-system-usage",
+      "title": "Branded or nominal types for IDs",
+      "expectation": "Identifier types are branded so the compiler distinguishes them even though both carry string at runtime.",
+      "violationSignal": "Identifier types declared as bare string aliases.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.as-const-for-literal-preservation",
+      "layer": "type-system-usage",
+      "title": "as const for literal preservation",
+      "expectation": "Configuration objects, route lists, and similar literal values use as const to preserve narrow literal types.",
+      "violationSignal": "Patterns where as const would tighten inference and is missing.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.utility-types-preferred",
+      "layer": "type-system-usage",
+      "title": "Utility types preferred over hand-rolled",
+      "expectation": "Built-in utility types are used rather than hand-rolling equivalents.",
+      "violationSignal": "Hand-rolled mapped types that duplicate a built-in utility."
+    },
+    {
+      "checkId": "typescript-audit.generic-constraints-used",
+      "layer": "type-system-usage",
+      "title": "Generic constraints used",
+      "expectation": "Generic parameters operated on with property access or indexing carry extends constraints.",
+      "violationSignal": "Bare T generics whose body operates on the parameter assuming a shape."
+    },
+    {
+      "checkId": "typescript-audit.conditional-types-judicious",
+      "layer": "type-system-usage",
+      "title": "Conditional types used judiciously",
+      "expectation": "Conditional types in application code are bounded and not nested deeper than the threshold.",
+      "violationSignal": "Nested conditional types deeper than the threshold.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-conditional-type-depth",
+      "defaultThreshold": 3,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.runtime-validation-library-installed",
+      "layer": "type-safety-at-boundaries",
+      "title": "Runtime validation library installed",
+      "expectation": "A runtime validation library is present in a project that performs network requests, parses JSON, or reads form, URL, or storage data.",
+      "violationSignal": "No validation library is present in such a project.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"]
+    },
+    {
+      "checkId": "typescript-audit.network-response-data-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "Network response data validated",
+      "expectation": "Network responses are parsed through a validator before being typed, or use a type-safe layer such as tRPC or GraphQL Code Generator.",
+      "violationSignal": "Network responses cast directly with as or implicitly typed without runtime validation."
+    },
+    {
+      "checkId": "typescript-audit.json-parse-results-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "JSON.parse results validated",
+      "expectation": "JSON.parse outputs are validated, not typed by direct assertion.",
+      "violationSignal": "JSON.parse(...) as MyType patterns."
+    },
+    {
+      "checkId": "typescript-audit.form-data-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "Form data validated",
+      "expectation": "Forms validate input with the form library's schema integration or a standalone validator.",
+      "violationSignal": "Form data passed straight to a typed handler with no validator.",
+      "relatedAudits": ["react-audit"]
+    },
+    {
+      "checkId": "typescript-audit.url-parameters-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "URL parameters validated",
+      "expectation": "Router-extracted params are validated before being typed as anything stricter than string or string[].",
+      "violationSignal": "URL parameters cast to specific types or assumed narrower than their actual runtime type."
+    },
+    {
+      "checkId": "typescript-audit.storage-reads-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "localStorage and sessionStorage reads validated",
+      "expectation": "Storage reads are parsed and validated before being typed.",
+      "violationSignal": "JSON.parse(localStorage.getItem('key')!) patterns with no validator."
+    },
+    {
+      "checkId": "typescript-audit.environment-variables-validated",
+      "layer": "type-safety-at-boundaries",
+      "title": "Environment variables validated",
+      "expectation": "Environment-variable access goes through a validated configuration module rather than direct scattered reads.",
+      "violationSignal": "Direct process.env.X reads in feature code rather than a validated config module.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    }
+  ]
+}

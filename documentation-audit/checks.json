@@ -1,0 +1,294 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "documentation-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of documentation audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete documentation state breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-link-check",
+      "description": "Resolve external Markdown links over the network in addition to the always-on internal link check."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-readme-min-lines",
+    "--threshold-adr-staleness-days",
+    "--threshold-feature-doc-coverage",
+    "--threshold-public-api-doc-coverage",
+    "--threshold-todo-staleness-days",
+    "--threshold-doc-staleness-days"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "architecture-audit",
+      "relationship": "Owns feature-folder public-API documentation; the per-feature documentation check overlaps."
+    },
+    {
+      "audit": "quality-gates-audit",
+      "relationship": "Owns Conventional Commit enforcement referenced by documentation conventions."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "documentation-audit.readme-present",
+      "layer": "project-entry-and-onboarding",
+      "title": "README present",
+      "expectation": "A README.md or README.mdx exists at the repository root.",
+      "violationSignal": "No README at all."
+    },
+    {
+      "checkId": "documentation-audit.readme-substantive",
+      "layer": "project-entry-and-onboarding",
+      "title": "README is substantive",
+      "expectation": "The README is at least the minimum threshold lines and contains content beyond the project name and a logo.",
+      "violationSignal": "The README is below the threshold.",
+      "thresholdFlag": "--threshold-readme-min-lines",
+      "defaultThreshold": 30
+    },
+    {
+      "checkId": "documentation-audit.readme-covers-onboarding-essentials",
+      "layer": "project-entry-and-onboarding",
+      "title": "README covers onboarding essentials",
+      "expectation": "The README covers what the project is, prerequisites, install, run dev server, run tests, and build for production.",
+      "violationSignal": "None of the essentials present.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.readme-setup-instructions-match-scripts",
+      "layer": "project-entry-and-onboarding",
+      "title": "README setup instructions match package.json scripts",
+      "expectation": "Commands shown in the README reference scripts that actually exist in package.json.",
+      "violationSignal": "A README command references a script that no longer exists."
+    },
+    {
+      "checkId": "documentation-audit.license-present",
+      "layer": "project-entry-and-onboarding",
+      "title": "LICENSE present",
+      "expectation": "A LICENSE file exists at the root with a recognisable license.",
+      "violationSignal": "No license file."
+    },
+    {
+      "checkId": "documentation-audit.contributing-present",
+      "layer": "project-entry-and-onboarding",
+      "title": "CONTRIBUTING.md present",
+      "expectation": "When the project appears to accept external contributions, a CONTRIBUTING.md exists.",
+      "violationSignal": "A public-facing project with no contributing guide.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.required-tool-versions-documented",
+      "layer": "project-entry-and-onboarding",
+      "title": "Required tool versions documented",
+      "expectation": "One or more of .nvmrc, .tool-versions, engines.node, volta, or mise.toml is present.",
+      "violationSignal": "None present."
+    },
+    {
+      "checkId": "documentation-audit.env-example-present",
+      "layer": "project-entry-and-onboarding",
+      "title": "Environment example file present",
+      "expectation": "When the project reads environment variables, an example file documents them with placeholder values only.",
+      "violationSignal": "The project reads environment variables but no example file documents them."
+    },
+    {
+      "checkId": "documentation-audit.architecture-overview-present",
+      "layer": "architectural-and-decision-documentation",
+      "title": "Architecture overview present",
+      "expectation": "A top-level architecture document exists at a conventional path.",
+      "violationSignal": "No architecture overview at any conventional path."
+    },
+    {
+      "checkId": "documentation-audit.adrs-present",
+      "layer": "architectural-and-decision-documentation",
+      "title": "Architecture Decision Records present",
+      "expectation": "An ADR directory exists with at least one ADR.",
+      "violationSignal": "No ADR infrastructure at all.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.recent-adr-activity",
+      "layer": "architectural-and-decision-documentation",
+      "title": "Recent ADR activity",
+      "expectation": "When ADRs are present, at least one was added or modified within the staleness threshold.",
+      "violationSignal": "All ADRs older than the threshold in a project with recent code activity.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-adr-staleness-days",
+      "defaultThreshold": 180,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.adrs-follow-a-template",
+      "layer": "architectural-and-decision-documentation",
+      "title": "ADRs follow a recognisable template",
+      "expectation": "ADRs include identifiable sections for Status, Context, Decision, and Consequences.",
+      "violationSignal": "ADRs without a consistent structure.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.per-feature-documentation",
+      "layer": "architectural-and-decision-documentation",
+      "title": "Per-feature documentation",
+      "expectation": "Each feature folder has a README.md or a documenting comment block at the top of its barrel file.",
+      "violationSignal": "Per-feature documentation coverage below the violation threshold.",
+      "thresholdFlag": "--threshold-feature-doc-coverage",
+      "defaultThreshold": 50,
+      "relatedAudits": ["architecture-audit"]
+    },
+    {
+      "checkId": "documentation-audit.diagrams-for-non-trivial-architecture",
+      "layer": "architectural-and-decision-documentation",
+      "title": "Diagrams for non-trivial architecture",
+      "expectation": "Architecture documentation includes at least one diagram.",
+      "violationSignal": "Architecture docs contain no diagrams in a structurally-complex project.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.tsdoc-on-exported-public-apis",
+      "layer": "code-level-documentation",
+      "title": "TSDoc or JSDoc on exported public APIs",
+      "expectation": "Public exports carry a documentation block describing what they do.",
+      "violationSignal": "Public exports broadly undocumented, below the public-API documentation coverage threshold.",
+      "thresholdFlag": "--threshold-public-api-doc-coverage",
+      "defaultThreshold": 60
+    },
+    {
+      "checkId": "documentation-audit.comments-explain-why-not-what",
+      "layer": "code-level-documentation",
+      "title": "Comments explain WHY, not WHAT",
+      "expectation": "Comments add information the code itself does not convey.",
+      "violationSignal": "High counts of restating-the-code comments.",
+      "softCheck": true,
+      "confidence": "heuristic",
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.no-commented-out-code",
+      "layer": "code-level-documentation",
+      "title": "No commented-out code",
+      "expectation": "Code is deleted, not commented out; git history is the audit log.",
+      "violationSignal": "Blocks of commented-out code containing valid syntax."
+    },
+    {
+      "checkId": "documentation-audit.todos-include-owner-and-reference",
+      "layer": "code-level-documentation",
+      "title": "TODOs include owner and reference",
+      "expectation": "Every TODO or FIXME comment includes an owner identifier or a tracking-system reference.",
+      "violationSignal": "Bare TODO or FIXME comments with no owner or reference.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.todos-not-stale",
+      "layer": "code-level-documentation",
+      "title": "TODOs not stale",
+      "expectation": "No TODO is older than the staleness threshold, measured by the most recent git modification of the line.",
+      "violationSignal": "TODOs older than the threshold.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-todo-staleness-days",
+      "defaultThreshold": 90,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.no-empty-doc-comments",
+      "layer": "code-level-documentation",
+      "title": "No empty doc comments",
+      "expectation": "No documentation comment blocks with no content.",
+      "violationSignal": "Empty TSDoc or JSDoc blocks."
+    },
+    {
+      "checkId": "documentation-audit.storybook-stories-for-design-system-components",
+      "layer": "code-level-documentation",
+      "title": "Storybook stories for design-system components",
+      "expectation": "When Storybook and a design-system directory are detected, every component has a story file.",
+      "violationSignal": "Design-system components without stories.",
+      "skipWhenAbsent": "No design system is detected.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.deployment-documented",
+      "layer": "operational-documentation-and-drift",
+      "title": "Deployment documented",
+      "expectation": "A document describes how the project is deployed.",
+      "violationSignal": "A deployable project with no deployment documentation.",
+      "skipWhenAbsent": "No deployable target is detected."
+    },
+    {
+      "checkId": "documentation-audit.rollback-procedure-documented",
+      "layer": "operational-documentation-and-drift",
+      "title": "Rollback procedure documented",
+      "expectation": "A document describes how to roll back a bad deployment.",
+      "violationSignal": "Deployment documented but rollback not documented.",
+      "skipWhenAbsent": "No deployable target is detected.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.monitoring-and-alerting-documented",
+      "layer": "operational-documentation-and-drift",
+      "title": "Monitoring and alerting documented",
+      "expectation": "Documentation references the monitoring or observability stack.",
+      "violationSignal": "No references in documentation.",
+      "skipWhenAbsent": "The project is not deployed.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.feature-flag-documentation",
+      "layer": "operational-documentation-and-drift",
+      "title": "Feature-flag documentation",
+      "expectation": "When a feature-flag library is detected, feature flags are documented.",
+      "violationSignal": "A feature-flag library is used with no flag documentation.",
+      "skipWhenAbsent": "No feature-flag library is detected.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.readme-script-drift-detection",
+      "layer": "operational-documentation-and-drift",
+      "title": "README script-drift detection",
+      "expectation": "Commands shown in the README correspond to scripts that exist in package.json.",
+      "violationSignal": "The README references missing or renamed scripts."
+    },
+    {
+      "checkId": "documentation-audit.documentation-freshness",
+      "layer": "operational-documentation-and-drift",
+      "title": "Documentation freshness",
+      "expectation": "A healthy ratio of documentation files has been modified within the staleness threshold.",
+      "violationSignal": "Pervasive documentation staleness.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-doc-staleness-days",
+      "defaultThreshold": 180,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "documentation-audit.internal-links-resolve",
+      "layer": "operational-documentation-and-drift",
+      "title": "Internal links resolve",
+      "expectation": "Markdown links to other files in the repository resolve to existing files and anchors.",
+      "violationSignal": "Broken internal links or anchors."
+    },
+    {
+      "checkId": "documentation-audit.external-links-resolve",
+      "layer": "operational-documentation-and-drift",
+      "title": "External links resolve",
+      "expectation": "Markdown links to external URLs return a success or redirect status on a HEAD request.",
+      "violationSignal": "Many broken external links.",
+      "skipWhenAbsent": "The --with-link-check flag is not set.",
+      "enrichmentFlags": ["--with-link-check"],
+      "allowedStatuses": ["present", "partial", "violation"]
+    }
+  ]
+}

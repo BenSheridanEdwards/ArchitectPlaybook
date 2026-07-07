@@ -1,0 +1,273 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "react-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of React audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete code breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "performance-audit",
+      "relationship": "Owns performance-driven memoization and rendering cost; this audit owns correctness-driven memoization."
+    },
+    {
+      "audit": "architecture-audit",
+      "relationship": "Owns module boundaries and global state strategy; state-management checks overlap."
+    },
+    {
+      "audit": "linting-audit",
+      "relationship": "Owns the eslint-plugin-react-hooks configuration this audit expects."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "react-audit.react-hooks-plugin-enabled",
+      "layer": "hooks-correctness",
+      "title": "eslint-plugin-react-hooks recommended set enabled",
+      "expectation": "The hooks plugin's recommended rules are enabled in the active ESLint configuration, or the equivalent Biome rules for Biome projects.",
+      "violationSignal": "The plugin is missing or the recommended set is off.",
+      "relatedAudits": ["linting-audit"]
+    },
+    {
+      "checkId": "react-audit.no-silenced-exhaustive-deps",
+      "layer": "hooks-correctness",
+      "title": "No silenced exhaustive-deps without justification",
+      "expectation": "exhaustive-deps disable lines carry a justification comment on the same or adjacent line.",
+      "violationSignal": "Suppressions of exhaustive-deps with no surrounding explanation.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.no-empty-dependency-arrays-where-dependencies-exist",
+      "layer": "hooks-correctness",
+      "title": "No empty dependency arrays where dependencies exist",
+      "expectation": "An empty useEffect dependency array is not used when the body closes over rendered values that change.",
+      "violationSignal": "Effects with empty dependency arrays that read varying state, props, or context."
+    },
+    {
+      "checkId": "react-audit.no-data-fetching-in-effects-when-query-library-exists",
+      "layer": "hooks-correctness",
+      "title": "No data fetching in effects when a query library exists",
+      "expectation": "When a query library or framework loader is available, components fetch via the data layer rather than useEffect plus fetch.",
+      "violationSignal": "useEffect calling fetch or axios in a project with a query layer installed.",
+      "relatedAudits": ["performance-audit"]
+    },
+    {
+      "checkId": "react-audit.no-state-synchronisation",
+      "layer": "hooks-correctness",
+      "title": "No state synchronisation",
+      "expectation": "State is derived from props or other state rather than stored in useState and re-synchronised by useEffect.",
+      "violationSignal": "A useEffect that does setX(propX) to mirror props into state."
+    },
+    {
+      "checkId": "react-audit.status-enums-over-multiple-booleans",
+      "layer": "hooks-correctness",
+      "title": "Status enums over multiple booleans",
+      "expectation": "Multi-stage state uses a single status enum rather than separate booleans that can drift.",
+      "violationSignal": "Three or more boolean state variables representing a single conceptual lifecycle.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.useref-for-mutable-non-render-state",
+      "layer": "hooks-correctness",
+      "title": "useRef for mutable non-render state",
+      "expectation": "Mutable values that do not trigger re-renders use useRef, not useState.",
+      "violationSignal": "useState used to hold a value never read in render but mutated frequently."
+    },
+    {
+      "checkId": "react-audit.cleanup-functions-present",
+      "layer": "hooks-correctness",
+      "title": "Cleanup functions present for side effects",
+      "expectation": "useEffect returns a cleanup for subscriptions, timers, observers, async cancellation, and event listeners.",
+      "violationSignal": "Side-effect setup with no matching teardown."
+    },
+    {
+      "checkId": "react-audit.memoization-for-correctness",
+      "layer": "hooks-correctness",
+      "title": "Memoization for correctness, not just performance",
+      "expectation": "Callbacks or values in a downstream hook's dependency array that need referential stability for correctness are wrapped in useCallback or useMemo.",
+      "violationSignal": "A useEffect whose dependencies include an inline callback created on each render."
+    },
+    {
+      "checkId": "react-audit.custom-hook-design",
+      "layer": "hooks-correctness",
+      "title": "Custom hook design",
+      "expectation": "Custom hooks have a single responsibility, are named useFoo, and return a consistent shape across the codebase.",
+      "violationSignal": "Custom hooks returning mixed shapes inconsistently, or named without the use prefix.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.function-components-only-in-new-code",
+      "layer": "component-design",
+      "title": "Function components only in new code",
+      "expectation": "New components are function components; class components persist only as legacy.",
+      "violationSignal": "Class components are present, and especially a class component newer than the most recent function component."
+    },
+    {
+      "checkId": "react-audit.components-named-pascalcase",
+      "layer": "component-design",
+      "title": "Components named in PascalCase",
+      "expectation": "Component files and exported component identifiers use PascalCase.",
+      "violationSignal": "Non-PascalCase component definitions."
+    },
+    {
+      "checkId": "react-audit.hooks-named-with-use-prefix",
+      "layer": "component-design",
+      "title": "Hooks named with use prefix",
+      "expectation": "Custom hooks export identifiers starting with use followed by an uppercase letter.",
+      "violationSignal": "A function that calls hooks but does not start with use."
+    },
+    {
+      "checkId": "react-audit.forwardref-for-ref-receiving-components",
+      "layer": "component-design",
+      "title": "forwardRef for ref-receiving components",
+      "expectation": "Components that need to receive ref use forwardRef, or React 19 ref-as-prop.",
+      "violationSignal": "A component renders a focusable element consumers would ref, but does not forward refs and is not React-19 ref-as-prop."
+    },
+    {
+      "checkId": "react-audit.displayname-on-memo-forwardref-wrappers",
+      "layer": "component-design",
+      "title": "displayName on memo and forwardRef wrappers",
+      "expectation": "Components wrapped in React.memo or forwardRef set displayName so the DevTools tree is readable.",
+      "violationSignal": "Wrapped components with no displayName."
+    },
+    {
+      "checkId": "react-audit.children-prop-typed",
+      "layer": "component-design",
+      "title": "Children prop typed",
+      "expectation": "When a component accepts children, the prop is typed React.ReactNode.",
+      "violationSignal": "children: any or children: JSX.Element in component prop types."
+    },
+    {
+      "checkId": "react-audit.one-component-or-hook-per-file",
+      "layer": "component-design",
+      "title": "One component or hook per file",
+      "expectation": "Files export one primary component or hook plus supporting types and helpers.",
+      "violationSignal": "Files exporting more than three independent components or hooks.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.named-exports-for-components",
+      "layer": "component-design",
+      "title": "Named exports for components",
+      "expectation": "Components are exported as named exports, not default exports.",
+      "violationSignal": "Default-exported components in projects that otherwise use named exports.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.form-state-via-form-library",
+      "layer": "state-management",
+      "title": "Form state via a form library",
+      "expectation": "Forms with more than five fields or non-trivial validation use a dedicated form library.",
+      "violationSignal": "Complex forms hand-rolled with a useState per field.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.server-state-in-data-layer",
+      "layer": "state-management",
+      "title": "Server state in the data layer",
+      "expectation": "Server-fetched data lives in a data layer rather than component-local useState populated by useEffect plus fetch.",
+      "violationSignal": "Fetched-data state held in component state with no query layer involved.",
+      "relatedAudits": ["performance-audit", "architecture-audit"]
+    },
+    {
+      "checkId": "react-audit.single-global-state-library",
+      "layer": "state-management",
+      "title": "Single global state library",
+      "expectation": "Exactly one global state strategy is used as the application's global state approach.",
+      "violationSignal": "Multiple global state libraries in the same application.",
+      "relatedAudits": ["architecture-audit"]
+    },
+    {
+      "checkId": "react-audit.no-state-synchronisation-between-sources-of-truth",
+      "layer": "state-management",
+      "title": "No state synchronisation between sources of truth",
+      "expectation": "Data is stored in one place and derived elsewhere, not duplicated across component state, a global store, and a URL parameter at once.",
+      "violationSignal": "Detected duplicate-state patterns."
+    },
+    {
+      "checkId": "react-audit.state-at-the-right-level",
+      "layer": "state-management",
+      "title": "State at the right level",
+      "expectation": "Local state lives where it is used, lifted state at the lowest common ancestor, and global state only for genuinely global concerns.",
+      "violationSignal": "Global state holding single-subtree values, or local state for values used across the application.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.url-state-for-shareable-state",
+      "layer": "state-management",
+      "title": "URL state for shareable or recoverable state",
+      "expectation": "Search queries, filters, sort orders, current page, and selected tabs live in URL parameters when the user expects them to survive a reload.",
+      "violationSignal": "Patterns where a refresh would lose UI state the user expects to keep.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.useid-for-accessible-ids",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "useId for accessible IDs",
+      "expectation": "Generated IDs used to wire up labels, ARIA attributes, and form controls use useId.",
+      "violationSignal": "Hand-rolled ID generation when React 18+ is available.",
+      "relatedAudits": ["accessibility-audit"]
+    },
+    {
+      "checkId": "react-audit.usetransition-for-non-urgent-updates",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "useTransition or startTransition for non-urgent updates",
+      "expectation": "Deferrable updates use useTransition or startTransition.",
+      "violationSignal": "Detected hot patterns where transitions would help and are absent.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["performance-audit"]
+    },
+    {
+      "checkId": "react-audit.suspense-boundaries-for-async-data",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "Suspense boundaries for async data",
+      "expectation": "When the framework or library supports Suspense for data fetching, Suspense boundaries with meaningful fallbacks are used.",
+      "violationSignal": "Async data fetched without surrounding Suspense in projects that opted into Suspense-based fetching."
+    },
+    {
+      "checkId": "react-audit.use-client-minimal-and-deliberate",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "'use client' used minimally and deliberately",
+      "expectation": "Client-component boundaries sit at the leaves of the tree, not at the root.",
+      "violationSignal": "Excessive 'use client' fragmentation, or 'use client' files importing server-only modules.",
+      "skipWhenAbsent": "The Next.js App Router is not in use.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["architecture-audit"]
+    },
+    {
+      "checkId": "react-audit.server-actions-used-appropriately",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "Server Actions used appropriately",
+      "expectation": "Mutating operations in App Router projects use Server Actions when appropriate.",
+      "violationSignal": "Patterns where Server Actions would be the natural choice but route handlers are used instead.",
+      "skipWhenAbsent": "The Next.js App Router is not in use.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "react-audit.useoptimistic-for-optimistic-mutations",
+      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "title": "useOptimistic for optimistic mutations",
+      "expectation": "Optimistic UI updates use useOptimistic rather than hand-rolled optimistic state.",
+      "violationSignal": "Hand-rolled optimistic updates in React 19 codebases.",
+      "skipWhenAbsent": "The project is on React 18.x rather than React 19."
+    }
+  ]
+}

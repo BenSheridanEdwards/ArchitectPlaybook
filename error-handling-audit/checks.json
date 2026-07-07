@@ -1,0 +1,233 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "error-handling-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of error-handling audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete code breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "typescript-audit",
+      "relationship": "Owns the useUnknownInCatchVariables compiler flag; catch typing overlaps."
+    },
+    {
+      "audit": "security-audit",
+      "relationship": "Owns secret redaction; sensitive-data logging overlaps."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "error-handling-audit.no-empty-catch-blocks",
+      "layer": "throw-and-catch-hygiene",
+      "title": "No empty catch blocks",
+      "expectation": "No catch with an empty body.",
+      "violationSignal": "Any empty catch, reported with file and line."
+    },
+    {
+      "checkId": "error-handling-audit.no-silently-swallowed-errors",
+      "layer": "throw-and-catch-hygiene",
+      "title": "No silently swallowed errors",
+      "expectation": "Every catch logs or reports the error, returns a typed result, or rethrows with context.",
+      "violationSignal": "A catch that does none of the three, reported with file and line."
+    },
+    {
+      "checkId": "error-handling-audit.no-string-or-non-error-throws",
+      "layer": "throw-and-catch-hygiene",
+      "title": "No string or non-Error throws",
+      "expectation": "Every throw throws an Error or subclass.",
+      "violationSignal": "throw of a string, number, or plain object, reported with file and line."
+    },
+    {
+      "checkId": "error-handling-audit.typescript-catch-typing",
+      "layer": "throw-and-catch-hygiene",
+      "title": "TypeScript catch typing",
+      "expectation": "useUnknownInCatchVariables is enabled, or every catch parameter in source is annotated : unknown.",
+      "violationSignal": "The compiler option is off and untyped or any-typed catch parameters appear in source.",
+      "relatedAudits": ["typescript-audit"]
+    },
+    {
+      "checkId": "error-handling-audit.error-chaining-preserves-cause",
+      "layer": "throw-and-catch-hygiene",
+      "title": "Error chaining preserves cause",
+      "expectation": "When rethrowing or wrapping, the original is attached via the cause option.",
+      "violationSignal": "A catch whose body throws a fresh error without referencing the original."
+    },
+    {
+      "checkId": "error-handling-audit.domain-errors-use-custom-classes",
+      "layer": "throw-and-catch-hygiene",
+      "title": "Domain errors use custom classes",
+      "expectation": "At least one custom error class hierarchy exists for domain errors.",
+      "violationSignal": "All thrown errors are bare Error.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "error-handling-audit.network-calls-have-error-paths",
+      "layer": "async-and-network-error-handling",
+      "title": "Network calls have error paths",
+      "expectation": "Every network call site has surrounding error handling or explicitly propagates the failure through its return type.",
+      "violationSignal": "An awaited fetch or axios call with no surrounding error handling and no upward propagation."
+    },
+    {
+      "checkId": "error-handling-audit.network-calls-have-timeout-configuration",
+      "layer": "async-and-network-error-handling",
+      "title": "Network calls have timeout configuration",
+      "expectation": "Each network primitive uses AbortSignal.timeout, a query-layer signal, or an explicit timeout option.",
+      "violationSignal": "Network calls without any timeout."
+    },
+    {
+      "checkId": "error-handling-audit.retry-logic-for-retriable-failures",
+      "layer": "async-and-network-error-handling",
+      "title": "Retry logic for retriable failures",
+      "expectation": "Retry behaviour is centralised in the data layer with explicit retriable conditions.",
+      "violationSignal": "Inconsistent per-call-site retries, or no retry strategy in an application that depends on network reliability.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "error-handling-audit.status-code-branching-is-explicit",
+      "layer": "async-and-network-error-handling",
+      "title": "Status-code branching is explicit",
+      "expectation": "Network responses distinguish 4xx from 5xx and from network errors, not conflated into a single string.",
+      "violationSignal": "if (!response.ok) throw new Error('Request failed') with no status discrimination."
+    },
+    {
+      "checkId": "error-handling-audit.top-level-async-errors-captured",
+      "layer": "async-and-network-error-handling",
+      "title": "Top-level async errors captured",
+      "expectation": "Async functions invoked from non-await contexts capture rejections explicitly.",
+      "violationSignal": "An async arrow passed as an event handler with no internal try/catch, or an awaited call inside useEffect with no error path."
+    },
+    {
+      "checkId": "error-handling-audit.abortcontroller-for-cancellable-requests",
+      "layer": "async-and-network-error-handling",
+      "title": "AbortController for cancellable requests",
+      "expectation": "Components that may unmount while a request is pending use AbortController or the data layer's signal to cancel on unmount.",
+      "violationSignal": "A bare fetch inside useEffect with no cleanup."
+    },
+    {
+      "checkId": "error-handling-audit.root-error-boundary-present",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Root error boundary present",
+      "expectation": "At least one error boundary wraps the application root.",
+      "violationSignal": "No root boundary detected."
+    },
+    {
+      "checkId": "error-handling-audit.route-or-feature-level-boundaries",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Route- or feature-level boundaries",
+      "expectation": "Boundaries exist at route or feature-cluster level, not only at the root.",
+      "violationSignal": "Only a single root boundary present in an application with multiple routes or features."
+    },
+    {
+      "checkId": "error-handling-audit.fallback-ui-offers-recovery",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Fallback UI offers recovery",
+      "expectation": "Boundary fallback components include at least one recovery affordance.",
+      "violationSignal": "A fallback that only renders an error message with no action."
+    },
+    {
+      "checkId": "error-handling-audit.boundary-forwards-to-reporting-service",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Boundary forwards to reporting service",
+      "expectation": "The boundary's error handler calls the detected error-reporting service.",
+      "violationSignal": "A boundary that only renders the fallback without reporting."
+    },
+    {
+      "checkId": "error-handling-audit.suspense-paired-with-error-boundary",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Suspense paired with error boundary",
+      "expectation": "Every Suspense that wraps async-loaded data has an error boundary as an ancestor.",
+      "violationSignal": "A Suspense with no error boundary upstream."
+    },
+    {
+      "checkId": "error-handling-audit.no-try-catch-around-jsx-render",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "No try/catch around JSX render",
+      "expectation": "Render functions do not wrap return values in try/catch, since that does not catch render errors.",
+      "violationSignal": "A try/catch whose try block returns JSX."
+    },
+    {
+      "checkId": "error-handling-audit.mutation-errors-handled-at-call-site",
+      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "title": "Mutation errors handled at call site",
+      "expectation": "Data-layer mutations have explicit onError handlers, or the consuming component handles isError.",
+      "violationSignal": "Mutations with no error handling and no consuming isError branch."
+    },
+    {
+      "checkId": "error-handling-audit.error-reporting-service-integrated",
+      "layer": "logging-and-observability",
+      "title": "Error-reporting service integrated",
+      "expectation": "A recognised error-reporting service is installed as a dependency.",
+      "violationSignal": "No error-reporting service detected."
+    },
+    {
+      "checkId": "error-handling-audit.reporting-initialised-at-entry-point",
+      "layer": "logging-and-observability",
+      "title": "Reporting initialised at entry point",
+      "expectation": "Initialisation happens before any application code runs, in the entry point.",
+      "violationSignal": "The service is installed but not initialised in the entry point."
+    },
+    {
+      "checkId": "error-handling-audit.release-versioning-attached",
+      "layer": "logging-and-observability",
+      "title": "Release versioning attached",
+      "expectation": "The reporting client is configured with a release identifier.",
+      "violationSignal": "No release configuration."
+    },
+    {
+      "checkId": "error-handling-audit.source-maps-uploaded",
+      "layer": "logging-and-observability",
+      "title": "Source maps uploaded",
+      "expectation": "A continuous-integration step uploads source maps to the reporting service after a successful build.",
+      "violationSignal": "No upload step detected in any workflow file."
+    },
+    {
+      "checkId": "error-handling-audit.production-sample-rate-configured",
+      "layer": "logging-and-observability",
+      "title": "Production sample rate configured",
+      "expectation": "The reporting client has an explicit trace sample rate in production, not the SDK default.",
+      "violationSignal": "The default sample rate in production."
+    },
+    {
+      "checkId": "error-handling-audit.no-console-log-in-production-code-paths",
+      "layer": "logging-and-observability",
+      "title": "No console.log in production code paths",
+      "expectation": "console.log, console.debug, and console.warn are absent from production code except when guarded by an environment check.",
+      "violationSignal": "Unguarded console.* calls in production source."
+    },
+    {
+      "checkId": "error-handling-audit.structured-logging",
+      "layer": "logging-and-observability",
+      "title": "Structured logging",
+      "expectation": "Logger calls pass a context object alongside the message, not a single string-concatenated argument.",
+      "violationSignal": "Logger calls that only pass a string.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "error-handling-audit.sensitive-data-redaction-configured",
+      "layer": "logging-and-observability",
+      "title": "Sensitive-data redaction configured",
+      "expectation": "The reporting client scrubs passwords, tokens, and PII keys before send, or documents a safe-field allowlist.",
+      "violationSignal": "No redaction configured.",
+      "relatedAudits": ["security-audit"]
+    },
+    {
+      "checkId": "error-handling-audit.single-log-per-error",
+      "layer": "logging-and-observability",
+      "title": "Single log per error",
+      "expectation": "An error that is caught, logged, and rethrown is not logged again at every layer above.",
+      "violationSignal": "Patterns where the same error path logs at multiple layers.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    }
+  ]
+}

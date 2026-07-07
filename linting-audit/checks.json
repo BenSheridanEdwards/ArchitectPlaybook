@@ -1,0 +1,244 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "linting-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of linting audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete configuration breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-run",
+      "description": "Run the detected linter and use its output to enrich the static configuration findings."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-suppressions-per-file"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "quality-gates-audit",
+      "relationship": "Owns whether the linter runs at each lifecycle stage."
+    },
+    {
+      "audit": "accessibility-audit",
+      "relationship": "Owns end-to-end accessibility scanning; the jsx-a11y plugin gap surfaces in both."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "linting-audit.exactly-one-linter-installed",
+      "layer": "configuration-shape",
+      "title": "Exactly one linter installed",
+      "expectation": "Either ESLint or Biome is installed, not both.",
+      "violationSignal": "Both eslint and @biomejs/biome are present in package.json dependencies."
+    },
+    {
+      "checkId": "linting-audit.modern-configuration-format",
+      "layer": "configuration-shape",
+      "title": "Modern configuration format",
+      "expectation": "ESLint uses flat config; Biome uses biome.json or biome.jsonc.",
+      "violationSignal": "ESLint legacy .eslintrc.* format is in use."
+    },
+    {
+      "checkId": "linting-audit.single-configuration-source",
+      "layer": "configuration-shape",
+      "title": "Single configuration source",
+      "expectation": "Exactly one configuration file exists at the repository or workspace root.",
+      "violationSignal": "Multiple top-level configuration files, or both flat and legacy formats present."
+    },
+    {
+      "checkId": "linting-audit.typescript-parser-configured",
+      "layer": "configuration-shape",
+      "title": "TypeScript parser configured",
+      "expectation": "ESLint registers @typescript-eslint/parser with parserOptions.project or projectService so type-aware rules can run; Biome support is implicit.",
+      "violationSignal": "ESLint configuration without a TypeScript parser despite tsconfig.json being present."
+    },
+    {
+      "checkId": "linting-audit.declarative-configuration",
+      "layer": "configuration-shape",
+      "title": "Declarative configuration",
+      "expectation": "The configuration does not require side-effectful evaluation or environment-dependent rule selection.",
+      "violationSignal": "Configuration that branches on process.env in non-trivial ways.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "linting-audit.base-recommended-set-extended",
+      "layer": "rule-coverage",
+      "title": "Base recommended set extended",
+      "expectation": "The base recommended ruleset is extended.",
+      "violationSignal": "No base ruleset extended."
+    },
+    {
+      "checkId": "linting-audit.typescript-eslint-type-checked-or-stronger",
+      "layer": "rule-coverage",
+      "title": "@typescript-eslint recommended-type-checked or stronger",
+      "expectation": "At least recommended-type-checked is extended; strict-type-checked is preferred.",
+      "violationSignal": "No @typescript-eslint configuration, or the plain recommended set only."
+    },
+    {
+      "checkId": "linting-audit.react-recommended-configured",
+      "layer": "rule-coverage",
+      "title": "eslint-plugin-react/recommended",
+      "expectation": "When React is detected, the React recommended config is extended.",
+      "violationSignal": "React project without the plugin configured.",
+      "skipWhenAbsent": "The project is not a React project."
+    },
+    {
+      "checkId": "linting-audit.react-hooks-recommended-configured",
+      "layer": "rule-coverage",
+      "title": "eslint-plugin-react-hooks/recommended",
+      "expectation": "When React is detected, the hooks plugin's recommended rules are enabled.",
+      "violationSignal": "React project without it.",
+      "skipWhenAbsent": "The project is not a React project."
+    },
+    {
+      "checkId": "linting-audit.jsx-a11y-recommended-configured",
+      "layer": "rule-coverage",
+      "title": "eslint-plugin-jsx-a11y/recommended",
+      "expectation": "When React is detected, the accessibility plugin's recommended rules are enabled.",
+      "violationSignal": "React project without it.",
+      "skipWhenAbsent": "The project is not a React project.",
+      "relatedAudits": ["accessibility-audit"]
+    },
+    {
+      "checkId": "linting-audit.import-plugin-configured",
+      "layer": "rule-coverage",
+      "title": "eslint-plugin-import configured",
+      "expectation": "The import plugin is configured with the TypeScript resolver plus rules for unresolved imports, import order, and no-cycle.",
+      "violationSignal": "The plugin is missing, or installed without the TypeScript resolver."
+    },
+    {
+      "checkId": "linting-audit.config-prettier-last",
+      "layer": "rule-coverage",
+      "title": "eslint-config-prettier last in extends",
+      "expectation": "When Prettier is in the project, eslint-config-prettier is the last entry in the extends list.",
+      "violationSignal": "Prettier installed but the config is not added, or added but not last."
+    },
+    {
+      "checkId": "linting-audit.node-best-practices-plugin",
+      "layer": "rule-coverage",
+      "title": "Node best-practices plugin",
+      "expectation": "When the project has Node-only entry points, eslint-plugin-n's recommended rules are enabled.",
+      "violationSignal": "Node entry points present without the plugin.",
+      "skipWhenAbsent": "The project is a browser-only frontend."
+    },
+    {
+      "checkId": "linting-audit.biome-linter-enabled",
+      "layer": "rule-coverage",
+      "title": "Biome linter enabled",
+      "expectation": "In a Biome project, linter.enabled is true.",
+      "violationSignal": "The Biome linter is disabled.",
+      "skipWhenAbsent": "The project does not use Biome."
+    },
+    {
+      "checkId": "linting-audit.biome-recommended-and-domain-rules-enabled",
+      "layer": "rule-coverage",
+      "title": "Biome recommended and domain rule sets enabled",
+      "expectation": "In a Biome project, recommended rules and each domain rule set (correctness, suspicious, complexity, performance, security, style, plus a11y for React) are enabled or replaced rule-by-rule.",
+      "violationSignal": "Recommended rules off, or a domain set off without rule-by-rule replacement.",
+      "skipWhenAbsent": "The project does not use Biome."
+    },
+    {
+      "checkId": "linting-audit.lint-script-present",
+      "layer": "strictness-and-enforcement",
+      "title": "Lint script in package.json",
+      "expectation": "A lint script exists and invokes the detected linter against the project.",
+      "violationSignal": "No lint script, or the script invokes a different tool."
+    },
+    {
+      "checkId": "linting-audit.continuous-integration-enforces-zero-warnings",
+      "layer": "strictness-and-enforcement",
+      "title": "Continuous integration enforces zero warnings",
+      "expectation": "The continuous-integration lint step uses --max-warnings=0 for ESLint or --error-on-warnings for Biome.",
+      "violationSignal": "Lint runs without the zero-warnings flag, or lint failures do not fail the build.",
+      "relatedAudits": ["quality-gates-audit"]
+    },
+    {
+      "checkId": "linting-audit.type-aware-rules-actually-enabled",
+      "layer": "strictness-and-enforcement",
+      "title": "Type-aware rules actually enabled",
+      "expectation": "When @typescript-eslint/parser is configured, the project pointer is set so type-aware rules can run.",
+      "violationSignal": "The parser is configured but the project pointer is missing, so type-aware rules silently no-op."
+    },
+    {
+      "checkId": "linting-audit.no-globally-disabled-rules-without-justification",
+      "layer": "strictness-and-enforcement",
+      "title": "No globally disabled rules without justification",
+      "expectation": "The configuration does not turn off rules from extended recommended sets globally without an inline comment explaining why.",
+      "violationSignal": "A rule overridden to off at the top level without a comment."
+    },
+    {
+      "checkId": "linting-audit.lint-errors-fail-the-build",
+      "layer": "strictness-and-enforcement",
+      "title": "Lint errors fail the build",
+      "expectation": "Continuous integration treats lint errors as build failures with no || true and no continue-on-error on the lint step.",
+      "violationSignal": "Workflow patterns that swallow lint failures.",
+      "relatedAudits": ["quality-gates-audit"]
+    },
+    {
+      "checkId": "linting-audit.editor-integration-available",
+      "layer": "strictness-and-enforcement",
+      "title": "Editor integration available",
+      "expectation": "A workspace-level recommendation exists for the linter's editor extension.",
+      "violationSignal": "No editor-recommendation configuration.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "linting-audit.no-blanket-file-level-disables-without-justification",
+      "layer": "suppressions-hygiene",
+      "title": "No blanket file-level disables without justification",
+      "expectation": "A blanket file-level disable carries a free-text justification on the same or preceding line.",
+      "violationSignal": "A blanket disable with no following justification."
+    },
+    {
+      "checkId": "linting-audit.each-disable-specifies-rules",
+      "layer": "suppressions-hygiene",
+      "title": "Each disable specifies rules",
+      "expectation": "Inline and next-line disable comments specify which rules they disable, never blanket.",
+      "violationSignal": "A bare disable comment with no rule names."
+    },
+    {
+      "checkId": "linting-audit.each-suppression-carries-justification",
+      "layer": "suppressions-hygiene",
+      "title": "Each suppression carries a justification",
+      "expectation": "Every suppression comment is followed by free-text justification.",
+      "violationSignal": "Suppression comments with no surrounding explanation.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "linting-audit.ignores-do-not-exclude-production-source",
+      "layer": "suppressions-hygiene",
+      "title": "Ignore patterns do not exclude production source",
+      "expectation": "The ignore patterns do not exclude entire production source directories, feature folders, or *.ts/*.tsx blanketly.",
+      "violationSignal": "Patterns that ignore production code under src/ or the framework equivalent."
+    },
+    {
+      "checkId": "linting-audit.no-stale-ignore-entries",
+      "layer": "suppressions-hygiene",
+      "title": "No stale ignore entries",
+      "expectation": "Every entry in the ignore list resolves to at least one existing file or directory.",
+      "violationSignal": "Entries pointing at paths that no longer exist."
+    },
+    {
+      "checkId": "linting-audit.suppression-density-reasonable",
+      "layer": "suppressions-hygiene",
+      "title": "Suppression density is reasonable",
+      "expectation": "Files contain at most the threshold number of suppressions each.",
+      "violationSignal": "Files exceeding the threshold.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-suppressions-per-file",
+      "defaultThreshold": 5,
+      "allowedStatuses": ["present", "partial", "violation"]
+    }
+  ]
+}

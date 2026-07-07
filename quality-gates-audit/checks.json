@@ -1,0 +1,182 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "quality-gates-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of quality-gates audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Some but not all detection signals for the gate resolve; the skill reports this as misconfigured.",
+    "missing": "None of the detection signals for the gate resolve.",
+    "violation": "A configured gate is present but wired in a way that defeats its purpose."
+  },
+  "layerNaming": "This audit is organised by lifecycle stage rather than the four-layer baseline. Each check's layer names the stage it belongs to: pre-commit, pre-push, or continuous-integration.",
+  "relatedAudits": [
+    {
+      "audit": "testing-audit",
+      "relationship": "Owns whether the tests themselves are behaviour-focused and well designed; this audit owns whether they run at each lifecycle stage."
+    },
+    {
+      "audit": "bundle-build-audit",
+      "relationship": "Owns build output and bundle composition; this audit owns whether a build smoke and bundle-size budget run as gates."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "quality-gates-audit.hook-runner-installed",
+      "layer": "pre-commit",
+      "title": "Hook runner installed",
+      "expectation": "Husky or Lefthook is configured for the repository.",
+      "violationSignal": "No .husky/ directory with hooks and no lefthook.yml or lefthook.yaml is present."
+    },
+    {
+      "checkId": "quality-gates-audit.staged-file-formatter",
+      "layer": "pre-commit",
+      "title": "Staged-file formatter",
+      "expectation": "Prettier or Biome formats staged files via lint-staged, wired into the pre-commit hook.",
+      "violationSignal": "No prettier or @biomejs/biome devDependency, no lint-staged block, or no matching pre-commit hook entry."
+    },
+    {
+      "checkId": "quality-gates-audit.staged-file-linter",
+      "layer": "pre-commit",
+      "title": "Staged-file linter",
+      "expectation": "ESLint or Biome lints staged files via lint-staged, with --fix allowed, wired into the pre-commit hook.",
+      "violationSignal": "No eslint or @biomejs/biome devDependency, no lint-staged block invoking it, or no matching pre-commit hook entry."
+    },
+    {
+      "checkId": "quality-gates-audit.type-check-on-staged-files",
+      "layer": "pre-commit",
+      "title": "Type check on staged files",
+      "expectation": "tsc --noEmit or an equivalent runs against staged TypeScript files via lint-staged or a hook script.",
+      "violationSignal": "No typescript devDependency, no tsconfig.json, or no lint-staged or hook entry invoking tsc --noEmit."
+    },
+    {
+      "checkId": "quality-gates-audit.commit-message-lint",
+      "layer": "pre-commit",
+      "title": "Commit-message lint",
+      "expectation": "commitlint enforces Conventional Commits on the subject line via a commit-msg hook.",
+      "violationSignal": "No @commitlint/cli and @commitlint/config-conventional devDependencies, no commitlint config file, or no commit-msg hook invoking commitlint."
+    },
+    {
+      "checkId": "quality-gates-audit.secret-scan-on-staged-content",
+      "layer": "pre-commit",
+      "title": "Secret scan on staged content",
+      "expectation": "gitleaks protect or detect-secrets runs against staged content before commit.",
+      "violationSignal": "No .gitleaks.toml, no .pre-commit-config.yaml referencing detect-secrets, or no matching pre-commit hook entry."
+    },
+    {
+      "checkId": "quality-gates-audit.pre-push-hook-configured",
+      "layer": "pre-push",
+      "title": "Pre-push hook configured",
+      "expectation": "A pre-push hook exists and is wired into the hook runner.",
+      "violationSignal": "No .husky/pre-push and no pre-push block in lefthook.yml."
+    },
+    {
+      "checkId": "quality-gates-audit.full-type-check",
+      "layer": "pre-push",
+      "title": "Full type check",
+      "expectation": "tsc --noEmit runs over the entire project on pre-push.",
+      "violationSignal": "The pre-push hook does not invoke tsc --noEmit or a package.json script that does."
+    },
+    {
+      "checkId": "quality-gates-audit.full-lint",
+      "layer": "pre-push",
+      "title": "Full lint",
+      "expectation": "The project's lint command runs the whole codebase on pre-push and fails on warnings.",
+      "violationSignal": "The pre-push hook does not run eslint . or the Biome equivalent with no --fix and a non-zero exit on warnings."
+    },
+    {
+      "checkId": "quality-gates-audit.unit-tests",
+      "layer": "pre-push",
+      "title": "Unit tests",
+      "expectation": "Vitest or Jest runs the unit-test suite to completion on pre-push.",
+      "violationSignal": "The pre-push hook does not invoke vitest run or jest --ci and no matching package.json script exists."
+    },
+    {
+      "checkId": "quality-gates-audit.build-smoke",
+      "layer": "pre-push",
+      "title": "Build smoke",
+      "expectation": "The production build command runs and exits cleanly on pre-push.",
+      "violationSignal": "The pre-push hook does not invoke the framework build command."
+    },
+    {
+      "checkId": "quality-gates-audit.continuous-integration-workflow-present",
+      "layer": "continuous-integration",
+      "title": "Continuous-integration workflow file present",
+      "expectation": "At least one continuous-integration workflow definition exists.",
+      "violationSignal": "No .github/workflows/*.yml, .gitlab-ci.yml, .circleci/config.yml, or equivalent is present."
+    },
+    {
+      "checkId": "quality-gates-audit.pre-push-gates-rerun-on-clean-checkout",
+      "layer": "continuous-integration",
+      "title": "Pre-push gates re-run on a clean checkout",
+      "expectation": "The workflow installs dependencies fresh and re-runs type-check, lint, unit tests, and build.",
+      "violationSignal": "The workflow does not contain steps invoking the same scripts as the pre-push hook."
+    },
+    {
+      "checkId": "quality-gates-audit.end-to-end-tests",
+      "layer": "continuous-integration",
+      "title": "End-to-end tests",
+      "expectation": "Playwright or Cypress runs against a build of the application in continuous integration.",
+      "violationSignal": "No @playwright/test or cypress devDependency and no workflow step invoking playwright test or cypress run.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"],
+      "relatedAudits": ["testing-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.coverage-threshold-enforced",
+      "layer": "continuous-integration",
+      "title": "Coverage threshold enforced",
+      "expectation": "The test runner is configured with a coverage threshold and the workflow fails when it is not met.",
+      "violationSignal": "No coverage thresholds in vitest.config.* or jest.config.*, or no workflow step invoking the coverage run.",
+      "relatedAudits": ["testing-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.bundle-size-budget",
+      "layer": "continuous-integration",
+      "title": "Bundle-size budget",
+      "expectation": "A bundle-size check runs and fails when the budget is exceeded.",
+      "violationSignal": "No size-limit, bundlewatch, or bundle-analyzer budget check and no workflow step running it.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"],
+      "relatedAudits": ["bundle-build-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.accessibility-checks",
+      "layer": "continuous-integration",
+      "title": "Accessibility checks",
+      "expectation": "Automated accessibility checks run against components or pages in continuous integration.",
+      "violationSignal": "No @axe-core/*, pa11y, or Storybook accessibility addon and no workflow step invoking the check.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"],
+      "relatedAudits": ["accessibility-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.dependency-vulnerability-scan",
+      "layer": "continuous-integration",
+      "title": "Dependency vulnerability scan",
+      "expectation": "A vulnerability scanner runs against the lockfile in continuous integration.",
+      "violationSignal": "No npm/pnpm/yarn audit step and no Snyk, osv-scanner, or Dependabot configuration.",
+      "relatedAudits": ["dependency-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.license-compliance-check",
+      "layer": "continuous-integration",
+      "title": "License compliance check",
+      "expectation": "A license check runs and enforces an allow-list or deny-list.",
+      "violationSignal": "No license-checker or equivalent, or no workflow step invoking it with an allow-list or deny-list.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"],
+      "relatedAudits": ["dependency-audit"]
+    },
+    {
+      "checkId": "quality-gates-audit.lighthouse-continuous-integration",
+      "layer": "continuous-integration",
+      "title": "Lighthouse continuous integration",
+      "expectation": "Lighthouse CI runs against a deployed or built version of the application and asserts thresholds.",
+      "violationSignal": "No @lhci/cli devDependency, no lighthouserc.* configuration, or no workflow step invoking lhci autorun.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "missing", "violation"],
+      "relatedAudits": ["performance-audit"]
+    }
+  ]
+}
