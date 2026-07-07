@@ -74,6 +74,25 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
    /system-self-improve
    ```
 
+### Recommended audit order
+
+Audits are independent, but they are not equally urgent, and some read context
+the others depend on. This is the playbook's own recommended order. Phases run in
+sequence; audits **within** a phase are independent and can run in parallel, one
+worktree each (`--worktree`).
+
+| Phase | Audits | Why here |
+| --- | --- | --- |
+| 0 — Prepare | `/install-architect-playbook-globally`, `/pre-audit-setup` | Install the skills and build the knowledge graph that everything downstream reads. |
+| 1 — Base plate | `/agentic-audit`, `/quality-gates-audit` | Establish whether the context layer is truthful and the gates are real before trusting anything else. |
+| 2 — Behaviour floor | `/testing-audit` | The safety net. Nothing else is safe to change until you know what the tests actually cover. |
+| 3 — Structure | `/architecture-audit` | Fix boundaries and coupling before polishing the code that sits inside them. |
+| 4 — Maintainability | `/typescript-audit`, `/react-audit`, `/linting-audit` | Make the code agents read and imitate consistent. |
+| 5 — Risk | `/security-audit`, `/dependency-audit` | Close the vulnerabilities and supply-chain gaps. |
+| 6 — Non-functionals | `/performance-audit`, `/accessibility-audit`, `/error-handling-audit`, `/bundle-build-audit` | Optimise last, once behaviour and structure have settled. |
+| 7 — Knowledge | `/documentation-audit` | Detect drift once reality has stopped moving. |
+| 8 — Review and loop | `/ben-architect-review` → re-run any failed audits → `/system-self-improve` | Review the changes, close the remaining gaps, and evolve the audits that missed something. |
+
 ## Flags
 
 Every audit supports the same minimal set:
