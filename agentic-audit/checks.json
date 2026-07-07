@@ -1,0 +1,321 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "agentic-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of agentic-setup audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the project shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete content or configuration breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "thresholdFlags": [
+    "--threshold-instruction-min-lines",
+    "--threshold-instruction-max-lines",
+    "--threshold-permission-broadness"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "documentation-audit",
+      "relationship": "Owns human-facing documentation quality; instruction-file links to canonical docs overlap."
+    },
+    {
+      "audit": "security-audit",
+      "relationship": "Owns application secret hygiene; settings-file secret checks overlap."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "agentic-audit.primary-instruction-file-present",
+      "layer": "project-context-coverage",
+      "title": "Primary instruction file present",
+      "expectation": "At least one of CLAUDE.md, AGENTS.md, .cursorrules, or .cursor/rules/*.mdc exists at the repository root or an equivalent canonical path.",
+      "violationSignal": "No agentic instruction file at all."
+    },
+    {
+      "checkId": "agentic-audit.primary-instruction-file-substantive",
+      "layer": "project-context-coverage",
+      "title": "Primary instruction file is substantive",
+      "expectation": "The primary file is at least the minimum threshold lines and has identifiable structure beyond a single bullet list.",
+      "violationSignal": "The primary file is below the minimum-lines threshold.",
+      "thresholdFlag": "--threshold-instruction-min-lines",
+      "defaultThreshold": 25
+    },
+    {
+      "checkId": "agentic-audit.primary-instruction-file-not-bloated",
+      "layer": "project-context-coverage",
+      "title": "Primary instruction file is not bloated",
+      "expectation": "The primary file is at most the maximum threshold lines, because instruction files compete with the user's problem for tokens.",
+      "violationSignal": "The primary file is above the maximum-lines threshold.",
+      "thresholdFlag": "--threshold-instruction-max-lines",
+      "defaultThreshold": 400
+    },
+    {
+      "checkId": "agentic-audit.project-purpose-documented",
+      "layer": "project-context-coverage",
+      "title": "Project purpose documented",
+      "expectation": "The instruction file states what the project is and who it is for in identifiable prose.",
+      "violationSignal": "No purpose statement."
+    },
+    {
+      "checkId": "agentic-audit.tech-stack-documented",
+      "layer": "project-context-coverage",
+      "title": "Tech stack documented",
+      "expectation": "The instruction file names the primary framework, language, and runtime.",
+      "violationSignal": "No tech-stack signals at all.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.architectural-mental-model-documented",
+      "layer": "project-context-coverage",
+      "title": "Architectural mental model documented",
+      "expectation": "The instruction file gives a brief architectural orientation: directory layout, dominant module pattern, or a link to ARCHITECTURE.md.",
+      "violationSignal": "No architectural orientation.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.domain-glossary-present",
+      "layer": "project-context-coverage",
+      "title": "Domain glossary present where appropriate",
+      "expectation": "When the project uses domain-specific terminology, the instruction file defines or links to a glossary.",
+      "violationSignal": "Heavy domain terminology with no glossary.",
+      "skipWhenAbsent": "No domain terminology is detected.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.links-to-canonical-docs",
+      "layer": "project-context-coverage",
+      "title": "Links to canonical human-facing docs",
+      "expectation": "The instruction file points the agent at the README, ARCHITECTURE.md, ADR directory, and CONTRIBUTING.md when those exist.",
+      "violationSignal": "None of the canonical docs are linked.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["documentation-audit"]
+    },
+    {
+      "checkId": "agentic-audit.build-test-run-commands-documented",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Build, test, and run commands documented",
+      "expectation": "The instruction file lists the canonical install, dev-server, test, and build commands or links to a section that does.",
+      "violationSignal": "None of the four basic commands are documented.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.code-style-conventions-documented",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Code-style and naming conventions documented",
+      "expectation": "The instruction file states the project's naming, import-ordering, formatting, and abbreviations conventions.",
+      "violationSignal": "No conventions documented in a non-trivial codebase.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.commit-branching-conventions-documented",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Commit and branching conventions documented",
+      "expectation": "The instruction file states the commit-message convention, branch-naming convention, and any git add policy.",
+      "violationSignal": "No commit conventions in a project with multiple contributors.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.testing-philosophy-documented",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Testing philosophy or approach documented",
+      "expectation": "The instruction file states the testing convention: framework, query priority, behaviour-over-implementation, snapshot policy.",
+      "violationSignal": "Tests exist but no testing convention is documented.",
+      "skipWhenAbsent": "No test files are present.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.do-and-do-not-guidance-present",
+      "layer": "operational-guidance-and-conventions",
+      "title": "What to do and what NOT to do guidance present",
+      "expectation": "The instruction file contains explicit agent guidance: things to avoid and things to prefer.",
+      "violationSignal": "No agent-specific guidance at all.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.tone-response-style-guidance-present",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Tone or response-style guidance present",
+      "expectation": "When the project surfaces user-facing AI features, the instruction file documents the desired response style or persona.",
+      "violationSignal": "AI surface present with no response-style guidance.",
+      "skipWhenAbsent": "No AI surface is detected.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.imperative-present-rule-signal",
+      "layer": "operational-guidance-and-conventions",
+      "title": "Imperative-present rule signal",
+      "expectation": "When the project requires Conventional Commits, the instruction file or a referenced doc demands the imperative-present subject form.",
+      "violationSignal": "Conventional Commits required but the imperative-present rule is not stated.",
+      "skipWhenAbsent": "Conventional Commits is not in use.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.settings-json-valid",
+      "layer": "claude-code-settings-hygiene",
+      "title": "settings.json is valid JSON",
+      "expectation": "When present, .claude/settings.json parses as JSON with no syntax errors.",
+      "violationSignal": "Parse error.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists."
+    },
+    {
+      "checkId": "agentic-audit.settings-local-gitignored",
+      "layer": "claude-code-settings-hygiene",
+      "title": "settings.local.json is gitignored",
+      "expectation": ".gitignore excludes settings.local.json so personal overrides do not leak into the project.",
+      "violationSignal": "settings.local.json is committed or not gitignored.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists."
+    },
+    {
+      "checkId": "agentic-audit.no-secrets-in-settings-json",
+      "layer": "claude-code-settings-hygiene",
+      "title": "No secrets in settings.json",
+      "expectation": "The file contains no entries that look like API keys, tokens, passwords, or private URLs.",
+      "violationSignal": "A secret-shape or secret-named pattern match is found.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists.",
+      "relatedAudits": ["security-audit"]
+    },
+    {
+      "checkId": "agentic-audit.no-secrets-in-settings-local-json",
+      "layer": "claude-code-settings-hygiene",
+      "title": "No secrets in settings.local.json",
+      "expectation": "settings.local.json holds no secret-shaped values; secrets belong in environment variables and a secret manager.",
+      "violationSignal": "Pattern match in settings.local.json.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["security-audit"]
+    },
+    {
+      "checkId": "agentic-audit.permissions-appropriately-scoped",
+      "layer": "claude-code-settings-hygiene",
+      "title": "Permissions are appropriately scoped",
+      "expectation": "The permissions.allow list does not contain more than the tolerated count of over-broad patterns.",
+      "violationSignal": "More than the threshold count of broad patterns such as Bash(*), Edit(*), or Write(*).",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists.",
+      "thresholdFlag": "--threshold-permission-broadness",
+      "defaultThreshold": 5
+    },
+    {
+      "checkId": "agentic-audit.permissions-deny-non-empty-in-deployed-projects",
+      "layer": "claude-code-settings-hygiene",
+      "title": "permissions.deny is non-empty in security-sensitive projects",
+      "expectation": "When the project ships to production, permissions.deny explicitly forbids destructive commands.",
+      "violationSignal": "The deny list is empty in a deployed project.",
+      "skipWhenAbsent": "The project is library-only, or neither settings file exists.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.hooks-reference-existing-scripts",
+      "layer": "claude-code-settings-hygiene",
+      "title": "Hooks reference scripts that exist",
+      "expectation": "Every configured hook command is a one-line shell expression or invokes a script that exists in the repository.",
+      "violationSignal": "A hook references a missing script.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists."
+    },
+    {
+      "checkId": "agentic-audit.env-vars-no-secrets",
+      "layer": "claude-code-settings-hygiene",
+      "title": "Environment variables do not contain secrets",
+      "expectation": "The env block's values are not concrete secrets; secret-looking names are tolerated only with empty or referenced values.",
+      "violationSignal": "A concrete secret value in env.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists."
+    },
+    {
+      "checkId": "agentic-audit.status-line-and-model-overrides-intentional",
+      "layer": "claude-code-settings-hygiene",
+      "title": "Status-line and model overrides are intentional",
+      "expectation": "When statusLine or model is set, the value matches a documented Claude Code option and is not a stale model identifier.",
+      "violationSignal": "A stale or invalid identifier.",
+      "skipWhenAbsent": "Neither .claude/settings.json nor .claude/settings.local.json exists.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.mcp-server-entries-auditable",
+      "layer": "claude-code-settings-hygiene",
+      "title": "MCP-server entries are auditable",
+      "expectation": "Every mcpServers entry has a recognisable command, a transport, and either no secrets or environment-variable references for secrets.",
+      "violationSignal": "A concrete secret in an MCP-server config.",
+      "skipWhenAbsent": "No mcpServers block exists.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.single-source-of-truth-for-shared-rules",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "Single source of truth for shared rules",
+      "expectation": "When more than one instruction file exists, one is the source of truth and the others reference it explicitly or are symlinks.",
+      "violationSignal": "Files contain conflicting guidance.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.tech-stack-mentions-match-dependencies",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "Tech-stack mentions match dependencies",
+      "expectation": "Frameworks and tools named in instruction files appear in package.json.",
+      "violationSignal": "Multiple stale framework references.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.commands-documented-match-scripts",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "Commands documented match package.json scripts",
+      "expectation": "Commands shown in instruction files reference scripts that exist in package.json.",
+      "violationSignal": "An instruction-file command references a missing script."
+    },
+    {
+      "checkId": "agentic-audit.cross-references-resolve",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "Cross-references resolve",
+      "expectation": "Internal references in instruction files point at files or directories that exist.",
+      "violationSignal": "A referenced file is missing.",
+      "relatedAudits": ["documentation-audit"]
+    },
+    {
+      "checkId": "agentic-audit.no-retired-model-identifiers",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "No retired-model identifiers",
+      "expectation": "Instruction files do not mention model IDs that have been retired.",
+      "violationSignal": "Multiple retired-model mentions in active guidance.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.instruction-file-freshness",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "Instruction-file freshness",
+      "expectation": "When the project has had recent activity, at least one instruction file has been modified within the freshness threshold.",
+      "violationSignal": "All instruction files older than the threshold in an active project.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "agentic-audit.no-abbreviations-in-agentic-prose",
+      "layer": "multi-agent-consistency-and-drift",
+      "title": "No abbreviations in agentic prose when the project requires it",
+      "expectation": "When a rule file declares a no-abbreviations policy, the instruction files comply with it.",
+      "violationSignal": "The policy is declared and the file violates it.",
+      "skipWhenAbsent": "No abbreviations policy is declared.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    }
+  ]
+}

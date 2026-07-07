@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "accessibility-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of accessibility audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete markup or configuration breaks the invariant."
+  },
+  "enrichmentFlags": [
+    {
+      "flag": "--severity=error",
+      "description": "Restrict reporting to error-level accessibility findings."
+    }
+  ],
+  "relatedAudits": [
+    {
+      "audit": "linting-audit",
+      "relationship": "Owns the eslint-plugin-jsx-a11y configuration this audit expects."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "accessibility-audit.jsx-accessibility-lint-plugin",
+      "layer": "tooling-and-automation",
+      "title": "jsx-accessibility lint plugin",
+      "expectation": "eslint-plugin-jsx-a11y is installed and the recommended or strict ruleset is enabled in the active ESLint configuration.",
+      "violationSignal": "The plugin is missing, the recommended set is not extended, or the plugin is disabled at file or directory level.",
+      "relatedAudits": ["linting-audit"]
+    },
+    {
+      "checkId": "accessibility-audit.axe-in-development",
+      "layer": "tooling-and-automation",
+      "title": "Axe in development",
+      "expectation": "@axe-core/react is initialised in development mode so violations are logged to the browser console during local work.",
+      "violationSignal": "The dependency is missing, or no entry point imports it behind a development guard."
+    },
+    {
+      "checkId": "accessibility-audit.component-test-integration",
+      "layer": "tooling-and-automation",
+      "title": "Component-test integration",
+      "expectation": "jest-axe or vitest-axe is available and at least one component test asserts toHaveNoViolations.",
+      "violationSignal": "The matcher dependency is missing, or no test file uses it."
+    },
+    {
+      "checkId": "accessibility-audit.end-to-end-accessibility-scan",
+      "layer": "tooling-and-automation",
+      "title": "End-to-end accessibility scan",
+      "expectation": "@axe-core/playwright or the Cypress equivalent is configured and at least one end-to-end spec runs an axe scan against a rendered page.",
+      "violationSignal": "The scanner dependency is missing, or no spec invokes it."
+    },
+    {
+      "checkId": "accessibility-audit.storybook-accessibility-addon",
+      "layer": "tooling-and-automation",
+      "title": "Storybook accessibility addon",
+      "expectation": "When Storybook is in use, @storybook/addon-a11y is registered.",
+      "violationSignal": "The Storybook configuration does not list the addon.",
+      "skipWhenAbsent": "Storybook is not detected."
+    },
+    {
+      "checkId": "accessibility-audit.continuous-integration-enforcement",
+      "layer": "tooling-and-automation",
+      "title": "Continuous integration enforcement",
+      "expectation": "A continuous-integration step runs the unit and end-to-end accessibility checks and fails the build on violations.",
+      "violationSignal": "No workflow step invokes the relevant accessibility test command."
+    },
+    {
+      "checkId": "accessibility-audit.semantic-html-over-generic-containers",
+      "layer": "component-patterns",
+      "title": "Semantic HTML over generic containers",
+      "expectation": "Interactive elements use the right tag and list-shaped UI uses list elements.",
+      "violationSignal": "A div or span with an onClick and no role, keyboard handler, or tabIndex; a list rendered with div children; a clickable item that should be a button or anchor."
+    },
+    {
+      "checkId": "accessibility-audit.aria-used-correctly",
+      "layer": "component-patterns",
+      "title": "ARIA used correctly",
+      "expectation": "ARIA attributes appear only on supporting elements, are not redundant, and are present where required.",
+      "violationSignal": "ARIA on an element where it has no effect, redundant ARIA, icon-only buttons without an accessible name, disclosure triggers without aria-expanded, or modals without aria-modal and a labelling strategy."
+    },
+    {
+      "checkId": "accessibility-audit.keyboard-support",
+      "layer": "component-patterns",
+      "title": "Keyboard support",
+      "expectation": "Every interactive element is reachable by Tab and operable by keyboard, and focus is visible.",
+      "violationSignal": "outline: none without a replacement focus style, custom widgets that skip the authoring-practices keyboard model, or keydown handlers that block default behaviour without re-implementing it."
+    },
+    {
+      "checkId": "accessibility-audit.focus-management",
+      "layer": "component-patterns",
+      "title": "Focus management",
+      "expectation": "Modals trap focus and restore on close, route changes move focus to a sensible target, and a skip-to-content link is the first focusable element.",
+      "violationSignal": "A modal without focus trap and restoration, a custom router with no focus handling, or auto-focus on load on a non-form-first page."
+    },
+    {
+      "checkId": "accessibility-audit.forms",
+      "layer": "component-patterns",
+      "title": "Forms",
+      "expectation": "Every input has an associated label, errors are programmatically associated with fields, required fields are indicated for both screen readers and sighted users, and grouped controls use fieldset and legend.",
+      "violationSignal": "An input whose only label is a placeholder, an error not tied to its field by aria-describedby, a required field marked only with an asterisk, or a radio or checkbox group without fieldset and legend."
+    },
+    {
+      "checkId": "accessibility-audit.images-and-media",
+      "layer": "component-patterns",
+      "title": "Images and media",
+      "expectation": "Every img has an alt attribute, content SVG icons have an accessible name, videos have captions, and auto-playing media is muted with a pause control.",
+      "violationSignal": "img without alt, a content SVG with no accessible name, or video autoplay without muted and a pause control."
+    },
+    {
+      "checkId": "accessibility-audit.colour-and-contrast",
+      "layer": "component-patterns",
+      "title": "Colour and contrast",
+      "expectation": "Text colours meet WCAG AA contrast against their backgrounds and information is never conveyed by colour alone.",
+      "violationSignal": "Statically-defined text and background pairings below 4.5:1 (or 3:1 for large text), or UI states differentiated only by colour."
+    },
+    {
+      "checkId": "accessibility-audit.motion-and-animation",
+      "layer": "component-patterns",
+      "title": "Motion and animation",
+      "expectation": "Long animations respect prefers-reduced-motion and no essential information is delivered through animation alone.",
+      "violationSignal": "Animations longer than five seconds with no pause control, global stylesheets with no prefers-reduced-motion block, or auto-rotating carousels without pause."
+    },
+    {
+      "checkId": "accessibility-audit.text-and-content-structure",
+      "layer": "component-patterns",
+      "title": "Text and content structure",
+      "expectation": "Headings are in document order with no skipped levels and link text is descriptive in isolation.",
+      "violationSignal": "A page that skips heading levels, multiple h1 per page outside a warranted context, or non-descriptive link text."
+    },
+    {
+      "checkId": "accessibility-audit.document-language",
+      "layer": "application-shell",
+      "title": "Document language",
+      "expectation": "The HTML shell sets html lang to a real language code.",
+      "violationSignal": "The HTML shell does not set a non-empty lang."
+    },
+    {
+      "checkId": "accessibility-audit.per-route-document-titles",
+      "layer": "application-shell",
+      "title": "Per-route document titles",
+      "expectation": "The document title updates on every navigation using the framework's title primitive.",
+      "violationSignal": "Routed views do not update the document title."
+    },
+    {
+      "checkId": "accessibility-audit.skip-to-content-link",
+      "layer": "application-shell",
+      "title": "Skip-to-content link",
+      "expectation": "A skip link to the main landmark exists and is the first focusable element on every page.",
+      "violationSignal": "No visible-on-focus skip link is rendered in the application shell."
+    },
+    {
+      "checkId": "accessibility-audit.route-announcement",
+      "layer": "application-shell",
+      "title": "Route announcement",
+      "expectation": "Client-side navigations are announced to assistive technology.",
+      "violationSignal": "No live region or framework-provided announcer handles route changes."
+    },
+    {
+      "checkId": "accessibility-audit.viewport-meta",
+      "layer": "application-shell",
+      "title": "Viewport meta",
+      "expectation": "The viewport meta tag is present and does not disable scaling.",
+      "violationSignal": "The viewport meta is missing, or sets user-scalable=no or maximum-scale=1."
+    },
+    {
+      "checkId": "accessibility-audit.landmark-roles",
+      "layer": "application-shell",
+      "title": "Landmark roles",
+      "expectation": "The application shell renders the standard landmarks once per page, with navigation and complementary where the design has them.",
+      "violationSignal": "Duplicate landmarks of the same role without a differentiating aria-label, or missing core landmarks."
+    },
+    {
+      "checkId": "accessibility-audit.error-and-not-found-pages",
+      "layer": "application-shell",
+      "title": "Error and not-found pages",
+      "expectation": "Custom error and 404 pages have a heading, manage focus, and offer a way back to the main application.",
+      "violationSignal": "An error or not-found route without a heading or without a link back to a known landing route."
+    },
+    {
+      "checkId": "accessibility-audit.authentication-pages",
+      "layer": "application-shell",
+      "title": "Authentication pages",
+      "expectation": "Sign-in and sign-up forms support password-manager autofill, declare input purposes, and do not trap users in modal flows that break with a screen reader.",
+      "violationSignal": "Inputs use the wrong autoComplete values, or forms are nested inside non-dismissible modals."
+    }
+  ]
+}

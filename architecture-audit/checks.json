@@ -1,0 +1,194 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "architecture-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of architecture audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete code or configuration breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--pattern",
+      "description": "Declare the intended architectural pattern (layered, feature-folders, hexagonal) so boundary checks judge against the stated intent."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-god-module",
+    "--threshold-god-component",
+    "--threshold-file-size",
+    "--threshold-fan-out"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "pre-audit-setup",
+      "relationship": "Builds the knowledge graph the boundary and coupling checks read from."
+    },
+    {
+      "audit": "react-audit",
+      "relationship": "Owns component-level design; state and data-flow checks overlap."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "architecture-audit.no-circular-dependencies",
+      "layer": "module-boundaries",
+      "title": "No circular dependencies",
+      "expectation": "The dependency graph is acyclic.",
+      "violationSignal": "One or more cycles are detected by the knowledge graph; each cycle is reported as an ordered list of module paths.",
+      "enrichmentSources": ["graphify-out/graph.json"]
+    },
+    {
+      "checkId": "architecture-audit.feature-folders-single-entry-point",
+      "layer": "module-boundaries",
+      "title": "Feature folders have a single entry point",
+      "expectation": "Each top-level feature or module folder exposes a barrel index.ts and external imports go through it.",
+      "violationSignal": "An external file imports from a deep path inside a feature folder, bypassing its index.ts."
+    },
+    {
+      "checkId": "architecture-audit.no-deep-relative-imports",
+      "layer": "module-boundaries",
+      "title": "No deep relative imports",
+      "expectation": "Relative imports go up at most two levels (../../).",
+      "violationSignal": "Any import string containing ../../../ or deeper."
+    },
+    {
+      "checkId": "architecture-audit.no-back-imports-across-layers",
+      "layer": "module-boundaries",
+      "title": "No back-imports across layers",
+      "expectation": "In a layered pattern, upstream layers do not import from downstream layers; in a feature-folder pattern, sibling features import only through their public entry points.",
+      "violationSignal": "An import that crosses a boundary in the wrong direction, reported with importer, import, and direction."
+    },
+    {
+      "checkId": "architecture-audit.cross-workspace-contracts-respected",
+      "layer": "module-boundaries",
+      "title": "Cross-workspace contracts respected",
+      "expectation": "Internal packages import only from each other's published entry points, not deep paths.",
+      "violationSignal": "A deep import into another workspace's src/ directory.",
+      "skipWhenAbsent": "The project is not a monorepo."
+    },
+    {
+      "checkId": "architecture-audit.no-god-module",
+      "layer": "coupling-and-complexity",
+      "title": "No god module",
+      "expectation": "No single module has fan-in greater than the threshold.",
+      "violationSignal": "A module exceeds the threshold, reported with its path, rank, and inbound edge count.",
+      "thresholdFlag": "--threshold-god-module",
+      "defaultThreshold": 30
+    },
+    {
+      "checkId": "architecture-audit.no-god-component",
+      "layer": "coupling-and-complexity",
+      "title": "No god component",
+      "expectation": "No React component is rendered by more than the threshold number of parents.",
+      "violationSignal": "A component exceeds the threshold, reported with its path and the count of distinct rendering parents.",
+      "thresholdFlag": "--threshold-god-component",
+      "defaultThreshold": 25
+    },
+    {
+      "checkId": "architecture-audit.file-size-budget",
+      "layer": "coupling-and-complexity",
+      "title": "File size budget",
+      "expectation": "No source file exceeds the threshold in lines.",
+      "violationSignal": "A file exceeds the threshold, reported with its line count.",
+      "thresholdFlag": "--threshold-file-size",
+      "defaultThreshold": 400
+    },
+    {
+      "checkId": "architecture-audit.component-fan-out-budget",
+      "layer": "coupling-and-complexity",
+      "title": "Component fan-out budget",
+      "expectation": "No component imports more than the threshold number of modules.",
+      "violationSignal": "A component exceeds the threshold, reported with the count and the imported modules.",
+      "thresholdFlag": "--threshold-fan-out",
+      "defaultThreshold": 15
+    },
+    {
+      "checkId": "architecture-audit.no-orphaned-files",
+      "layer": "coupling-and-complexity",
+      "title": "No orphaned files",
+      "expectation": "Every source file is reachable from at least one entry point.",
+      "violationSignal": "Files with zero inbound edges that are not themselves entry points, reported as likely-dead modules for the user to verify."
+    },
+    {
+      "checkId": "architecture-audit.single-state-management-strategy",
+      "layer": "state-and-data-flow",
+      "title": "Single state-management strategy",
+      "expectation": "Exactly one global state strategy is used, not multiple in the same application.",
+      "violationSignal": "Two or more state-management libraries are present with no declared migration path."
+    },
+    {
+      "checkId": "architecture-audit.data-fetching-layer-separated",
+      "layer": "state-and-data-flow",
+      "title": "Data fetching layer separated",
+      "expectation": "Server state lives in a designated data-fetching layer, not in component-level useEffect plus fetch.",
+      "violationSignal": "Files outside the designated hooks or data layer call fetch, axios, or framework data primitives directly."
+    },
+    {
+      "checkId": "architecture-audit.no-global-mutable-singletons",
+      "layer": "state-and-data-flow",
+      "title": "No global mutable singletons",
+      "expectation": "No top-level let exports hold mutable state.",
+      "violationSignal": "A module-level mutable export such as export let x = ..."
+    },
+    {
+      "checkId": "architecture-audit.side-effects-isolated",
+      "layer": "state-and-data-flow",
+      "title": "Side effects isolated",
+      "expectation": "Components go through a hook or service module rather than reading or writing localStorage, sessionStorage, document.cookie, or window.* directly.",
+      "violationSignal": "Direct usage of those browser globals in component files."
+    },
+    {
+      "checkId": "architecture-audit.server-vs-client-distinction",
+      "layer": "state-and-data-flow",
+      "title": "Server vs. client distinction",
+      "expectation": "The 'use client' directive is used deliberately, and server and client components do not import each other's exclusive modules.",
+      "violationSignal": "A 'use client' file importing a server-only module, a server component importing a client-only one, or more than half of components marked client.",
+      "skipWhenAbsent": "The Next.js App Router is not in use.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "architecture-audit.file-naming-consistency",
+      "layer": "convention-adherence",
+      "title": "File-naming consistency",
+      "expectation": "Files match the dominant naming pattern in their directory.",
+      "violationSignal": "Files whose name does not match the dominant pattern in their directory.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "architecture-audit.directory-structure-consistency",
+      "layer": "convention-adherence",
+      "title": "Directory-structure consistency",
+      "expectation": "Every directory at the same depth follows the same organisational convention as siblings of the same kind.",
+      "violationSignal": "A directory that does not match the inferred pattern for its kind.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "architecture-audit.index-barrels-consistent",
+      "layer": "convention-adherence",
+      "title": "Index barrels consistent",
+      "expectation": "If barrel files are used in any feature folder, they are used in every feature folder.",
+      "violationSignal": "Mixed-mode barrel usage across feature folders.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "architecture-audit.public-api-documented",
+      "layer": "convention-adherence",
+      "title": "Public API documented",
+      "expectation": "Each feature folder's index.ts has a documenting comment block, or the folder has a README.md.",
+      "violationSignal": "Feature folders without either a documenting barrel comment or a README.md.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "relatedAudits": ["documentation-audit"]
+    }
+  ]
+}

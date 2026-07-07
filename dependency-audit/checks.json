@@ -1,0 +1,210 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "dependency-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of dependency-health audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete dependency state breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-network",
+      "description": "Enrich findings with registry data such as latest versions, deprecation flags, and publish dates."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-major-versions-behind",
+    "--threshold-abandonment-months",
+    "--security-critical-packages"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "quality-gates-audit",
+      "relationship": "Owns whether the vulnerability scan and license check run as gates."
+    },
+    {
+      "audit": "security-audit",
+      "relationship": "Owns application-level security; this audit owns supply-chain and dependency vulnerabilities."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "dependency-audit.no-high-or-critical-vulnerabilities",
+      "layer": "security",
+      "title": "No high or critical vulnerabilities",
+      "expectation": "The package manager's audit reports no high or critical advisories.",
+      "violationSignal": "Any high or critical advisory, reported with package, severity, advisory ID, and fix availability.",
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.no-moderate-vulnerabilities",
+      "layer": "security",
+      "title": "No moderate vulnerabilities",
+      "expectation": "The package manager's audit reports no moderate advisories.",
+      "violationSignal": "Moderate advisories present.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.lockfile-present-and-committed",
+      "layer": "security",
+      "title": "Lockfile present and committed",
+      "expectation": "A lockfile exists and is tracked by git.",
+      "violationSignal": "No lockfile, or the lockfile is in .gitignore."
+    },
+    {
+      "checkId": "dependency-audit.lockfile-integrity-verifiable",
+      "layer": "security",
+      "title": "Lockfile integrity verifiable",
+      "expectation": "The lockfile carries integrity hashes and continuous integration uses the frozen-install variant.",
+      "violationSignal": "A lockfile format without integrity hashes, or continuous-integration scripts not using the frozen-install variant."
+    },
+    {
+      "checkId": "dependency-audit.no-install-scripts-from-untrusted-packages",
+      "layer": "security",
+      "title": "No install scripts from untrusted packages",
+      "expectation": "Direct dependencies that declare lifecycle scripts are limited to a known-trusted allowlist.",
+      "violationSignal": "Direct-dependency lifecycle scripts from packages outside the allowlist, reported with the package, the script, and the script body."
+    },
+    {
+      "checkId": "dependency-audit.continuous-integration-vulnerability-scanning-enabled",
+      "layer": "security",
+      "title": "Continuous-integration vulnerability scanning enabled",
+      "expectation": "A continuous-integration workflow runs the package manager's audit, or Dependabot, Snyk, or Renovate configuration is present.",
+      "violationSignal": "No such automation detected.",
+      "relatedAudits": ["quality-gates-audit"]
+    },
+    {
+      "checkId": "dependency-audit.no-dependencies-more-than-two-majors-behind",
+      "layer": "health",
+      "title": "No dependencies more than two majors behind",
+      "expectation": "Each direct dependency is at most the threshold number of major versions behind its latest release.",
+      "violationSignal": "A direct dependency exceeds the threshold, reported with current and latest.",
+      "thresholdFlag": "--threshold-major-versions-behind",
+      "defaultThreshold": 2,
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.no-deprecated-major-usage",
+      "layer": "health",
+      "title": "No deprecated-major usage",
+      "expectation": "No direct dependency runs on an upstream-deprecated major version.",
+      "violationSignal": "Deprecated-major usage.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.no-abandoned-packages",
+      "layer": "health",
+      "title": "No abandoned packages",
+      "expectation": "No direct dependency has gone more than the threshold months without a publish.",
+      "violationSignal": "Direct dependencies whose latest publish is older than the threshold.",
+      "softCheck": true,
+      "thresholdFlag": "--threshold-abandonment-months",
+      "defaultThreshold": 24,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.no-officially-deprecated-packages",
+      "layer": "health",
+      "title": "No officially deprecated packages",
+      "expectation": "No direct dependency carries a deprecated flag in the registry.",
+      "violationSignal": "A deprecated direct dependency, reported with the deprecation message and recommended replacement.",
+      "enrichmentFlags": ["--with-network"]
+    },
+    {
+      "checkId": "dependency-audit.peer-dependencies-satisfied",
+      "layer": "health",
+      "title": "Peer dependencies satisfied",
+      "expectation": "Every declared peer dependency in the tree resolves to a satisfying version.",
+      "violationSignal": "Unsatisfied peer dependency warnings from the package manager's list command."
+    },
+    {
+      "checkId": "dependency-audit.every-package-has-a-license",
+      "layer": "compliance",
+      "title": "Every package has a license declared",
+      "expectation": "No package in the dependency tree is missing a license field.",
+      "violationSignal": "Packages with UNLICENSED, an unresolvable SEE LICENSE IN reference, or a missing field."
+    },
+    {
+      "checkId": "dependency-audit.strong-copyleft-licenses-flagged",
+      "layer": "compliance",
+      "title": "Strong-copyleft licenses are flagged for human review",
+      "expectation": "The audit surfaces GPL, AGPL, or LGPL packages for human review, passing them only when an allowlist file includes them.",
+      "violationSignal": "GPL, AGPL, or LGPL in the tree with no allowlist file.",
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "dependency-audit.restrictive-licenses-flagged",
+      "layer": "compliance",
+      "title": "Source-available restrictive licenses are flagged for human review",
+      "expectation": "The audit surfaces SSPL, BUSL, Commons Clause, or similar for human review, passing them only when an allowlist file includes them.",
+      "violationSignal": "Restrictive licenses present without an allowlist.",
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "dependency-audit.license-checker-tool-present",
+      "layer": "compliance",
+      "title": "License-checker tool present",
+      "expectation": "A license-enforcement tool is configured and a continuous-integration step runs it.",
+      "violationSignal": "No license tool detected, or a tool present without a continuous-integration step invoking it.",
+      "relatedAudits": ["quality-gates-audit"]
+    },
+    {
+      "checkId": "dependency-audit.no-unused-dependencies",
+      "layer": "hygiene",
+      "title": "No unused dependencies",
+      "expectation": "Every entry in dependencies and devDependencies is imported somewhere in the project.",
+      "violationSignal": "Packages declared but never imported; the finding records the confidence level.",
+      "enrichmentSources": ["graphify-out/graph.json"]
+    },
+    {
+      "checkId": "dependency-audit.no-misplaced-dependencies",
+      "layer": "hygiene",
+      "title": "No misplaced dependencies",
+      "expectation": "Production packages live in dependencies and development-only packages live in devDependencies.",
+      "violationSignal": "A devDependency imported by production code, or a dependency imported only by test or build files.",
+      "enrichmentSources": ["graphify-out/graph.json"]
+    },
+    {
+      "checkId": "dependency-audit.no-duplicate-packages",
+      "layer": "hygiene",
+      "title": "No duplicate packages",
+      "expectation": "Each package appears at exactly one resolved version in the lockfile.",
+      "violationSignal": "The same package name at multiple versions in the lockfile."
+    },
+    {
+      "checkId": "dependency-audit.no-package-manager-mixing",
+      "layer": "hygiene",
+      "title": "No package-manager mixing",
+      "expectation": "Exactly one lockfile is present and continuous integration uses the same package manager that produced it.",
+      "violationSignal": "Multiple lockfiles, or a workflow using a different package manager than the lockfile implies."
+    },
+    {
+      "checkId": "dependency-audit.security-critical-packages-exact-pinned",
+      "layer": "hygiene",
+      "title": "Security-critical packages exact-pinned",
+      "expectation": "A configurable allowlist of security-critical packages is exact-pinned in package.json.",
+      "violationSignal": "Security-critical packages declared with a caret or tilde range.",
+      "softCheck": true,
+      "thresholdFlag": "--security-critical-packages",
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "dependency-audit.engines-field-declared",
+      "layer": "hygiene",
+      "title": "engines field declared",
+      "expectation": "package.json declares the supported node version range.",
+      "violationSignal": "The engines field is absent."
+    }
+  ]
+}

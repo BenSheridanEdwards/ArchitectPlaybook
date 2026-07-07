@@ -1,21 +1,16 @@
 # Project rules for the architect-playbook
 
-These rules apply to every Claude Code session that opens this repository, and to every skill authored inside it. They are intentionally short. If a rule and a skill body disagree, the rule wins and the skill body should be patched (run `/system-self-improve` if appropriate).
+Read [AGENTS.md](AGENTS.md) first — this file adds only the Claude-specific
+layer on top of it. AGENTS.md is the tool-agnostic contract: what the repo is,
+how to run the gates, the operating rules, and the truth rules. The commit,
+naming, and skill-authoring conventions the validator enforces live in
+[.agents/CONVENTIONS.md](.agents/CONVENTIONS.md). The gate matrix lives in
+[.agents/QUALITY_GATES.md](.agents/QUALITY_GATES.md); the pull-request contract
+lives in [.agents/PR_QUALITY.md](.agents/PR_QUALITY.md).
 
-## Commits
-
-- **Use Conventional Commits for every commit.** Subject lines use the imperative present tense.
-- Common types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`.
-- Commit subjects must be machine-parseable. No free-form subjects, no skipping the type prefix.
-- Stage files explicitly. Do not use `git add -A` or `git add .` in committed examples or recommendations.
-
-## Naming and language
-
-- **No abbreviations.** Spell every word out.
-  - Correct: Documentation, Performance, Accessibility, Dependency, Configuration, Authentication, Repository, Authorization, Internationalization.
-  - Incorrect: Documentation → docs, Performance → perf, Accessibility → a11y, Dependency → dep, Configuration → config (in prose), Authentication → auth, Repository → repo.
-- Skill folder names match their slash-command trigger. The trigger field in the YAML frontmatter equals `/<folder-name>`.
-- Filenames may keep their canonical ecosystem form (`.gitignore`, `tsconfig.json`, `package.json`). The no-abbreviations rule applies to prose, identifiers, headings, and triggers.
+The rules below govern how a Claude Code session authors and runs the skills in
+this repository. If a rule and a skill body disagree, the rule wins and the
+skill body should be patched (run `/system-self-improve` if appropriate).
 
 ## Skill structure
 
@@ -52,6 +47,7 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
   - `.architect-audits/<skill-name>/findings.json` — machine-readable for downstream skills.
   - `.architect-audits/<skill-name>/snapshot.md` — diagnostic snapshot.
   - `.architect-audits/<skill-name>/metadata.json` — skill version, run timestamp, graphify revision hash.
+- **`checks.json` mirrors the layers.** When an audit ships a `checks.json` beside its `SKILL.md`, every check's `layer` must match a layer (or lifecycle stage) heading in the body, and the file must stay aligned whenever a check is added, removed, renamed, or moved. The validator enforces this.
 
 ## Cross-session handoff
 
@@ -71,19 +67,6 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 - Never hard-code absolute paths in skill bodies.
 - Derive from the current working directory or `$HOME`.
 - Never write to `~/.claude/settings.json` from any skill in this playbook. Project-local settings only.
-
-## Agent tooling
-
-This repo is wired for Claude Code with three tools:
-
-- **Ponytail** — default lazy-coding mode (global plugin). `/ponytail lite|full|ultra`.
-- **GitNexus** — code-intelligence graph. MCP server in `.mcp.json` (`npx -y gitnexus mcp`,
-  no global install needed); skills in `.claude/skills/gitnexus/`; index in `.gitnexus/`
-  (gitignored). (Re)index with `npx gitnexus analyze`. See the auto-generated
-  **GitNexus — Code Intelligence** block below — it is managed by `gitnexus analyze`
-  (`<!-- gitnexus:start/end -->`) and rewritten on every re-index; do not hand-edit inside it.
-- **Graphify** — `/graphify` builds a navigable knowledge graph under `graphify-out/`
-  (gitignored). Use it for architecture and file-relationship questions.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

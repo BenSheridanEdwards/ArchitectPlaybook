@@ -1,0 +1,269 @@
+{
+  "schemaVersion": "1.0.0",
+  "skillName": "performance-audit",
+  "humanCanonicalSource": "SKILL.md",
+  "description": "Machine-readable inventory of performance audit checks for validation and generated maps.",
+  "statusTaxonomy": {
+    "present": "The expected invariant is fully satisfied.",
+    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "missing": "A structural prerequisite is absent.",
+    "violation": "Concrete code breaks the invariant."
+  },
+  "informationalLayers": [
+    "diagnostic-snapshot"
+  ],
+  "enrichmentFlags": [
+    {
+      "flag": "--with-lighthouse-results",
+      "description": "Enrich findings with Lighthouse metrics from a results file, cross-validating the LCP element and Core Web Vitals."
+    }
+  ],
+  "thresholdFlags": [
+    "--threshold-virtualization"
+  ],
+  "relatedAudits": [
+    {
+      "audit": "bundle-build-audit",
+      "relationship": "Owns bundle-size budgets; this audit owns runtime and rendering cost."
+    },
+    {
+      "audit": "react-audit",
+      "relationship": "Owns correctness-driven memoization; this audit owns performance-driven memoization."
+    }
+  ],
+  "checks": [
+    {
+      "checkId": "performance-audit.expensive-computations-memoized",
+      "layer": "render-performance",
+      "title": "Expensive computations memoized",
+      "expectation": "Expensive derivations inside component bodies are wrapped in useMemo or moved out of render.",
+      "violationSignal": "A known-expensive method at the top level of a render function with non-trivial inputs and no useMemo wrapping."
+    },
+    {
+      "checkId": "performance-audit.stable-references-for-memod-children-props",
+      "layer": "render-performance",
+      "title": "Stable references for memo'd children's props",
+      "expectation": "Components wrapped in React.memo receive object, array, or function props that are stable across renders.",
+      "violationSignal": "An inline object literal or arrow function passed to a React.memo-wrapped child as a prop."
+    },
+    {
+      "checkId": "performance-audit.stable-context-values",
+      "layer": "render-performance",
+      "title": "Stable Context values",
+      "expectation": "Context provider values are wrapped in useMemo so consumers do not re-render on every parent render.",
+      "violationSignal": "A Context.Provider with a fresh object literal as its value each render."
+    },
+    {
+      "checkId": "performance-audit.long-lists-virtualized",
+      "layer": "render-performance",
+      "title": "Long lists virtualized",
+      "expectation": "Lists rendering more than the threshold of repeating items use a virtualization library.",
+      "violationSignal": "A .map rendering more items than the threshold without a virtualization wrapper.",
+      "thresholdFlag": "--threshold-virtualization",
+      "defaultThreshold": 50
+    },
+    {
+      "checkId": "performance-audit.stable-list-keys",
+      "layer": "render-performance",
+      "title": "Stable list keys",
+      "expectation": "List keys are stable, unique, and not the array index when items can be inserted, removed, or reordered.",
+      "violationSignal": "key={index} patterns in lists where the data shape suggests reordering is possible."
+    },
+    {
+      "checkId": "performance-audit.react-memo-for-pure-components-in-hot-paths",
+      "layer": "render-performance",
+      "title": "React.memo for pure components in hot paths",
+      "expectation": "Pure components rendered many times per parent render are wrapped in React.memo.",
+      "violationSignal": "Frequently-rendered pure components without React.memo wrapping.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"],
+      "enrichmentSources": ["graphify-out/graph.json"]
+    },
+    {
+      "checkId": "performance-audit.no-expensive-work-in-render-without-memoization",
+      "layer": "render-performance",
+      "title": "No expensive work in render without memoization",
+      "expectation": "Render bodies do not synchronously perform large transformations without useMemo.",
+      "violationSignal": "Detected hot patterns running unconditionally in render bodies."
+    },
+    {
+      "checkId": "performance-audit.usestate-lazy-initialiser-for-heavy-initial-values",
+      "layer": "render-performance",
+      "title": "useState lazy initialiser for heavy initial values",
+      "expectation": "Expensive initial values use the lazy initialiser form of useState.",
+      "violationSignal": "useState(expensiveCompute()) with a non-trivial right-hand side that runs on every render."
+    },
+    {
+      "checkId": "performance-audit.single-data-fetching-strategy",
+      "layer": "network-and-data",
+      "title": "Single data-fetching strategy",
+      "expectation": "Exactly one data-fetching strategy is used, not multiple in the same application.",
+      "violationSignal": "Two or more strategies present in dependencies and used in source."
+    },
+    {
+      "checkId": "performance-audit.stale-time-configured",
+      "layer": "network-and-data",
+      "title": "Stale-time configured",
+      "expectation": "The detected data layer has a non-zero default staleTime or equivalent.",
+      "violationSignal": "A default staleTime of 0 in the global query client configuration.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "performance-audit.parallel-fetches-use-parallel-patterns",
+      "layer": "network-and-data",
+      "title": "Parallel fetches use parallel patterns",
+      "expectation": "Multiple independent fetches in the same render path use parallel patterns rather than sequential await chains.",
+      "violationSignal": "Sequentially awaited fetches with no data dependency between them."
+    },
+    {
+      "checkId": "performance-audit.no-n-plus-one-fetch-patterns",
+      "layer": "network-and-data",
+      "title": "No N+1 fetch patterns",
+      "expectation": "Lists do not fire one fetch per row from inside list items.",
+      "violationSignal": "A useQuery or equivalent called inside a list item's render path."
+    },
+    {
+      "checkId": "performance-audit.request-deduplication-available",
+      "layer": "network-and-data",
+      "title": "Request deduplication available",
+      "expectation": "The detected data layer deduplicates concurrent requests for the same key.",
+      "violationSignal": "A custom data layer with no deduplication."
+    },
+    {
+      "checkId": "performance-audit.prefetching-for-predictable-navigation",
+      "layer": "network-and-data",
+      "title": "Prefetching for predictable navigation",
+      "expectation": "Links to known navigation targets prefetch.",
+      "violationSignal": "Custom anchor-based navigation in apps where the data layer supports prefetching.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "performance-audit.streaming-and-suspense-for-slow-data",
+      "layer": "network-and-data",
+      "title": "Streaming and Suspense for slow data",
+      "expectation": "Long-loading data sections are wrapped in Suspense boundaries with meaningful fallbacks.",
+      "violationSignal": "Slow data fetches in route handlers or server components that block the entire route render.",
+      "skipWhenAbsent": "The project is not on the Next.js App Router."
+    },
+    {
+      "checkId": "performance-audit.server-rendered-data-not-refetched-on-client",
+      "layer": "network-and-data",
+      "title": "Server-rendered data not re-fetched on client",
+      "expectation": "Data already available from a server component, route loader, or initial server render is not re-fetched on the client.",
+      "violationSignal": "Patterns where server-rendered data is also fetched via a client-side hook."
+    },
+    {
+      "checkId": "performance-audit.framework-image-primitive-used",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Framework image primitive used",
+      "expectation": "Images use the framework's image component; native img is reserved for icon-sized SVG and decorative purposes.",
+      "violationSignal": "Plain img tags pointing at content imagery in a framework that provides an image primitive."
+    },
+    {
+      "checkId": "performance-audit.lcp-image-marked-priority",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "LCP image marked priority",
+      "expectation": "At least one image per landing route is marked as the priority or eager-loaded LCP candidate.",
+      "violationSignal": "No priority or eager-loaded image on landing routes, or the hero image is not the priority one.",
+      "enrichmentFlags": ["--with-lighthouse-results"]
+    },
+    {
+      "checkId": "performance-audit.explicit-dimensions-on-images",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Explicit dimensions on images",
+      "expectation": "Every image has explicit width and height, or CSS aspect-ratio, to avoid Cumulative Layout Shift.",
+      "violationSignal": "An image with no dimensions and no aspect-ratio CSS."
+    },
+    {
+      "checkId": "performance-audit.lazy-loading-below-the-fold-images",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Lazy loading below-the-fold images",
+      "expectation": "Below-the-fold images use lazy loading.",
+      "violationSignal": "Forced eager loading on below-the-fold imagery."
+    },
+    {
+      "checkId": "performance-audit.fonts-use-font-display-swap",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Fonts use font-display swap or optional",
+      "expectation": "Web fonts are configured with font-display: swap or optional, with critical fonts preloaded.",
+      "violationSignal": "Fonts loaded without font-display, or with font-display: block."
+    },
+    {
+      "checkId": "performance-audit.critical-css-handled",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Critical CSS handled",
+      "expectation": "The framework handles critical CSS extraction, or the project explicitly inlines critical CSS for hero and landing routes.",
+      "violationSignal": "Neither path is set up.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "performance-audit.no-layout-shifting-late-content",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "No layout-shifting late content",
+      "expectation": "Content that loads asynchronously has reserved space so it does not push other content when it arrives.",
+      "violationSignal": "Async-loading content with no reserved dimensions."
+    },
+    {
+      "checkId": "performance-audit.video-autoplay-is-muted",
+      "layer": "assets-media-and-core-web-vitals",
+      "title": "Video autoplay is muted",
+      "expectation": "video autoplay is paired with muted.",
+      "violationSignal": "Autoplay videos without muted."
+    },
+    {
+      "checkId": "performance-audit.long-computations-deferred-or-workered",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Long computations deferred or workered",
+      "expectation": "Computations that visibly block the main thread use useDeferredValue, startTransition, requestIdleCallback, or a Web Worker.",
+      "violationSignal": "Detected hot patterns running synchronously in event handlers or effects.",
+      "softCheck": true,
+      "allowedStatuses": ["present", "partial", "violation"]
+    },
+    {
+      "checkId": "performance-audit.high-frequency-handlers-throttled",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Scroll, resize, and mousemove handlers throttled",
+      "expectation": "High-frequency event handlers are debounced or throttled.",
+      "violationSignal": "Scroll or equivalent handlers firing without throttling."
+    },
+    {
+      "checkId": "performance-audit.animations-use-compositor-friendly-properties",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Animations use compositor-friendly properties",
+      "expectation": "Animations change transform, opacity, or filter rather than layout properties.",
+      "violationSignal": "CSS or JS-driven animations that touch layout properties such as width, height, top, left, or margin."
+    },
+    {
+      "checkId": "performance-audit.web-vitals-reporting-integrated",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Web Vitals reporting integrated",
+      "expectation": "The project reports Web Vitals to a backend.",
+      "violationSignal": "No Web Vitals reporting detected."
+    },
+    {
+      "checkId": "performance-audit.real-user-monitoring-integrated",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Real User Monitoring integrated",
+      "expectation": "A Real User Monitoring provider is configured for production.",
+      "violationSignal": "No Real User Monitoring detected."
+    },
+    {
+      "checkId": "performance-audit.lighthouse-continuous-integration-configured",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Lighthouse CI configured",
+      "expectation": "Lighthouse CI runs in continuous integration with thresholds for performance score and Core Web Vitals.",
+      "violationSignal": "No Lighthouse CI configuration detected.",
+      "relatedAudits": ["bundle-build-audit"]
+    },
+    {
+      "checkId": "performance-audit.performance-budgets-defined-and-enforced",
+      "layer": "main-thread-work-and-measurement",
+      "title": "Performance budgets defined and enforced",
+      "expectation": "The project enforces budgets on Lighthouse-derived metrics and continuous integration fails the build when they regress.",
+      "violationSignal": "No metric budgets defined, or defined but not enforced."
+    }
+  ]
+}

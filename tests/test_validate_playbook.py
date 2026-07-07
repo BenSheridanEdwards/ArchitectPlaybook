@@ -162,6 +162,30 @@ class ValidatePlaybookTests(unittest.TestCase):
             self.assertTrue(any("duplicate checkId" in finding.message for finding in findings))
             self.assertTrue(any("unknown layer" in finding.message for finding in findings))
 
+    def test_audit_layer_slugs_reads_stage_headings(self) -> None:
+        body = (
+            "### Stage 1 — Pre-commit (fast, runs on every commit attempt)\n"
+            "### Stage 2 — Pre-push (slower, runs once before pushing)\n"
+            "### Layer 1 — Test runner\n"
+        )
+        slugs = validate_playbook.audit_layer_slugs(body)
+        self.assertIn("pre-commit", slugs)
+        self.assertIn("pre-push", slugs)
+        self.assertIn("test-runner", slugs)
+
+    def test_check_metadata_accepts_stage_based_layer(self) -> None:
+        stage_skill = VALID_SKILL + "\n### Stage 1 — Pre-commit (fast)\n\n"
+        stage_checks = VALID_CHECKS_JSON.replace('"test-runner"', '"pre-commit"')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(stage_skill, encoding="utf-8")
+            (skill_dir / "checks.json").write_text(stage_checks, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
     def test_markdown_links_ignore_code_fences(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
