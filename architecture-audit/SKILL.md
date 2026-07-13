@@ -220,13 +220,40 @@ When the user agrees, build `implementation-plan.md`:
 
 The plan is descriptive, not executable. It does not move files, rewrite imports, or delete orphans.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "architecture-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:24Z",
   "framework": "next-app-router",
@@ -256,7 +283,13 @@ The plan is descriptive, not executable. It does not move files, rewrite imports
   "checks": [
     {
       "layer": "coupling-and-complexity",
-      "check": "no-god-module",
+      "checkId": "architecture-audit.no-god-module",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "threshold-violation",
       "status": "violation",
       "thresholdApplied": 30,
       "evidence": [],
@@ -303,7 +336,7 @@ The plan is descriptive, not executable. It does not move files, rewrite imports
 | --- | --- | --- |
 | Knowledge graph missing | `/pre-audit-setup` has not been run, or the graph has been deleted. | Stop. Print the friendly message and exit. Do not run any check. |
 | `tsconfig.json` missing | The skill is being run on a JavaScript-only project, or outside the project root. | Stop. Inform the user that the skill currently supports TypeScript only. |
-| Pattern inference inconclusive | The directory layout matches no clear convention. | Record `no-clear-pattern` in the snapshot. Skip the layered-specific and feature-folder-specific checks; report them as `missing` with an explanation. |
+| Pattern inference inconclusive | The directory layout matches no clear convention. | Record `no-clear-pattern` in the snapshot. Emit pattern-specific catalog checks as `not-applicable`/`not-evaluated` with null status and an explanation. |
 | Pattern override is wrong | The user passed `--pattern=layered` but no layered structure exists. | Trust the user's intent. Run the layered-style checks and report what they would expect to see; many will resolve as `missing` or `violation`. |
 | Threshold override is extreme | A user passes `--threshold-god-module=1000`. | Honour the value. Record it in `metadata.json` so the report makes the choice visible. |
 | Graph stale (large refactor since last `/graphify`) | The graph and the source no longer agree. | Detect stale-graph by comparing graph file modification time to the most recent `git log` commit time on source files. When stale, prefix the diagnostic snapshot with a warning and recommend `/pre-audit-setup --force`. Do not refuse to run. |

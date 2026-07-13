@@ -222,13 +222,40 @@ When the user agrees, build `implementation-plan.md`:
 
 The plan is descriptive, not executable. It does not install plugins, modify configuration, or add suppressions.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "linting-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:09Z",
   "linter": { "name": "eslint", "version": "9.10.0", "configFile": "eslint.config.mjs", "configFormat": "flat" },
@@ -256,7 +283,13 @@ The plan is descriptive, not executable. It does not install plugins, modify con
   "checks": [
     {
       "layer": "rule-coverage",
-      "check": "eslint-config-prettier-last-in-extends",
+      "checkId": "linting-audit.eslint-config-prettier-last-in-extends",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "configuration-order-violation",
       "status": "violation",
       "evidence": ["eslint.config.mjs"],
       "expectation": "When Prettier is in use, eslint-config-prettier is the last entry in the extends list.",

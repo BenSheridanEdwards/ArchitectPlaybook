@@ -1,12 +1,12 @@
 ---
 name: quality-gates-audit
-description: Audit pre-commit, pre-push, and CI/CD quality gates against an opinionated baseline. Reports present/missing/misconfigured gates and optionally generates an implementation plan.
+description: Audit pre-commit, pre-push, and CI/CD quality gates against an opinionated baseline. Reports present/partial/missing/violation gates and optionally generates an implementation plan.
 trigger: /quality-gates-audit
 ---
 
 # /quality-gates-audit
 
-Compare the current project against an opinionated baseline of quality gates organised by lifecycle stage (pre-commit, pre-push, continuous integration), report what is present, missing, or misconfigured, and then offer to generate an implementation plan for closing the gaps. The skill is read-only — it never modifies the project. The implementation plan is a Markdown document, not an applied change set.
+Compare the current project against an opinionated baseline of quality gates organised by lifecycle stage (pre-commit, pre-push, continuous integration), report what is present, partial, missing, or violating the intended enforcement, and then offer to generate an implementation plan for closing the gaps. The skill is read-only — it never modifies the project. The implementation plan is a Markdown document, not an applied change set.
 
 The default mental model is a TypeScript and React frontend project, but the audit must not hard-stop when a repository is a Markdown skill repository like ArchitectPlaybook. If `package.json` is absent, switch to documentation-or-skill-repository mode and audit executable repository contracts instead: skill validation, Markdown link integrity, bootstrap install truth, local Git hooks, Conventional Commit enforcement, and continuous integration validation.
 
@@ -25,7 +25,11 @@ This skill never accepts `--apply`. Applying a plan is a separate concern — th
 
 ## The opinionated baseline
 
-The skill audits against this exact list. A gate is **present** if every detection signal listed for it resolves; **misconfigured** if some but not all signals resolve; **missing** if none resolve.
+The skill audits against this exact list. A gate is **present** if every detection
+signal resolves; **partial** if some but not all signals resolve; **missing** if
+none resolve; and **violation** if a configured gate is wired in a way that
+defeats its intended enforcement. Use `classification: "misconfigured"` on a
+`partial` or `violation` result when that human-readable qualifier is useful.
 
 ### Stage 1 — Pre-commit (fast, runs on every commit attempt)
 
@@ -75,7 +79,7 @@ The skill audits against this exact list. A gate is **present** if every detecti
    - `metadata.json` — skill version, run timestamp, graphify revision hash, ecosystem.
 6. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
 
-   > "Generate an implementation plan for the missing or misconfigured gates? (yes/no)"
+   > "Generate an implementation plan for the missing, partial, or violating gates? (yes/no)"
 
    On `yes`, writes `.architect-audits/quality-gates-audit/implementation-plan.md` describing exactly which packages to install, which configuration files to add, and which hook or workflow entries to wire up — ordered by stage. The plan does not modify any project files; it is a checklist for the user.
 
@@ -120,10 +124,11 @@ Detect the hook runner:
 For each gate in the active stage list, walk its detection signals:
 
 - **All signals resolve →** `status: "present"`.
-- **Some signals resolve →** `status: "misconfigured"`. Record exactly which signals matched and which did not.
+- **Some signals resolve →** `status: "partial"` and `classification: "misconfigured"`. Record exactly which signals matched and which did not.
 - **No signals resolve →** `status: "missing"`.
+- **Signals exist but enforcement is neutralised →** `status: "violation"` and `classification: "misconfigured"`.
 
-Capture every matching path or configuration key in the `evidence` array so the report is auditable. Never guess — when a signal is ambiguous, prefer `misconfigured` over `present`.
+Capture every matching path or configuration key in the `evidence` array so the report is auditable. Never guess — when a signal is ambiguous, prefer `partial` over `present`.
 
 ### Step 4 — Write phase 1 outputs
 
@@ -166,7 +171,7 @@ After printing, ask the single yes-or-no question: *"Generate an implementation 
 When the user agrees, build `implementation-plan.md`:
 
 1. **Header** — repository name, baseline version, timestamp, list of detected gaps grouped by stage.
-2. **Per-stage plan**, ordered pre-commit → pre-push → continuous integration. For each missing or misconfigured gate include:
+2. **Per-stage plan**, ordered pre-commit → pre-push → continuous integration. For each missing, partial, or violating gate include:
    - The package(s) to install, with the exact command for the detected package manager.
    - The configuration file(s) to create or modify, with full content snippets.
    - The hook or workflow entry to add, with full content snippets.
@@ -175,27 +180,61 @@ When the user agrees, build `implementation-plan.md`:
 
 The plan is descriptive, not executable. It does not run the install commands and does not create the configuration files.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json` is an object with this top-level structure:
+`findings.json` uses this top-level structure. The example shows one
+representative check; emitted output contains every catalog check exactly once:
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "quality-gates-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:09Z",
   "ecosystem": "node",
   "packageManager": "pnpm",
   "hookRunner": "husky",
   "summary": {
-    "preCommit":              { "present": 4, "misconfigured": 1, "missing": 1 },
-    "prePush":                { "present": 2, "misconfigured": 0, "missing": 3 },
-    "continuousIntegration":  { "present": 4, "misconfigured": 1, "missing": 4 }
+    "preCommit":              { "present": 4, "partial": 1, "missing": 1, "violation": 0 },
+    "prePush":                { "present": 2, "partial": 0, "missing": 3, "violation": 0 },
+    "continuousIntegration":  { "present": 4, "partial": 1, "missing": 4, "violation": 0 }
   },
-  "gates": [
+  "checks": [
     {
       "stage": "pre-commit",
-      "gate": "commit-message-lint",
+      "checkId": "quality-gates-audit.commit-message-lint",
+      "layer": "pre-commit",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "missing-enforcement",
       "status": "missing",
       "evidence": [],
       "expectation": "commitlint with @commitlint/config-conventional and a .husky/commit-msg hook",
@@ -212,12 +251,17 @@ The plan is descriptive, not executable. It does not run the install commands an
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
   "skillName": "quality-gates-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:09Z",
-  "graphifyRevision": "<hash from graphify-out/metadata if present>",
-  "filtersApplied": { "stages": ["pre-commit", "pre-push", "continuous-integration"], "include": [], "exclude": [] }
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
+  "graphifyRevision": "<hash from graphify-out/metadata if present>"
 }
 ```
 
@@ -232,10 +276,10 @@ The plan is descriptive, not executable. It does not run the install commands an
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The repository is not a Node.js project, or the command is being run from the wrong directory. | If the repository has `SKILL.md`, `CLAUDE.md`, or `.claude/`, switch to documentation-or-skill-repository mode; otherwise change directory into the project root and re-run. |
-| Workflow file present but cannot be parsed | Malformed YAML, or a templating system the skill does not understand. | Treat every gate that depends on workflow detection as `misconfigured` and record the parse error in the gate's evidence field. Do not crash. |
+| Workflow file present but cannot be parsed | Malformed YAML, or a templating system the skill does not understand. | Treat every dependent gate as `partial` with `classification: "misconfigured"` and record the parse error in evidence. Do not crash. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue, but tag every gate's evidence with a `noGraphify: true` flag so the user knows the audit ran with reduced context. |
 | Monorepo with multiple workspaces | One `package.json` at the root plus several inside `packages/*` or `apps/*`. | Resolve the root manager and root-level gates as usual. Recommend a follow-up audit per workspace and surface the recommendation in `findings.md`. |
-| Conflicting tools (both ESLint and Biome present) | Both are configured. | Mark the gate as `misconfigured` with a gap that explains the conflict. The implementation plan should propose picking one. |
+| Conflicting tools (both ESLint and Biome present) | Both are configured. | Mark the gate as `partial` with `classification: "misconfigured"` and explain the conflict. The implementation plan should propose picking one. |
 
 ## What this skill explicitly does NOT do
 

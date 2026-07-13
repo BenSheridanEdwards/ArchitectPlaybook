@@ -247,13 +247,40 @@ When the user agrees, build `implementation-plan.md`:
 
 The plan is descriptive, not executable. It does not edit `tsconfig.json`, install validators, or refactor source.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "typescript-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:13Z",
   "typescriptVersion": "5.4.5",
@@ -309,7 +336,13 @@ The plan is descriptive, not executable. It does not edit `tsconfig.json`, insta
   "checks": [
     {
       "layer": "compiler-configuration",
-      "check": "no-unchecked-indexed-access",
+      "checkId": "typescript-audit.no-unchecked-indexed-access",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "compiler-safety-violation",
       "status": "violation",
       "evidence": ["tsconfig.json"],
       "expectation": "noUncheckedIndexedAccess is enabled so array[i] is typed as T | undefined.",

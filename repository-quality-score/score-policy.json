@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyVersion": "1.0.0",
+  "scorePrecision": 2,
+  "statusPoints": {
+    "present": "1.0",
+    "partial": "0.5",
+    "missing": "0.0",
+    "violation": "0.0"
+  },
+  "checkWeights": {
+    "standard": "1.0",
+    "soft": "0.5"
+  },
+  "audits": [
+    { "name": "accessibility-audit", "weight": "1.0" },
+    { "name": "agentic-audit", "weight": "1.0" },
+    { "name": "architecture-audit", "weight": "1.0" },
+    { "name": "bundle-build-audit", "weight": "1.0" },
+    { "name": "dependency-audit", "weight": "1.0" },
+    { "name": "documentation-audit", "weight": "1.0" },
+    { "name": "error-handling-audit", "weight": "1.0" },
+    { "name": "linting-audit", "weight": "1.0" },
+    { "name": "performance-audit", "weight": "1.0" },
+    { "name": "quality-gates-audit", "weight": "1.0" },
+    { "name": "react-audit", "weight": "1.0" },
+    { "name": "security-audit", "weight": "1.0" },
+    { "name": "testing-audit", "weight": "1.0" },
+    { "name": "typescript-audit", "weight": "1.0" }
+  ],
+  "bands": [
+    { "name": "Strong", "minimum": "90.00" },
+    { "name": "Sound", "minimum": "75.00" },
+    { "name": "Needs attention", "minimum": "60.00" },
+    { "name": "High risk", "minimum": "0.00" }
+  ]
+}

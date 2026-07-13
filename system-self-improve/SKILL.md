@@ -27,7 +27,7 @@ Three input modes, in priority order. The skill scans for them in this order and
 
 1. **Review gap report** (most common). A reviewer — fresh chat against a worktree, human, or another agent — writes `.architect-audits/<originating-audit>/review-gap-report.md` describing what the originating audit failed to catch. The default scan path is `.architect-audits/*/review-gap-report.md` in the current working directory; an alternative path is supplied via `--gap-report=<path>`.
 2. **User-supplied gap description.** The user invokes the skill with `--gap="<freeform description>"` plus `--target-skill=<skill-name>`. Useful when the user has noticed a gap directly without writing a formal review.
-3. **Pattern across audit runs.** When run with `--from-audit-history`, the skill scans `.architect-audits/*/findings.json` across the project for patterns suggesting an audit is systematically wrong: every project hits the same threshold, an audit consistently surfaces `partial` with no `violation` (suggesting the threshold is too lenient or the check is too weak), an audit's `noGraphify` fallback is the dominant code path. This is the most speculative mode and reports candidates as suggestions only.
+3. **Pattern across audit runs.** When run with `--from-audit-history`, the skill scans `.architect-audits/*/findings.json` across the project for patterns suggesting an audit is systematically wrong: every project hits the same threshold, an audit consistently surfaces `partial` with no `violation` (suggesting the threshold is too lenient or the check is too weak), an audit's `noGraphify` fallback is the dominant code path. Only canonical checks with `applicability: "applicable"` and `evaluationState: "evaluated"` participate. Non-applicable and non-evaluated checks are evidence about coverage, not evidence that a baseline is weak. This is the most speculative mode and reports candidates as suggestions only.
 
 ## Where `/system-self-improve` operates
 
@@ -163,7 +163,12 @@ Walk the priority order:
 
 1. Scan for `review-gap-report.md` files. Default scan path is `.architect-audits/*/review-gap-report.md` in the current working directory (which is *not* the playbook directory in the typical case — review reports live in the target project). When `--gap-report=<path>` is supplied, use that exclusively.
 2. Honour `--gap` plus `--target-skill` when supplied.
-3. Honour `--from-audit-history` and walk `.architect-audits/*/findings.json` looking for systematic patterns.
+3. Honour `--from-audit-history` and walk audit
+   `.architect-audits/*/findings.json` files looking for systematic patterns.
+   Ignore `repository-quality-score` and other non-audit outputs. For canonical
+   schema `2.0.0`, include only checks that are applicable and evaluated; ignore
+   non-applicable and non-evaluated results. Treat legacy files as lower-
+   confidence suggestions and never infer that an omitted check passed.
 
 Record the resolved input source in metadata.
 
@@ -175,9 +180,9 @@ For each blocker check, walk the logic. When a blocker triggers, stop and write 
 
 Find the originating skill's `SKILL.md` in the playbook. Locate the specific section to modify by structural search:
 
-- For "missing check" — find the relevant layer table; the new check goes at the end (additive, not insertive).
+- For "missing check" — find the relevant layer table; the new check goes at the end (additive, not insertive). Add the same full `checkId` to `checks.json` and increase its `catalogVersion`.
 - For "weak check" — find the existing check row; record its current text for the reversibility log.
-- For "wrong threshold" — find the threshold in the Usage block, the layer table, and the metadata schema.
+- For "wrong threshold" — find the threshold in the Usage block, the layer table, the catalog metadata, and the findings execution contract. Increase `catalogVersion` when the check's meaning changes.
 - For "stale detection logic" — find the relevant detection-logic step.
 - For "cross-skill drift" — find the boundary table entries in both skills.
 - For "boundary error" — find both the source and destination skills.
@@ -196,6 +201,9 @@ Generate the minimal diff. Verify against the prohibited-mutations list:
 - No changes to the established two-phase flow convention.
 - No changes to the Testing Philosophy preserved across audits.
 - No edits to any target-project file.
+- No audit-body change without an aligned `checks.json` and catalog-version
+  decision. A score-policy change is a separate architecture decision and is
+  never inferred merely to improve historical scores.
 
 Generate accompanying changes for every entry in the ripple-effect map. Draft the Conventional Commits message.
 

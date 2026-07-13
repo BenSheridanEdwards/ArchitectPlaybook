@@ -51,10 +51,12 @@ four numbered layers.
 
 ## checks.json
 
-An audit may ship a `checks.json` beside its `SKILL.md`. It is a machine-readable
+Every implemented audit ships a `checks.json` beside its `SKILL.md`. It is a machine-readable
 inventory of the same checks the body describes — never a replacement for the
 human-readable body. The validator requires:
 
+- Supported structural `schemaVersion: "1.1.0"` and a semantic
+  `catalogVersion`.
 - `skillName` equal to the folder name and `humanCanonicalSource` of `SKILL.md`.
 - A `statusTaxonomy` defining `present`, `partial`, `missing`, `violation`.
 - Each check with a non-empty `checkId` (prefixed `<folder-name>.`), `layer`,
@@ -63,7 +65,31 @@ human-readable body. The validator requires:
   `allowedStatuses` value drawn from the status taxonomy.
 
 Keep `checks.json` aligned with `SKILL.md` whenever a check is added, removed,
-renamed, or moved between layers.
+renamed, moved between layers, reweighted, or materially redefined. Increase
+`catalogVersion` for any of those compatibility changes. A new invariant gets a
+new `checkId`; do not silently reuse an old identity.
+
+## Canonical audit findings (ADR 0002)
+
+Every audit documents and emits findings schema `2.0.0` according to
+[AUDIT_FINDINGS_CONTRACT.md](AUDIT_FINDINGS_CONTRACT.md):
+
+- `findings.json` and `metadata.json` share the run, skill, catalog, timestamps,
+  target, and execution identity exactly.
+- The target includes an exact Git commit and source-tree cleanliness measured
+  before output files are written, ignoring only `.architect-audits/`.
+- Every catalog check appears exactly once with full `checkId`, matching layer,
+  applicability, evaluation state, evidence quality, classification, status,
+  and redacted evidence.
+- Non-applicable and applicable non-evaluated checks have null status. The
+  former is excluded without penalty; the latter reduces assessment coverage.
+- `misconfigured` is a classification, never a fifth status. Its canonical
+  quality-gate status is `partial` unless concrete wiring defeats enforcement,
+  which is `violation`.
+
+Repository Quality Score policy versions independently own points, weights,
+rounding, audit roster, and bands. A policy behavior change requires a
+`policyVersion` increase and an architecture decision update.
 
 ## Links and whitespace
 

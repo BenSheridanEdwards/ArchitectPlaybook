@@ -2,9 +2,10 @@
 
 This repository is Architect Playbook: a library of Claude Code slash-command
 skills that audit any codebase against opinionated baselines. It is mostly
-Markdown — one `SKILL.md` per skill folder — plus a small standard-library
-Python validator and its unit tests. There is no application to run and no build
-step; the deliverable is the skills themselves and the contracts that keep them
+Markdown — one `SKILL.md` per skill folder — plus small standard-library Python
+programs for repository validation and deterministic Repository Quality Score
+calculation, with unit tests. There is no application to run and no build step;
+the deliverable is the skills themselves and the contracts that keep them
 installable, comparable, and safe to run in parallel sessions.
 
 This file is the tool-agnostic contract for every agent (and human) working
@@ -110,7 +111,7 @@ hand-edit inside it.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ArchitectPlaybook** (675 symbols, 754 relationships, 8 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ArchitectPlaybook** (1089 symbols, 1402 relationships, 29 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
