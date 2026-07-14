@@ -260,6 +260,54 @@ class ValidatePlaybookTests(unittest.TestCase):
             self.assertTrue(any("full checkId" in message for message in messages))
             self.assertTrue(any("classification" in message for message in messages))
 
+    def test_canonical_findings_examples_must_match_check_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            score = root / "repository-quality-score"
+            score.mkdir()
+            (score / "SKILL.md").write_text("score\n", encoding="utf-8")
+            audit = root / "example-audit"
+            audit.mkdir()
+            example = {
+                "schemaVersion": "2.0.0",
+                "skillName": "example-audit",
+                "checkCatalogSchemaVersion": "1.1.0",
+                "checkCatalogVersion": "9.9.9",
+                "checks": [
+                    {
+                        "checkId": "example-audit.unknown-check",
+                        "layer": "wrong-layer",
+                    },
+                    {
+                        "checkId": "example-audit.single-test-runner",
+                        "layer": "wrong-layer",
+                    },
+                    {"checkId": "example-audit.single-test-runner"},
+                ]
+            }
+            (audit / "SKILL.md").write_text(
+                VALID_SKILL_WITH_LAYER
+                + VALID_RQS_CONTRACT
+                + "\n```json\n"
+                + json.dumps(example)
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            (audit / "checks.json").write_text(
+                VALID_CHECKS_JSON, encoding="utf-8"
+            )
+
+            findings: list[Any] = []
+            validate_playbook.validate_audit_findings_contract(root, findings)
+
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("absent from checks.json" in message for message in messages))
+            self.assertTrue(any("must be test-runner" in message for message in messages))
+            self.assertTrue(any("layer is missing" in message for message in messages))
+            self.assertTrue(
+                any("checkCatalogVersion must be 1.0.0" in message for message in messages)
+            )
+
     def test_markdown_links_ignore_code_fences(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -310,7 +358,7 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_score_policy(root, findings)
             self.assertTrue(any("policy audit list is out of sync" in finding.message for finding in findings))
 
-    def test_bootstrap_contract_accepts_materialized_tracked_symlink(self) -> None:
+    def test_bootstrap_contract_rejects_materialized_tracked_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "README.md").write_text(
@@ -336,7 +384,44 @@ class ValidatePlaybookTests(unittest.TestCase):
 
             validate_playbook.validate_bootstrap_contract(root, findings)
 
-            self.assertEqual(findings, [])
+            self.assertTrue(
+                any("must be a real directory" in finding.message for finding in findings)
+            )
+
+    def test_bootstrap_contract_rejects_copy_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text(
+                ".claude/skills/install-architect-playbook-globally\n",
+                encoding="utf-8",
+            )
+            installer = root / "install-architect-playbook-globally"
+            installer.mkdir()
+            source_text = (
+                "---\n"
+                "name: install-architect-playbook-globally\n"
+                "description: Installer.\n"
+                "trigger: /install-architect-playbook-globally\n"
+                "---\n"
+            )
+            (installer / "SKILL.md").write_text(source_text, encoding="utf-8")
+            bootstrap = (
+                root
+                / ".claude"
+                / "skills"
+                / "install-architect-playbook-globally"
+            )
+            bootstrap.mkdir(parents=True)
+            (bootstrap / "SKILL.md").write_text(
+                source_text + "drift\n", encoding="utf-8"
+            )
+
+            findings: list[Any] = []
+            validate_playbook.validate_bootstrap_contract(root, findings)
+
+            self.assertTrue(
+                any("must exactly match" in finding.message for finding in findings)
+            )
 
     def test_cli_accepts_current_repository(self) -> None:
         result = subprocess.run(

@@ -121,7 +121,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the unused-dependency and misplaced-dependency checks use the graph as the import truth (high confidence). When absent, both checks fall back to a regex/AST sweep and record `confidence: "low"` on their findings. The audit still runs in full either way.
-2. **Confirms a Node.js project.** Detects `package.json`. If absent, the skill stops and tells the user it currently supports Node.js projects only.
+2. **Confirms a Node.js project.** Detects `package.json`. If absent at the intended repository root, the skill writes a canonical not-applicable audit; if no project root can be established, it asks the user to change directory.
 3. **Detects the package manager and tier.** Infers the package manager from the lockfile present (and falls back to the `packageManager` field in `package.json`). Determines the input tier based on the presence of `node_modules` and the `--with-network` flag.
 4. **When `--with-network` is set**, runs the package manager's read-only audit and outdated commands and captures their JSON output. Never runs install, update, or any mutating operation.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/dependency-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -154,7 +154,7 @@ Detect the package manager:
 - `yarn.lock` → yarn (Berry detected by absence of `node-modules` linker default and presence of `.yarnrc.yml`).
 - `bun.lockb` → bun.
 
-When multiple lockfiles are present, fall back to the `packageManager` field in `package.json`. When none of these resolves, stop and tell the user.
+When multiple lockfiles are present, fall back to the `packageManager` field in `package.json`. When none of these resolves, continue: record the package-manager foundation check as `missing`, mark package-manager-command and lockfile-dependent checks applicable but `not-evaluated`, and evaluate manifest-only checks where possible.
 
 ### Step 2 — Determine the input tier
 
@@ -322,7 +322,7 @@ contains every catalog check exactly once):
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Stop. Inform the user that the skill currently supports npm, pnpm, yarn, and bun only. |
+| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Continue. Record the package-manager foundation as `missing`, dependent checks as applicable but `not-evaluated`, and evaluate manifest-only checks. List npm, pnpm, yarn, and bun in the remediation. |
 | `node_modules` absent | The user has not run install, or `node_modules` is in a non-standard location. | Continue at tier 1. Record `tier: 1` in metadata. Tier-2 checks degrade to `partial` with the gap "needs tier 2 — run install first". |
 | `--with-network` set but network command fails | Registry unreachable, authentication required, audit endpoint rate-limited. | Record the failure and the command output in metadata. Tier-3 checks degrade to `partial`. Do not crash. |
 | Multiple lockfiles present | Mid-migration between package managers, or accidental commit. | Pick the lockfile referenced by the `packageManager` field if set; otherwise the most recently modified. Record the conflict in the snapshot. The package-manager-mixing hygiene check will report `violation`. |

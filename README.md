@@ -51,7 +51,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
    ```
    /install-architect-playbook-globally
    ```
-   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally` already committed as a link to the top-level installer, so this one bootstrap command is available when the clone preserves symlinks. On Windows Git clients with symlink support disabled, the link can materialize as a text file; enable symlink support and re-check out the clone before relying on the bootstrap command.
+   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally/SKILL.md` as a real bootstrap skill directory, kept content-identical to the top-level installer by repository validation. It works on Windows and Unix checkouts without Git symlink support.
 
    *(Optional, for teams: once you `cd` into a target project, you can also run `/install-architect-playbook-locally` to pin the skills alongside that project in version control. Most users don't need this.)*
 
@@ -154,7 +154,7 @@ applicable-but-not-evaluated checks have a null status rather than an invented
 pass or failure. See the maintainer contract in
 [`.agents/AUDIT_FINDINGS_CONTRACT.md`](.agents/AUDIT_FINDINGS_CONTRACT.md).
 
-Current dogfood reports for this repository are committed under `.architect-audits/` for pre-audit setup, quality gates, testing, and architecture. Each report includes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` so downstream sessions can consume the same contract they expect from target projects.
+Historical dogfood reports for this repository are committed under `.architect-audits/` for pre-audit setup, quality gates, testing, and architecture. They predate findings schema `2.0.0` and remain legacy examples; the score calculator may adapt compatible reports only as provisional evidence. New or refreshed audit runs must use the canonical contract described above.
 
 ## How audits grade issues
 

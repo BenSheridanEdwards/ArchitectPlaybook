@@ -326,6 +326,107 @@ def validate_audit_findings_contract(root: Path, findings: list[Finding]) -> Non
                     "misconfigured is a classification; canonical status must be partial",
                 )
             )
+        checks_path = directory / "checks.json"
+        if not checks_path.is_file():
+            continue
+        try:
+            catalog_data = json.loads(checks_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(catalog_data, dict) or not isinstance(
+            catalog_data.get("checks"), list
+        ):
+            continue
+        catalog_layers = {
+            check.get("checkId"): check.get("layer")
+            for check in catalog_data["checks"]
+            if isinstance(check, dict)
+            and isinstance(check.get("checkId"), str)
+            and isinstance(check.get("layer"), str)
+        }
+        json_blocks = re.findall(
+            r"```json\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE
+        )
+        for block_index, block in enumerate(json_blocks, start=1):
+            if '"checkId"' not in block:
+                continue
+            try:
+                example = json.loads(block)
+            except json.JSONDecodeError as error:
+                findings.append(
+                    Finding(
+                        "error",
+                        skill_path,
+                        f"findings JSON example {block_index} is invalid: {error.msg}",
+                    )
+                )
+                continue
+            if (
+                isinstance(example, dict)
+                and example.get("schemaVersion") == "2.0.0"
+            ):
+                expected_shared = {
+                    "skillName": directory.name,
+                    "checkCatalogSchemaVersion": catalog_data.get("schemaVersion"),
+                    "checkCatalogVersion": catalog_data.get("catalogVersion"),
+                }
+                for field_name, expected_value in expected_shared.items():
+                    if example.get(field_name) != expected_value:
+                        findings.append(
+                            Finding(
+                                "error",
+                                skill_path,
+                                f"findings example {field_name} must be {expected_value}",
+                            )
+                        )
+            pending = [example]
+            while pending:
+                value = pending.pop()
+                if isinstance(value, list):
+                    pending.extend(value)
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                pending.extend(value.values())
+                check_id = value.get("checkId")
+                layer = value.get("layer")
+                if "checkId" not in value:
+                    continue
+                if not isinstance(check_id, str) or not check_id:
+                    findings.append(
+                        Finding(
+                            "error",
+                            skill_path,
+                            "findings example checkId must be a non-empty string",
+                        )
+                    )
+                    continue
+                if not isinstance(layer, str) or not layer:
+                    findings.append(
+                        Finding(
+                            "error",
+                            skill_path,
+                            f"findings example layer is missing for {check_id}",
+                        )
+                    )
+                    continue
+                expected_layer = catalog_layers.get(check_id)
+                if expected_layer is None:
+                    findings.append(
+                        Finding(
+                            "error",
+                            skill_path,
+                            f"findings example checkId is absent from checks.json: {check_id}",
+                        )
+                    )
+                elif layer != expected_layer:
+                    findings.append(
+                        Finding(
+                            "error",
+                            skill_path,
+                            f"findings example layer for {check_id} must be {expected_layer}",
+                        )
+                    )
 
 
 def decimal_value(value: object) -> Decimal | None:
@@ -485,26 +586,31 @@ def validate_bootstrap_contract(root: Path, findings: list[Finding]) -> None:
     claim = ".claude/skills/install-architect-playbook-globally" in readme
     bootstrap_entry = root / ".claude" / "skills" / "install-architect-playbook-globally"
     bootstrap = bootstrap_entry / "SKILL.md"
-    if not bootstrap.is_file() and bootstrap_entry.is_file():
-        # Git clients with symlink support disabled materialize a tracked
-        # directory symlink as a small text file containing its relative target.
-        raw_target = bootstrap_entry.read_text(encoding="utf-8").strip()
-        if raw_target and "\n" not in raw_target:
-            resolved_target: Path | None = (bootstrap_entry.parent / raw_target).resolve()
-            try:
-                resolved_target.relative_to(root.resolve())
-            except ValueError:
-                resolved_target = None
-            if resolved_target is not None:
-                materialized_target = resolved_target / "SKILL.md"
-                if materialized_target.is_file():
-                    bootstrap = materialized_target
+    if bootstrap_entry.is_symlink() or not bootstrap_entry.is_dir():
+        findings.append(
+            Finding(
+                "error",
+                bootstrap_entry,
+                "bootstrap installer must be a real directory so it works when Git symlinks are disabled",
+            )
+        )
     if claim and not bootstrap.is_file():
         findings.append(Finding("error", root / "README.md", "README claims bootstrap global installer is committed, but .claude/skills/install-architect-playbook-globally/SKILL.md is missing"))
     if bootstrap.is_file():
         frontmatter, _, _ = parse_frontmatter(bootstrap.read_text(encoding="utf-8"))
         if frontmatter.get("name") != "install-architect-playbook-globally":
             findings.append(Finding("error", bootstrap, "bootstrap installer frontmatter name must match install-architect-playbook-globally"))
+        source = root / "install-architect-playbook-globally" / "SKILL.md"
+        if source.is_file() and bootstrap.read_text(
+            encoding="utf-8"
+        ) != source.read_text(encoding="utf-8"):
+            findings.append(
+                Finding(
+                    "error",
+                    bootstrap,
+                    "bootstrap installer must exactly match install-architect-playbook-globally/SKILL.md",
+                )
+            )
 
 
 def iter_markdown_files(root: Path) -> list[Path]:

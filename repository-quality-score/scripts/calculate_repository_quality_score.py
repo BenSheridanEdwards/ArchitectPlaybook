@@ -110,44 +110,80 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ScoreInputError(f"duplicate JSON key: {key}")
+            raise ScoreInputError("duplicate JSON object key")
         result[key] = value
     return result
 
 
 def _reject_constant(value: str) -> None:
-    raise ScoreInputError(f"non-finite JSON number is not allowed: {value}")
+    raise ScoreInputError("non-finite JSON number is not allowed")
+
+
+def _stat_identity(stat: os.stat_result) -> tuple[int, int, int, int]:
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+
+def _stable_file_snapshot(
+    path: Path, *, maximum_bytes: int | None = None
+) -> tuple[bytes, dict[str, Any]]:
+    """Read one stable byte snapshot and fingerprint those exact bytes."""
+    for _ in range(2):
+        before = path.stat()
+        if maximum_bytes is not None and before.st_size > maximum_bytes:
+            raise ScoreInputError(f"JSON input exceeds {maximum_bytes} bytes")
+        with path.open("rb") as handle:
+            opened = os.fstat(handle.fileno())
+            raw = handle.read(None if maximum_bytes is None else maximum_bytes + 1)
+            after_read = os.fstat(handle.fileno())
+        after = path.stat()
+        if maximum_bytes is not None and len(raw) > maximum_bytes:
+            raise ScoreInputError(f"JSON input exceeds {maximum_bytes} bytes")
+        identities = {
+            _stat_identity(before),
+            _stat_identity(opened),
+            _stat_identity(after_read),
+            _stat_identity(after),
+        }
+        if len(identities) == 1 and len(raw) == after.st_size:
+            return raw, {
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "size": after.st_size,
+                "modifiedNanoseconds": after.st_mtime_ns,
+                "device": after.st_dev,
+                "inode": after.st_ino,
+            }
+    raise UnstableInputError("an input file changed while it was being read")
 
 
 def file_fingerprint(path: Path) -> dict[str, Any]:
-    stat = path.stat()
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return {
-        "sha256": digest.hexdigest(),
-        "size": stat.st_size,
-        "modifiedNanoseconds": stat.st_mtime_ns,
-    }
+    return _stable_file_snapshot(path)[1]
 
 
 def strict_json_load(path: Path, fingerprints: dict[Path, dict[str, Any]]) -> Any:
     try:
         resolved = path.resolve(strict=True)
-        if resolved.stat().st_size > MAX_JSON_BYTES:
-            raise ScoreInputError(f"JSON input exceeds {MAX_JSON_BYTES} bytes")
-        raw = resolved.read_text(encoding="utf-8")
+        raw_bytes, fingerprint = _stable_file_snapshot(
+            resolved, maximum_bytes=MAX_JSON_BYTES
+        )
+        raw = raw_bytes.decode("utf-8")
         value = json.loads(
             raw,
             object_pairs_hook=_reject_duplicate_pairs,
             parse_constant=_reject_constant,
         )
-        fingerprints[resolved] = file_fingerprint(resolved)
+        fingerprints[resolved] = fingerprint
         return value
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except ScoreInputError:
+        raise
+    except UnicodeError as exc:
         raise ScoreInputError(
-            f"cannot read valid UTF-8 JSON: {safe_exception_message(exc)}"
+            "cannot read valid UTF-8 JSON"
+        ) from exc
+    except (json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise ScoreInputError("cannot parse JSON input") from exc
+    except OSError as exc:
+        raise ScoreInputError(
+            f"cannot read JSON input: {safe_exception_message(exc)}"
         ) from exc
 
 
@@ -569,13 +605,17 @@ def parse_canonical_candidate(
         raise ScoreInputError("runFinishedAt cannot precede runStartedAt")
     target = require_object(data.get("target"), "findings target")
     repository_name = require_string(target.get("repository"), "target.repository")
+    repository_parts = repository_name.split("/")
     if (
-        Path(repository_name).is_absolute()
-        or re.match(r"^[A-Za-z]:[\\/]", repository_name)
+        repository_name.startswith(("/", "\\"))
+        or Path(repository_name).is_absolute()
+        or re.match(r"^[A-Za-z]:", repository_name)
         or repository_name.startswith(("\\\\", "//"))
         or "\\" in repository_name
         or "://" in repository_name
         or "@" in repository_name
+        or any(part in {"", ".", ".."} for part in repository_parts)
+        or any(ord(character) < 32 for character in repository_name)
     ):
         raise ScoreInputError("target.repository cannot contain a local path or credentials")
     git_commit = require_string(target.get("gitCommit"), "target.gitCommit").lower()
@@ -729,7 +769,9 @@ def parse_legacy_candidate(
                 if check_id.endswith(f".{identifier}")
             )
             if len(matches) != 1:
-                raise ScoreInputError(f"legacy check identifier is not an exact unique match: {identifier}")
+                raise ScoreInputError(
+                    "legacy check identifier is not an exact unique catalog match"
+                )
             check_id = matches[0]
         if check_id in normalized:
             raise ScoreInputError(f"legacy findings contain duplicate check {check_id}")
@@ -786,17 +828,37 @@ def parse_legacy_candidate(
     raw_commit = data.get("gitCommit", data.get("commit"))
     if git_commit is None and isinstance(raw_commit, str) and COMMIT_PATTERN.fullmatch(raw_commit):
         git_commit = raw_commit.lower()
-    timestamp_value = data.get("timestamp", data.get("generatedAt", "1970-01-01T00:00:00Z"))
-    timestamp = timestamp_value if isinstance(timestamp_value, str) else "1970-01-01T00:00:00Z"
-    run_identifier = data.get("runIdentifier", f"legacy-{hashlib.sha256(str(source_path).encode()).hexdigest()[:12]}")
-    if not isinstance(run_identifier, str):
-        run_identifier = str(run_identifier)
+    timestamp = "1970-01-01T00:00:00Z"
+    for timestamp_value in (
+        data.get("runFinishedAt"),
+        data.get("timestamp"),
+        data.get("generatedAt"),
+    ):
+        if not isinstance(timestamp_value, str):
+            continue
+        try:
+            _, parsed_timestamp = require_rfc3339_timestamp(
+                timestamp_value, "legacy timestamp"
+            )
+        except ScoreInputError:
+            continue
+        timestamp = parsed_timestamp.astimezone(timezone.utc).isoformat(
+            timespec="seconds"
+        ).replace("+00:00", "Z")
+        break
+    try:
+        canonical_legacy = json.dumps(
+            data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ScoreInputError("legacy findings cannot be normalized safely") from exc
+    run_identifier = f"legacy-{hashlib.sha256(canonical_legacy).hexdigest()[:12]}"
 
     return Candidate(
         catalog.name,
         source_path,
         source_label,
-        str(data.get("schemaVersion", "legacy")),
+        "legacy",
         run_identifier,
         timestamp,
         git_commit,
@@ -819,18 +881,34 @@ def parse_candidate(
     source_label: str,
 ) -> Candidate:
     document = require_object(data, "findings document")
-    if document.get("schemaVersion") == FINDINGS_SCHEMA_VERSION:
+    schema_version = document.get("schemaVersion")
+    if schema_version == FINDINGS_SCHEMA_VERSION:
         return parse_canonical_candidate(
             document, metadata_data, catalog, source_path, source_label
         )
+    if schema_version is not None and schema_version not in ("legacy", "1.0.0"):
+        raise ScoreInputError("unsupported findings schemaVersion")
     return parse_legacy_candidate(document, catalog, source_path, source_label)
 
 
 def candidate_priority(candidate: Candidate) -> tuple[Any, ...]:
+    not_evaluated = sum(
+        check.applicability == "applicable"
+        and check.evaluation_state == "not-evaluated"
+        for check in candidate.checks
+    )
+    degraded = sum(
+        check.applicability == "applicable"
+        and check.evidence_quality == "degraded"
+        for check in candidate.checks
+    )
     return (
         1 if candidate.canonical else 0,
         1 if not candidate.filters_applied else 0,
         1 if not candidate.threshold_overrides and not candidate.policy_overrides else 0,
+        1 if not_evaluated == 0 and degraded == 0 else 0,
+        -not_evaluated,
+        -degraded,
         1 if candidate.graph_available else 0,
         -len(candidate.provisional_reasons),
         parse_timestamp(candidate.timestamp),
@@ -920,6 +998,8 @@ def discover_candidates(
                         )
                         continue
                 accepted.append(candidate)
+            except UnstableInputError:
+                raise
             except (ScoreInputError, OSError) as exc:
                 excluded.append(
                     {
@@ -1307,6 +1387,18 @@ def calculate(
         "scorePolicy": {
             "path": "repository-quality-score/score-policy.json",
             "sha256": fingerprints[policy_path.resolve()]["sha256"],
+            "statusPoints": {
+                name: json_number(value, 6)
+                for name, value in status_points.items()
+            },
+            "checkWeights": {
+                name: json_number(value, 6)
+                for name, value in check_weights.items()
+            },
+            "auditWeights": {
+                name: json_number(value, 6)
+                for name, value in audit_weights.items()
+            },
         },
         "discovery": {
             "currentWorktreeOnly": current_worktree_only,
@@ -1406,14 +1498,30 @@ def render_markdown(result: dict[str, Any]) -> str:
     ):
         lines.append("No audit inputs were missing or excluded.")
 
+    score_policy = result["scorePolicy"]
+    status_points = ", ".join(
+        f"{name}={value}" for name, value in score_policy["statusPoints"].items()
+    )
+    check_weights = ", ".join(
+        f"{name}={value}" for name, value in score_policy["checkWeights"].items()
+    )
+    audit_weights = score_policy["auditWeights"]
+    unique_audit_weights = set(audit_weights.values())
+    audit_weight_description = (
+        f"Every audit category has weight {next(iter(unique_audit_weights))}."
+        if len(unique_audit_weights) == 1
+        else "Audit category weights are "
+        + ", ".join(f"{name}={value}" for name, value in audit_weights.items())
+        + "."
+    )
     lines.extend(
         [
             "",
             "## Scoring method",
             "",
-            f"Policy version `{result['policyVersion']}` assigns present=1, partial=0.5, "
-            "missing=0, and violation=0. Standard checks weigh 1.0 and soft checks 0.5. "
-            "Each audit is normalized before equally weighted audit categories are averaged. "
+            f"Policy version `{result['policyVersion']}` assigns status points: {status_points}. "
+            f"Check weights are {check_weights}. {audit_weight_description} "
+            "Each audit is normalized before the configured audit weights are applied. "
             "Missing and unevaluated evidence reduces coverage instead of becoming a guessed pass or failure.",
             "",
             "## Obtain an official score",
@@ -1480,6 +1588,14 @@ def verify_fingerprints(fingerprints: dict[Path, dict[str, Any]]) -> bool:
     return True
 
 
+def verify_repository_state(repository_root: Path, result: dict[str, Any]) -> bool:
+    target = result["target"]
+    return (
+        current_commit(repository_root) == target["gitCommit"]
+        and is_source_clean(repository_root) == target["sourceWorkingTreeClean"]
+    )
+
+
 def acquire_lock(lock_path: Path) -> int:
     try:
         return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -1519,7 +1635,11 @@ def atomic_write(path: Path, content: str) -> None:
             pass
 
 
-def write_reports(repository_root: Path, result: dict[str, Any]) -> Path:
+def write_reports(
+    repository_root: Path,
+    result: dict[str, Any],
+    fingerprints: dict[Path, dict[str, Any]],
+) -> Path:
     repository_root = repository_root.resolve(strict=True)
     audit_root = repository_root / ".architect-audits"
     if audit_root.exists():
@@ -1543,6 +1663,12 @@ def write_reports(repository_root: Path, result: dict[str, Any]) -> Path:
     lock_path = output_root / ".lock"
     lock_fd = acquire_lock(lock_path)
     try:
+        if not verify_fingerprints(fingerprints):
+            raise UnstableInputError("scoring inputs changed before publication")
+        if not verify_repository_state(repository_root, result):
+            raise UnstableInputError(
+                "repository commit or source cleanliness changed before publication"
+            )
         metadata = {
             "schemaVersion": result["schemaVersion"],
             "skillName": "repository-quality-score",
@@ -1596,6 +1722,8 @@ def build_result(
     for audit in audit_order:
         try:
             catalogs[audit] = load_catalog(skills_root, audit, fingerprints)
+        except UnstableInputError:
+            raise
         except (ScoreInputError, OSError) as exc:
             catalog_failures[audit] = (
                 f"The {audit} catalog is unavailable: {safe_exception_message(exc)}"
@@ -1661,16 +1789,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         for attempt in range(2):
-            repository_root, result, fingerprints = build_result(
-                args.target, args.skills_root, args.current_worktree_only
-            )
-            if verify_fingerprints(fingerprints):
-                break
-            if attempt == 1:
-                raise UnstableInputError(
-                    "scoring inputs changed during calculation; retry after audit writers finish"
+            try:
+                repository_root, result, fingerprints = build_result(
+                    args.target, args.skills_root, args.current_worktree_only
                 )
-        output_root = write_reports(repository_root, result)
+                if not verify_fingerprints(fingerprints):
+                    raise UnstableInputError(
+                        "scoring inputs changed during calculation"
+                    )
+                output_root = write_reports(repository_root, result, fingerprints)
+                break
+            except UnstableInputError:
+                if attempt == 1:
+                    raise UnstableInputError(
+                        "inputs or repository state changed during both score attempts; "
+                        "retry after audit writers finish"
+                    )
         score = display_number(result["overallScore"])
         print(
             f"RQS {result['status']}: {score} "

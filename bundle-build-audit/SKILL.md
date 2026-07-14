@@ -115,7 +115,7 @@ Defaults in parentheses; every threshold overridable via flags. Checks marked **
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: if `graphify-out/graph.json` exists, the skill uses community structure to suggest cleavage planes for code-splitting in the implementation plan. If absent, the audit still runs in full — the only loss is some intelligence in the remediation suggestions.
-2. **Confirms a Node.js project with a recognised build tool.** Detects the build tool from `package.json` dependencies and configuration files. If none of the supported build tools is detected, the skill stops and tells the user.
+2. **Confirms a Node.js project and detects its build tool.** If no supported build tool is detected, the audit records the build-tool foundation check as `missing`, marks only tool-specific checks applicable but `not-evaluated`, and continues evaluating package, dependency-separation, and continuous-integration checks that do not require a recognised tool.
 3. **Detects the meta-framework** for the diagnostic snapshot.
 4. **Locates a stats artefact when `--with-stats` is set.** Searches the conventional paths for the detected build tool, plus any path passed via `--stats-path`. Records the path or the absence in the snapshot.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/bundle-build-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -151,7 +151,7 @@ Detect the build tool:
 - `rollup` dependency with a `rollup.config.*` → plain Rollup.
 - `@vercel/turbopack` or Next.js with Turbopack opted in → Turbopack.
 
-If none match, stop and tell the user the skill currently supports the listed tools only.
+If none match, continue with explicit prerequisite evidence. Record the build-tool-present check as `missing`; mark tool-specific configuration, bundle, cache, and stats checks applicable but `not-evaluated` with reason `supported-build-tool-not-detected`; evaluate general dependency and continuous-integration checks where evidence exists. Mention the supported tools and the detected custom/unknown build command in the snapshot.
 
 ### Step 2 — Locate the stats artefact (if `--with-stats`)
 
@@ -316,7 +316,7 @@ contains every catalog check exactly once):
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| No supported build tool detected | The project uses Parcel, esbuild directly, or a custom build script. | Stop. Inform the user that the skill currently supports Vite, Next.js, Remix, Create React App, Webpack, Rollup, and Turbopack only. |
+| No supported build tool detected | The project uses Parcel, esbuild directly, or a custom build script. | Continue. Record the build-tool foundation as `missing`, dependent checks as applicable but `not-evaluated`, and evaluate independent dependency and continuous-integration checks. List the currently supported tools in the remediation. |
 | `--with-stats` set but no stats artefact found | The user has not installed a bundle analyser, or has not run `npm run build` (or equivalent with the bundle analyser enabled) recently. | Continue running. Mark stats-required checks as `partial` with the gap "stats artefact not present at <searched paths>". **Recovery:** run `/preflight --audit=bundle-build --install` to install a bundle analyser if missing, then run the build to produce the artefact and re-run with `--with-stats`. |
 | Stats artefact present but unreadable | Corrupt or unrecognised format. | Treat the artefact as missing. Record the parse error in the snapshot. Continue with degraded checks. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in `metadata.json`. The implementation plan loses the community-derived split-plane suggestions; everything else is unaffected. |

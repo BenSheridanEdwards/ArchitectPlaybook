@@ -60,7 +60,7 @@ A check resolves to one of four statuses:
 
 - **present** — the invariant holds.
 - **partial** — most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.
-- **missing** — a structural prerequisite is absent (no `tsconfig.json`, for example — the skill stops earlier in that case, but the status is reserved).
+- **missing** — an applicable structural prerequisite is absent. A non-TypeScript project is represented explicitly as an out-of-domain, not-applicable audit.
 - **violation** — the audit identified concrete configuration or source that breaks the invariant.
 
 Layer 0 is informational only and has no status.
@@ -91,7 +91,7 @@ Layer 0 is informational only and has no status.
 | `skipLibCheck` is a deliberate choice | The flag is either explicitly `true` (with the awareness that third-party `.d.ts` files won't be type-checked) or explicitly `false`. The check verifies the choice was made; it doesn't pick a side. Soft check. | The flag is absent and the default behaviour applies (which differs across TypeScript versions). |
 | `target` and `module` appropriate | `target` matches the runtime (`ES2022` or newer for modern Node and modern browsers). `module` is `ESNext`, `NodeNext`, or `Preserve` — not `CommonJS` for browser code. | `target: 'ES5'` or older in a project that ships modern environments only; or `module` mismatched against the resolution model. |
 | `moduleResolution` set explicitly | `moduleResolution` is `Bundler` (Vite, esbuild) or `NodeNext` (Node), set explicitly rather than defaulting. | Flag absent. |
-| Composite or project references for monorepos | Monorepos use TypeScript project references (composite projects) so type-checks scale across packages. Skipped silently outside monorepos. Soft check. | Multi-package project without project references. |
+| Composite or project references for monorepos | Monorepos use TypeScript project references (composite projects) so type-checks scale across packages. Explicitly not applicable outside monorepos. Soft check. | Multi-package project without project references. |
 
 ### Layer 2 — Type quality in source
 
@@ -134,7 +134,7 @@ Layer 0 is informational only and has no status.
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit cross-references type-quality offenders (high-`any`, high-`as`, high-`!` files) against graph centrality and prioritises god nodes in the implementation plan. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and `typescript` in dependencies. If any are absent, the skill stops and tells the user it currently supports TypeScript projects only.
+2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and `typescript` in dependencies. If the repository is not a TypeScript project, the skill writes a canonical not-applicable audit with every catalog check present once and a null status.
 3. **Resolves the effective `tsconfig.json`** by following any `extends` chain. Records the final resolved configuration in metadata.
 4. **Detects the runtime validation library** (zod, valibot, arktype, io-ts, yup, joi, superstruct, runtypes) for the diagnostic snapshot and for the layer 4 checks.
 5. **When `--with-run` is set**, invokes `npx tsc --noEmit` and parses the diagnostics. If `tsc` fails to start (not installed in the project), records the failure, prints to the chat and prepends to `findings.md`: "`--with-run` was requested but `typescript` is not installed. Run `/preflight --audit=typescript --install` to install it, then re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Records `recoveryHint: "/preflight --audit=typescript --install"` on each run-dependent check that degraded in `findings.json`. Continues with run-dependent enrichment degrading to `partial`.
@@ -159,11 +159,10 @@ Layer 0 is informational only and has no status.
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f package.json || { echo "typescript-audit: no package.json detected. This skill currently supports TypeScript projects only."; exit 1; }
-test -f tsconfig.json || { echo "typescript-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "typescript-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
 
-Verify TypeScript is installed: `typescript` in `dependencies` or `devDependencies`. When absent, stop with a friendly message.
+Verify `tsconfig.json` and TypeScript (`typescript` in `dependencies` or `devDependencies`). When either is absent, write all four canonical output files, set `auditApplicability.status` to `not-applicable`, and emit every `checks.json` entry once as `not-applicable`/`not-evaluated` with `status: null`.
 
 ### Step 2 — Resolve the effective tsconfig
 
@@ -367,8 +366,8 @@ contains every catalog check exactly once):
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project, or `tsconfig.json` lives at a non-standard path. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
-| TypeScript not installed | `typescript` is not in `dependencies` or `devDependencies`. | Stop with a friendly message recommending `npm install --save-dev typescript`. |
+| `no tsconfig.json detected` | JavaScript-only project, or `tsconfig.json` lives at a non-standard path. | After checking configured workspace paths, write a canonical not-applicable audit result with every catalog check present once and a null status. |
+| TypeScript not installed | `typescript` is not in `dependencies` or `devDependencies`. | Write the same canonical not-applicable result and recommend `npm install --save-dev typescript` when TypeScript was intended. |
 | `tsconfig.json` extends a missing or unparseable file | Broken `extends` chain. | Continue with the configuration that successfully parsed. Record the broken extension in metadata. The "single configuration source" intent is otherwise met. |
 | `--with-run` set but `tsc` fails to start | Binary missing, invalid configuration, monorepo path issue. | Record the failure and the captured stderr in metadata. Run-dependent enrichment of the diagnostic snapshot degrades to `partial`. The static analysis still runs. **Recovery:** run `/preflight --audit=typescript --install` to install `typescript`, then re-run with `--with-run`. |
 | `--with-run` set and `tsc` exits with type errors | Expected behaviour when there are real type errors. | Parse the diagnostics, record the count in the snapshot, and continue normally. Type errors are reported but do not cause the audit to fail. |

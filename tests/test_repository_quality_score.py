@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -15,6 +17,12 @@ CALCULATOR = (
     / "scripts"
     / "calculate_repository_quality_score.py"
 )
+
+spec = importlib.util.spec_from_file_location("rqs_calculator", CALCULATOR)
+assert spec and spec.loader
+rqs_calculator = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = rqs_calculator
+spec.loader.exec_module(rqs_calculator)
 
 
 class RepositoryQualityScoreTests(unittest.TestCase):
@@ -380,7 +388,7 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2, completed.stderr)
         result = self._score_json()
         self.assertIn(
-            "not an exact unique match",
+            "not an exact unique catalog match",
             result["excludedCandidates"][0]["reason"],
         )
 
@@ -492,7 +500,10 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         result = self._score_json()
         self.assertEqual(result["status"], "provisional")
         self.assertEqual(result["overallScore"], 100)
-        self.assertIn("duplicate JSON key", result["excludedCandidates"][0]["reason"])
+        self.assertIn(
+            "duplicate JSON object key",
+            result["excludedCandidates"][0]["reason"],
+        )
 
     def test_nonfinite_and_invalid_utf8_json_are_safely_excluded(self) -> None:
         path = self.repository / ".architect-audits" / "audit-one" / "findings.json"
@@ -520,6 +531,187 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         self.assertIn(
             "valid UTF-8 JSON",
             self._score_json()["excludedCandidates"][0]["reason"],
+        )
+
+    def test_excessive_nesting_and_large_integer_are_safely_excluded(self) -> None:
+        path = self.repository / ".architect-audits" / "audit-one" / "findings.json"
+        path.parent.mkdir(parents=True)
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+        path.write_text(
+            '{"gitCommit":"%s","checks":[],"nested":%s0%s}\n'
+            % (self.commit, "[" * 2000, "]" * 2000),
+            encoding="utf-8",
+        )
+
+        deeply_nested = self._run_score()
+
+        self.assertEqual(deeply_nested.returncode, 0, deeply_nested.stderr)
+        self.assertIn(
+            "cannot parse JSON input",
+            self._score_json()["excludedCandidates"][0]["reason"],
+        )
+        path.write_text(
+            '{"gitCommit":"%s","checks":[],"large":%s}\n'
+            % (self.commit, "9" * 5000),
+            encoding="utf-8",
+        )
+
+        large_integer = self._run_score()
+
+        self.assertEqual(large_integer.returncode, 0, large_integer.stderr)
+        self.assertIn(
+            "cannot parse JSON input",
+            self._score_json()["excludedCandidates"][0]["reason"],
+        )
+
+    def test_unknown_semantic_findings_schema_is_not_treated_as_legacy(self) -> None:
+        self._write_findings(
+            "audit-one",
+            {
+                "schemaVersion": "3.0.0",
+                "gitCommit": self.commit,
+                "checks": [
+                    {"check": "first", "status": "present", "evidence": ["one"]}
+                ],
+            },
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["status"], "provisional")
+        self.assertEqual(
+            result["excludedCandidates"][0]["reason"],
+            "invalid-findings: unsupported findings schemaVersion",
+        )
+
+    def test_legacy_identity_and_diagnostics_do_not_echo_untrusted_values(self) -> None:
+        secret_run = "manager-secret-run"
+        self._write_findings(
+            "audit-one",
+            {
+                "schemaVersion": "legacy",
+                "runIdentifier": secret_run,
+                "timestamp": "private-invalid-timestamp",
+                "gitCommit": self.commit,
+                "checks": [
+                    {"check": "first", "status": "present", "evidence": ["one"]},
+                    {"check": "second", "status": "present", "evidence": ["two"]},
+                ],
+            },
+        )
+
+        accepted = self._run_score()
+
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        result = self._score_json()
+        selected = result["categories"][0]["selectedRun"]
+        self.assertEqual(selected["schemaVersion"], "legacy")
+        self.assertTrue(selected["runIdentifier"].startswith("legacy-"))
+        self.assertEqual(selected["runFinishedAt"], "1970-01-01T00:00:00Z")
+        self.assertNotIn(secret_run, json.dumps(result))
+        self.assertNotIn("private-invalid-timestamp", json.dumps(result))
+
+        secret_check = "private-unknown-check"
+        self._write_findings(
+            "audit-one",
+            {
+                "gitCommit": self.commit,
+                "checks": [{"check": secret_check, "status": "present"}],
+            },
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        rejected = self._run_score()
+
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
+        self.assertNotIn(secret_check, json.dumps(self._score_json()))
+
+    def test_posix_absolute_target_repository_is_rejected_on_every_host(self) -> None:
+        findings = self._canonical_findings("audit-one", ["present", "present"])
+        findings["target"]["repository"] = "/private/target-repository"
+        self._write_findings("audit-one", findings)
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertIn(
+            "cannot contain a local path or credentials",
+            result["excludedCandidates"][0]["reason"],
+        )
+        self.assertNotIn("/private/target-repository", json.dumps(result))
+
+    def test_complete_candidate_beats_newer_degraded_candidate(self) -> None:
+        complete = self._canonical_findings(
+            "audit-one", ["present", "present"], graph_available=False
+        )
+        complete["runIdentifier"] = "run-complete"
+        degraded = self._canonical_findings(
+            "audit-one", ["missing", "missing"], graph_available=True
+        )
+        degraded["runIdentifier"] = "run-newer-degraded"
+        degraded["runStartedAt"] = "2026-07-13T11:00:00Z"
+        degraded["runFinishedAt"] = "2026-07-13T11:01:00Z"
+        degraded["checks"][0]["evidenceQuality"] = "degraded"
+        degraded["checks"][0]["evaluationReason"] = "limited evidence"
+        self._write_findings("audit-one", complete, run_directory="older")
+        self._write_findings("audit-one", degraded, run_directory="newer")
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(
+            result["categories"][0]["selectedRun"]["runIdentifier"],
+            "run-complete",
+        )
+        self.assertEqual(result["categories"][0]["score"], 100)
+
+    def test_json_fingerprint_matches_the_exact_parsed_bytes(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        fingerprints: dict[Path, dict[str, Any]] = {}
+
+        parsed = rqs_calculator.strict_json_load(policy_path, fingerprints)
+
+        self.assertEqual(parsed["policyVersion"], "1.0.0")
+        self.assertEqual(
+            fingerprints[policy_path.resolve()]["sha256"],
+            hashlib.sha256(policy_path.read_bytes()).hexdigest(),
+        )
+
+    def test_publication_rejects_repository_state_changed_after_calculation(self) -> None:
+        repository_root, result, fingerprints = rqs_calculator.build_result(
+            self.repository, self.skills, True
+        )
+        (self.repository / "changed-after-score.ts").write_text(
+            "dirty\n", encoding="utf-8"
+        )
+
+        with self.assertRaises(rqs_calculator.UnstableInputError):
+            rqs_calculator.write_reports(repository_root, result, fingerprints)
+
+        self.assertFalse(
+            (
+                self.repository
+                / ".architect-audits"
+                / "repository-quality-score"
+                / "score.json"
+            ).exists()
         )
 
     def test_mismatched_metadata_is_rejected_instead_of_qualified(self) -> None:
@@ -649,6 +841,36 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         result = self._score_json()
         self.assertEqual(result["overallScore"], 66.67)
         self.assertEqual(result["categories"][0]["possibleWeight"], 1.5)
+
+    def test_report_describes_the_applied_policy_values(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["statusPoints"]["partial"] = "0.25"
+        policy["checkWeights"] = {"standard": "2.0", "soft": "0.25"}
+        policy["audits"][1]["weight"] = "3.0"
+        self._write_json(policy_path, policy)
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["partial", "present"])
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["scorePolicy"]["statusPoints"]["partial"], 0.25)
+        report = (
+            self.repository
+            / ".architect-audits"
+            / "repository-quality-score"
+            / "score.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("partial=0.25", report)
+        self.assertIn("standard=2", report)
+        self.assertIn("audit-two=3", report)
+        self.assertNotIn("partial=0.5", report)
 
     def test_registered_worktree_findings_are_discovered_only_in_default_mode(self) -> None:
         worktree = Path(self.temporary.name) / "registered worktree"

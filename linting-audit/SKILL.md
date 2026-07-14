@@ -87,7 +87,7 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 | `eslint-plugin-jsx-a11y/recommended` (React only) | When React is detected, the accessibility plugin's recommended rules are enabled. (Surfaces the gap here as well as in `/accessibility-audit`, so a single fix passes both.) | React project without it. |
 | `eslint-plugin-import` configured | The import plugin is configured with the TypeScript resolver (`eslint-import-resolver-typescript`) plus rules for unresolved imports, import order, and no-cycle. | Plugin missing, or installed without the TypeScript resolver. |
 | `eslint-config-prettier` last in extends | When Prettier is in the project, `eslint-config-prettier` is the last entry in the extends list so it disables formatting rules that would conflict with Prettier. | Prettier installed but config not added; or added but not last. |
-| Node best-practices plugin | When the project has Node-only entry points (server code, build scripts), `eslint-plugin-n`'s recommended rules are enabled. Skipped silently for browser-only frontends. | Node entry points present without the plugin. |
+| Node best-practices plugin | When the project has Node-only entry points (server code, build scripts), `eslint-plugin-n`'s recommended rules are enabled. Explicitly not applicable for browser-only frontends. | Node entry points present without the plugin. |
 
 #### When Biome is detected
 
@@ -123,8 +123,8 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the implementation plan can rank suppression-heavy files by graph centrality — a suppression in a god node is more consequential than one in a leaf utility, and the plan recommends those for cleanup first. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and a TypeScript dependency. If absent, the skill stops and tells the user it currently supports TypeScript projects only.
-3. **Detects the linter.** Looks for `eslint` and/or `@biomejs/biome` in `package.json` dependencies, then for the configuration files of each. When neither is detected, the audit stops with a clear message: a project with no linter is a `/quality-gates-audit` problem first.
+2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and a TypeScript dependency. When the repository is not a TypeScript project, it still writes the four canonical output files with `auditApplicability.status: "not-applicable"` and every catalog check explicitly marked `not-applicable`/`not-evaluated` with a null status.
+3. **Detects the linter.** Looks for `eslint` and/or `@biomejs/biome` in `package.json` dependencies, then for the configuration files of each. When neither is detected, the audit records the linter-foundation checks as `missing`, marks only linter-dependent checks `not-evaluated`, and continues evaluating source- and continuous-integration checks that do not require a linter.
 4. **Detects React** for the React-conditional rule-coverage checks.
 5. **When `--with-run` is set**, invokes the detected linter in JSON-reporter mode, captures the output, and parses it. If the lint command fails to start (binary missing, configuration syntactically invalid), records the failure and degrades run-dependent checks to `partial`.
 6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/linting-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -147,9 +147,10 @@ The audit dispatches based on the detected linter. Whichever path runs, every ch
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f package.json || { echo "linting-audit: no package.json detected. This skill currently supports TypeScript projects only."; exit 1; }
-test -f tsconfig.json || { echo "linting-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "linting-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
+
+If `tsconfig.json` or the TypeScript dependency is absent, do not omit the audit. Write all four canonical output files, set `auditApplicability.status` to `not-applicable`, use a stable reason such as `typescript-project-not-detected`, and emit every `checks.json` entry exactly once as `not-applicable`/`not-evaluated` with `status: null`.
 
 ### Step 2 — Detect the linter
 
@@ -158,9 +159,7 @@ Read `package.json` dependencies:
 - `eslint` present → ESLint path.
 - `@biomejs/biome` present → Biome path.
 - Both present → record both, run the appropriate path for whichever is configured (presence of `eslint.config.*`/`.eslintrc.*` vs `biome.json`), and surface the dual-installation as a `violation` on the layer 1 "exactly one linter installed" check.
-- Neither present → stop with a clear message:
-
-  > `linting-audit` requires a linter (ESLint or Biome). No linter detected. Install one and configure it before running this audit; `/quality-gates-audit` will surface the gap as well.
+- Neither present → continue with explicit prerequisite evidence. Mark the linter-presence/configuration foundation check `missing`; mark checks that require ESLint or Biome execution/configuration as applicable but `not-evaluated` with reason `linter-not-detected`; evaluate independent suppression, source, and continuous-integration checks where evidence exists. Tell the user that `/quality-gates-audit` will also surface the tooling gap.
 
 ### Step 3 — Detect React
 
@@ -283,7 +282,7 @@ contains every catalog check exactly once):
   "checks": [
     {
       "layer": "rule-coverage",
-      "checkId": "linting-audit.eslint-config-prettier-last-in-extends",
+      "checkId": "linting-audit.config-prettier-last",
       "applicability": "applicable",
       "applicabilityReason": null,
       "evaluationState": "evaluated",
@@ -313,8 +312,8 @@ contains every catalog check exactly once):
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
-| Neither ESLint nor Biome installed | The project has no linter. | Stop with a friendly message recommending `/quality-gates-audit` to surface the broader gap, and `/install` of either ESLint or Biome before re-running. |
+| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
+| Neither ESLint nor Biome installed | The project has no linter. | Continue. Record the foundation check as `missing`, dependent checks as applicable but `not-evaluated`, and evaluate independent checks. Recommend `/quality-gates-audit` and installation of ESLint or Biome. |
 | Both ESLint and Biome installed | Mid-migration or accidental dual-install. | Continue. Run the audit against whichever has a configuration file. Surface dual-installation as a `violation` on the layer 1 "exactly one linter installed" check. |
 | `--with-run` set but lint command fails to start | Binary missing, configuration invalid, monorepo path resolution issue. | Record the failure and the captured stderr in metadata. Run-dependent checks degrade to `partial`. Continue with the static analysis. **Recovery:** run `/preflight --audit=linting --install` to install `eslint` or `@biomejs/biome` (whichever your project already uses), then re-run with `--with-run`. |
 | ESLint legacy configuration format | Project still on `.eslintrc.*`. | The layer 1 modern-format check reports `violation`. Continue auditing — the legacy format is still parseable; the implementation plan includes a migration snippet to flat config. |

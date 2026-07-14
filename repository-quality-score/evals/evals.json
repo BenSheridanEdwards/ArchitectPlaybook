@@ -45,6 +45,39 @@
         "Unknown and ambiguous identifiers are reported rather than ignored.",
         "Any calculated legacy score is provisional and names audits that need rerunning."
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "There are two current-commit runs for one audit: a newer degraded run and an older complete run. Calculate RQS from the strongest trustworthy evidence.",
+      "expected_output": "The skill deterministically selects the complete run before using graph availability or timestamp as a tie-breaker and records the other run as lower priority.",
+      "files": [],
+      "expectations": [
+        "Complete canonical evidence outranks degraded or not-evaluated evidence with otherwise equivalent qualification.",
+        "The unselected run appears in exclusions without leaking raw evidence.",
+        "Candidate selection remains deterministic when timestamps tie."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Calculate RQS while audit writers may still be finishing and do not publish a score for a repository state different from the one you measured.",
+      "expected_output": "The calculator parses and fingerprints each stable byte snapshot, rechecks inputs plus Git commit and cleanliness before publication, retries once on change, and then fails unavailable if the state changes again.",
+      "files": [],
+      "expectations": [
+        "Parsed bytes and their recorded SHA-256 fingerprint are identical.",
+        "Commit and source cleanliness are revalidated while the score lock is held.",
+        "A second unstable attempt does not publish a new score.json completion marker."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Our approved score policy uses custom status points, check weights, and unequal audit weights. Produce the score and explain exactly what was applied.",
+      "expected_output": "The calculator uses only the fingerprinted policy values and records and renders those applied values rather than a hard-coded default explanation.",
+      "files": [],
+      "expectations": [
+        "score.json includes the applied status points, check weights, and audit weights.",
+        "score.md describes the actual policy values and does not claim categories are equally weighted when they are not.",
+        "The policy version and SHA-256 fingerprint remain present for comparability."
+      ]
     }
   ]
 }

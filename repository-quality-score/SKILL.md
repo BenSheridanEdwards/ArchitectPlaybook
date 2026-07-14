@@ -166,6 +166,7 @@ paths.
 | Filter or threshold override used | Produce a provisional score and record the customization |
 | Skipped or failed check evaluation | Reduce coverage and produce a provisional score |
 | Findings change while scoring | Retry once, then stop with an unavailable result |
+| Commit or source cleanliness changes before publication | Retry the entire calculation once, then stop without publishing a new completion marker |
 | Git is unavailable | Inspect only the current directory and never call the result official |
 | Output path escapes through a symlink | Refuse to write and report the unsafe path |
 

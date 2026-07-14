@@ -12,11 +12,11 @@ The default mental model is TypeScript and React. Most checks apply to any TypeS
 
 ## Hard requirement: the Graphify knowledge graph
 
-This is the one audit that requires `graphify-out/graph.json`. Half the checks (god-node detection, community comparison, circular-dependency detection, fan-in and fan-out analysis) are unimplementable without it. If the graph is missing, the skill stops immediately with this message:
+This is the one audit that requires `graphify-out/graph.json`. Half the checks (god-node detection, community comparison, circular-dependency detection, fan-in and fan-out analysis) are unimplementable without it. If the graph is missing, the skill writes the canonical output files with every applicable catalog check marked `not-evaluated`, a null status, and reason `knowledge-graph-not-detected`, then prints this message:
 
 > `/architecture-audit` requires the Graphify knowledge graph. Please run `/pre-audit-setup` first, then re-run this audit.
 
-There is no graceful degradation. A misleading half-audit is worse than no audit.
+There is no scored half-audit. The explicit not-evaluated result prevents a misleading category score while giving downstream tools a complete, honest evidence record.
 
 ## Usage
 
@@ -69,7 +69,7 @@ Written before any check runs, so the human reading the report has architectural
 | Feature folders have a single entry point | Each top-level folder under `src/features/`, `src/modules/`, or the equivalent for the detected pattern exposes a barrel (`index.ts`) and external imports go through it. | An external file imports from a deep path inside a feature folder, bypassing its `index.ts`. Reported with the importer, the feature, and the bypassed path. |
 | No deep relative imports | Relative imports go up at most two levels (`../../`). | Any import string containing `../../../` or deeper. Reported with the importer file. |
 | No back-imports across layers | When the architectural pattern is layered (or detected as layered), upstream layers do not import from downstream layers (for example, UI does not import from data; data does not import from UI). When the pattern is feature-folders, sibling features do not import from each other except through their public entry points. | An import that crosses a boundary in the wrong direction. Reported with the importer, the import, and the direction of the violation. |
-| Cross-workspace contracts respected (monorepos only) | Internal packages import only from each other's published entry points, not deep paths. | A deep import into another workspace's `src/` directory. Skipped silently when the project is not a monorepo. |
+| Cross-workspace contracts respected (monorepos only) | Internal packages import only from each other's published entry points, not deep paths. Explicitly not applicable when the project is not a monorepo. | A deep import into another workspace's `src/` directory. |
 
 ### Layer 2 — Coupling and complexity
 
@@ -91,7 +91,7 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 | Data fetching layer separated | Server state lives in a designated data-fetching layer (TanStack Query, SWR, RTK Query, or a custom hooks layer) — not in component-level `useEffect` plus `fetch`. | Files outside the designated hooks or data layer that call `fetch`, `axios`, or framework-level data primitives directly. Reported with file references. |
 | No global mutable singletons | No top-level `let` exports holding mutable state. | A module-level mutable export (`export let x = ...`). Reported per occurrence. |
 | Side effects isolated | Components do not read or write `localStorage`, `sessionStorage`, `document.cookie`, or `window.*` directly — they go through a hook or a service module. | Direct usage in component files. Reported with file references. |
-| Server vs. client distinction (Next.js App Router only) | The `'use client'` directive is used deliberately, not on every file. Server components do not import client-only modules and vice versa. | A `'use client'` file importing a known server-only module, or a server component importing a known client-only one. Excessive `'use client'` boundary fragmentation (more than half of the components marked client) reported as `partial`. Skipped silently when the App Router is not in use. |
+| Server vs. client distinction (Next.js App Router only) | The `'use client'` directive is used deliberately, not on every file. Server components do not import client-only modules and vice versa. Explicitly not applicable when the App Router is not in use. | A `'use client'` file importing a known server-only module, or a server component importing a known client-only one. Excessive `'use client'` boundary fragmentation (more than half of the components marked client) reported as `partial`. |
 
 ### Layer 4 — Convention adherence
 
@@ -104,9 +104,9 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 
 ## What this skill does
 
-1. **Stops if the knowledge graph is missing.** Refuses to run with the friendly message above.
+1. **Requires the knowledge graph for evaluation.** When it is missing, writes a canonical no-score result with every applicable check explicitly `not-evaluated`, then prints the friendly recovery message above.
 2. **Reads the knowledge graph.** Loads `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`. The PreToolUse hook installed by `/pre-audit-setup` reminds you of this on every Glob and Grep — respect it.
-3. **Confirms a TypeScript project.** Detects TypeScript via `tsconfig.json` and a `package.json` dependency on `typescript`. If absent, the skill stops and tells the user it currently supports TypeScript only.
+3. **Confirms a TypeScript project.** Detects TypeScript via `tsconfig.json` and a `package.json` dependency on `typescript`. If absent, writes a canonical not-applicable audit with every catalog check present once and a null status.
 4. **Detects the meta-framework and the architectural pattern.** Records both in the diagnostic snapshot. The pattern detection is heuristic; the rationale is recorded so the user can override with `--pattern=` if the inference is wrong.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/architecture-audit/snapshot.md` and embeds the same content at the top of `findings.md`. The snapshot is informational and always present.
 6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
@@ -128,10 +128,10 @@ Defaults are in parentheses; every threshold is overridable via the flags above.
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f graphify-out/graph.json || { echo "/architecture-audit requires the Graphify knowledge graph. Please run /pre-audit-setup first, then re-run this audit."; exit 1; }
-test -f tsconfig.json || { echo "architecture-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
-test -f package.json || { echo "architecture-audit: no package.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "architecture-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
+
+If TypeScript is absent, write the canonical audit-level not-applicable result. If TypeScript is present but `graphify-out/graph.json` is absent, write all four canonical outputs with each catalog check applicable but `not-evaluated`, `evidenceQuality: "none"`, `status: null`, and evaluation reason `knowledge-graph-not-detected`; then tell the user to run `/pre-audit-setup`.
 
 ### Step 2 — Detect framework and architectural pattern
 
@@ -334,8 +334,8 @@ contains every catalog check exactly once):
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Knowledge graph missing | `/pre-audit-setup` has not been run, or the graph has been deleted. | Stop. Print the friendly message and exit. Do not run any check. |
-| `tsconfig.json` missing | The skill is being run on a JavaScript-only project, or outside the project root. | Stop. Inform the user that the skill currently supports TypeScript only. |
+| Knowledge graph missing | `/pre-audit-setup` has not been run, or the graph has been deleted. | Write the canonical no-score result with every applicable check explicitly `not-evaluated`, print the recovery message, and do not invent findings. |
+| `tsconfig.json` missing | The skill is being run on a JavaScript-only project, or outside the project root. | If `package.json` identifies a valid project root, write the canonical not-applicable audit result; otherwise ask the user to change to the project root. |
 | Pattern inference inconclusive | The directory layout matches no clear convention. | Record `no-clear-pattern` in the snapshot. Emit pattern-specific catalog checks as `not-applicable`/`not-evaluated` with null status and an explanation. |
 | Pattern override is wrong | The user passed `--pattern=layered` but no layered structure exists. | Trust the user's intent. Run the layered-style checks and report what they would expect to see; many will resolve as `missing` or `violation`. |
 | Threshold override is extreme | A user passes `--threshold-god-module=1000`. | Honour the value. Record it in `metadata.json` so the report makes the choice visible. |

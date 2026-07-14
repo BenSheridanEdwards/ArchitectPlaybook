@@ -109,7 +109,7 @@ Current findings are not normalized enough for safe scoring:
 These inconsistencies make normalization a prerequisite. Do not implement a
 calculator that merely counts whatever entries happen to be present.
 
-## Existing baseline-gate condition
+## Historical baseline-gate condition (resolved)
 
 Before this plan was added, the documented gates were run on Windows with
 `python`:
@@ -119,17 +119,12 @@ python scripts/validate-playbook.py
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-The validator reported 21 existing errors and the test suite reported two
-existing failures. The causes are Windows path normalization in README skill
-link comparison and the tracked bootstrap symlink not materializing as a
-directory when Windows symlink checkout is disabled. The Linux continuous-
-integration checkout is the authoritative clean-checkout comparison until those
-cross-platform issues are handled.
-
-Implementation must not hide or relabel these failures. Before changing
-production behavior, capture a clean Linux or continuous-integration-equivalent
-baseline. Keep any Windows baseline repair in a separate prerequisite commit or
-separate pull request so Repository Quality Score behavior remains reviewable.
+The validator originally reported 21 errors and the test suite reported two
+failures on Windows. The causes were Windows path normalization in README link
+comparison and a tracked bootstrap symlink materializing as a text file. Both
+cross-platform defects are now resolved: the bootstrap is a real directory and
+the validator requires its content to match the top-level installer. Windows
+and Linux are both required to pass the same deterministic gates.
 
 ## Scope
 
@@ -531,8 +526,9 @@ should render files to temporary names and replace final names only after the
 full run is ready. Repository Quality Score must:
 
 - require matching run identifiers between findings and metadata;
-- record a SHA-256 fingerprint of every input file it reads;
-- verify fingerprints again immediately before writing reports;
+- parse and fingerprint each JSON input from the same stable byte snapshot;
+- verify fingerprints, target commit, and source cleanliness again immediately
+  before writing reports;
 - retry discovery once if an input changed; and
 - abort with a clear unavailable result after the second change.
 
@@ -968,8 +964,8 @@ Use the phases below and keep the repository valid at every commit.
 2. Record `git status --short --branch`; preserve unrelated untracked files.
 3. Run the current validator and tests in a Linux or continuous-integration-
    equivalent environment and record the baseline.
-4. Keep the known Windows path and symlink failures separate from feature
-   regressions. Decide whether to repair them in a prerequisite commit.
+4. Verify the Windows-safe real-directory bootstrap and cross-platform path
+   handling remain green; treat any recurrence as a regression.
 5. Read `AGENTS.md`, `CLAUDE.md`, `.agents/CONVENTIONS.md`,
    `.agents/QUALITY_GATES.md`, `.agents/PR_QUALITY.md`, and
    `.agents/DEFINITION_OF_DONE.md` again before implementation.

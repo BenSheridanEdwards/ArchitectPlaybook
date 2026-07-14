@@ -58,7 +58,7 @@ A check resolves to one of four statuses:
 
 - **present** — the invariant holds.
 - **partial** — most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.
-- **missing** — a structural prerequisite is absent (no React installed, for example — the skill stops before this state is ever reached, but the status is reserved for future checks).
+- **missing** — an applicable structural prerequisite is absent. A non-React project is an out-of-domain audit and is represented explicitly as not applicable instead.
 - **violation** — the audit identified concrete code that breaks the invariant.
 
 Layer 0 is informational only and has no status. When React is older than 18,
@@ -117,22 +117,22 @@ they do not distort the summary or Repository Quality Score denominator.
 | State at the right level | Local state lives in the component that uses it; lifted state lives at the lowest common ancestor; global state is for genuinely global concerns (auth, theme, feature flags) — not "anything used in two places". Soft check — reported as `partial`. | Global state holding values used by a single subtree, or local state for values used across the application. |
 | URL state for shareable or recoverable state | Search queries, filters, sort orders, current page, and selected tabs live in URL parameters when the user would expect them to survive a reload. Soft check — reported as `partial`. | Detected patterns where a refresh would lose UI state that the user expects to keep. |
 
-### Layer 4 — React 18/19 idioms (skipped silently when React below 18)
+### Layer 4 — React 18/19 idioms (explicitly not applicable when React is below 18)
 
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
 | `useId` for accessible IDs | Generated IDs used to wire up labels, ARIA attributes, and form controls use `useId` rather than ad-hoc counters or random strings. (Overlap with `/accessibility-audit`.) | Hand-rolled ID generation when React 18+ is available. |
 | `useTransition` or `startTransition` for non-urgent updates | Updates that can be deferred (filtering large lists, search-as-you-type, navigation in a Suspense-aware app) use `useTransition` or `startTransition`. Soft check — reported as `partial`. (Overlap with `/performance-audit`.) | Detected hot patterns where transitions would help and are absent. |
 | Suspense boundaries for async data | When the framework or library supports Suspense for data fetching (React 19 `use()`, TanStack Query Suspense mode, framework loaders), Suspense boundaries with meaningful fallbacks are used. | Async data fetched without surrounding Suspense in projects that have opted into Suspense-based data fetching. |
-| `'use client'` used minimally and deliberately (Next.js App Router only) | Client-component boundaries sit at the leaves of the tree, not at the root. (Overlap with `/architecture-audit`.) Soft check — reported as `partial` when more than half of components are client components. | Excessive `'use client'` fragmentation; or `'use client'` files importing server-only modules. Skipped silently outside App Router. |
-| Server Actions used appropriately (Next.js App Router only) | Mutating operations in App Router projects use Server Actions (`'use server'`) when appropriate, rather than client-side `fetch` to a route handler that simply mutates. Soft check — reported as `partial`. | Patterns where Server Actions would be the natural choice but route handlers are used instead. Skipped silently outside App Router. |
-| `useOptimistic` for optimistic mutations (React 19 only) | Optimistic UI updates use `useOptimistic` rather than hand-rolled optimistic state. Skipped silently for React 18.x. | Hand-rolled optimistic updates in React 19 codebases. |
+| `'use client'` used minimally and deliberately (Next.js App Router only) | Client-component boundaries sit at the leaves of the tree, not at the root. (Overlap with `/architecture-audit`.) Soft check — reported as `partial` when more than half of components are client components. Explicitly not applicable outside App Router. | Excessive `'use client'` fragmentation; or `'use client'` files importing server-only modules. |
+| Server Actions used appropriately (Next.js App Router only) | Mutating operations in App Router projects use Server Actions (`'use server'`) when appropriate, rather than client-side `fetch` to a route handler that simply mutates. Soft check — reported as `partial`. Explicitly not applicable outside App Router. | Patterns where Server Actions would be the natural choice but route handlers are used instead. |
+| `useOptimistic` for optimistic mutations (React 19 only) | Optimistic UI updates use `useOptimistic` rather than hand-rolled optimistic state. Explicitly not applicable for React 18.x. | Hand-rolled optimistic updates in React 19 codebases. |
 
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit identifies widely-consumed custom hooks (a hook used by 50 components is more important to get right than one used by 2) and prioritises them in the implementation plan. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If any are absent, the skill stops and tells the user it currently supports TypeScript and React projects only.
-3. **Resolves the React version** from `package.json` and the lockfile. Determines whether layer 4 runs (React 18 or newer) or is reported as skipped.
+2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If TypeScript or React is absent, the skill writes a canonical not-applicable audit with every catalog check present once and a null status.
+3. **Resolves the React version** from `package.json` and the lockfile. Determines whether layer 4 runs (React 18 or newer) or is represented explicitly as not applicable.
 4. **Detects framework, form library, animation library, and design system** for the diagnostic snapshot and for layer-specific dispatch (App Router gates two layer 4 checks).
 5. **Counts class components and identifies the most-recently-modified component of each kind** so the implementation plan can flag class components newer than the most recent function component as the strongest migration signal.
 6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/react-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -141,7 +141,7 @@ they do not distort the summary or Repository Quality Score denominator.
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
-   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), React version, framework variant, applied filters, layer 4 skipped status when applicable.
+   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), React version, framework variant, applied filters, and the reason any Layer 4 checks are not applicable.
 9. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
 
    > "Generate an implementation plan for the React idiom gaps? (yes/no)"
@@ -155,15 +155,14 @@ they do not distort the summary or Repository Quality Score denominator.
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f package.json || { echo "react-audit: no package.json detected. This skill currently supports TypeScript and React projects only."; exit 1; }
-test -f tsconfig.json || { echo "react-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "react-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
 
-Confirm React: `react` in dependencies (directly or via Next.js, Remix, etc.). When absent, stop with a friendly message.
+Confirm TypeScript and React (`react` directly or via Next.js, Remix, etc.). When either is absent, write all four canonical output files, set the audit applicability to `not-applicable`, and emit every catalog check as `not-applicable`/`not-evaluated` with `status: null`.
 
 ### Step 2 — Resolve React version and framework
 
-Read `package.json` and the lockfile. The lockfile is authoritative when the two disagree. Record the major.minor version. If below 18, layer 4 is skipped.
+Read `package.json` and the lockfile. The lockfile is authoritative when the two disagree. Record the major.minor version. If below 18, emit every Layer 4 catalog check explicitly as `not-applicable`/`not-evaluated` with a null status.
 
 Resolve framework variant from dependencies and directory layout:
 
@@ -195,7 +194,7 @@ For each check in the active layer list, walk its detection logic:
 
 - **All required signals indicate the invariant holds →** `present`.
 - **Most signals hold; a small number of exceptions →** `partial`. Soft checks default to `partial` when adherence is mixed.
-- **The structural prerequisite is absent →** `missing`. (Reserved; in this audit `missing` is uncommon because the skill stops earlier when the prerequisite — React itself — is absent.)
+- **An applicable structural prerequisite is absent →** `missing`. If React itself is absent, use the audit-level not-applicable result instead.
 - **Concrete violators exist →** `violation`. Always include sample file references.
 
 Record up to ten representative samples plus a total count per check.
@@ -234,7 +233,7 @@ When the user agrees, build `implementation-plan.md`:
 2. **Layer 1 — hooks correctness plan**: per finding, the file and line, the offending pattern, and the recommended replacement (status enum snippet, derived-state refactor, cleanup function, memoization-for-correctness wrapping). Widely-consumed hooks (Graphify-prioritised) are addressed first because the blast radius is larger.
 3. **Layer 2 — component design plan**: per finding, the rename, the `forwardRef` introduction, the `displayName` addition, or the file split. Class-component migrations are listed with the most-recently-modified ones flagged for migration first; legacy class components in stable code are marked low-priority.
 4. **Layer 3 — state management plan**: per finding, the state to lift/lower/derive, the form-library introduction snippet, the URL-state migration. Cross-references `/architecture-audit`'s implementation plan when both flag the same single-state-library gap.
-5. **Layer 4 — React 18/19 idiom adoption plan** (when not skipped): adoption snippets for `useId`, `useTransition`, Suspense boundaries, `useOptimistic`. Server Action conversion proposals for App Router projects.
+5. **Layer 4 — React 18/19 idiom adoption plan** (when applicable): adoption snippets for `useId`, `useTransition`, Suspense boundaries, `useOptimistic`. Server Action conversion proposals for App Router projects.
 6. **Closing checklist** — flat checkbox list mirroring the gaps, suitable for pasting into a pull-request description.
 
 The plan is descriptive, not executable. It does not edit components, install libraries, or refactor state.
@@ -270,7 +269,7 @@ contains every catalog check exactly once):
   "skillName": "react-audit",
   "skillVersion": "1.0.0",
   "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.0.0",
+  "checkCatalogVersion": "1.1.0",
   "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
   "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
@@ -328,7 +327,7 @@ Every corresponding catalog entry remains in `checks` with
 `applicability: "not-applicable"`, `evaluationState: "not-evaluated"`,
 `evidenceQuality: "none"`, and `status: null`.
 
-`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top and one section per check, grouped by layer. `snapshot.md` contains only the snapshot. `metadata.json` carries skill identity, timestamps, Graphify revision (when present), React version, framework variant, the form/animation/design-system detection, applied filters, and the layer-4-skipped status when applicable.
+`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top and one section per check, grouped by layer. `snapshot.md` contains only the snapshot. `metadata.json` carries skill identity, timestamps, Graphify revision (when present), React version, framework variant, the form/animation/design-system detection, applied filters, and the reason any Layer 4 checks are not applicable.
 
 ## Idempotency rules
 
@@ -341,10 +340,10 @@ Every corresponding catalog entry remains in `checks` with
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
-| React not detected | The project does not depend on `react` directly or via a meta-framework. | Stop. Inform the user that this skill currently supports React projects only. |
-| React below 18 | The lockfile resolves React to 17.x or earlier. | Continue. Layer 4 reports `skipped: "react-version-below-18"` in `findings.json`. The implementation plan adds a "consider upgrading to React 18+ to unlock useId, useTransition, Suspense, and (eventually) useOptimistic" recommendation in its preamble. |
-| React 18 with no detected framework | A bare React project with a hand-rolled bundler. | Continue. Framework-conditional checks (App Router specifics) are silently skipped. |
+| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
+| React not detected | The project does not depend on `react` directly or via a meta-framework. | Write the same canonical not-applicable audit result; do not omit the audit from RQS coverage. |
+| React below 18 | The lockfile resolves React to 17.x or earlier. | Continue. Emit each React-18-only Layer 4 check as `not-applicable`/`not-evaluated` with reason `react-version-below-18` and `status: null`. The implementation plan adds an upgrade recommendation. |
+| React 18 with no detected framework | A bare React project with a hand-rolled bundler. | Continue. Emit App-Router-specific checks explicitly as `not-applicable`/`not-evaluated` with a null status. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The implementation plan loses centrality-based prioritisation; widely-consumed hooks are still surfaced via per-file count, with reduced precision. |
 | Multiple Reacts in the lockfile | Multiple major versions of React present (typically because a dependency pinned an older React). | Record both versions in the snapshot. The audit operates against the version the application's main entry resolves. The duplicate-React situation is also a `/dependency-audit` concern; both audits surface it. |
 | Class components dominate | The codebase has more class components than function components. | The "function components only in new code" check still reports `partial` (class components don't make this `violation`); the diagnostic snapshot records the imbalance and the implementation plan recommends a phased migration starting with most-frequently-modified files. |

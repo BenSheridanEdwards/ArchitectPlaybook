@@ -8,7 +8,7 @@ trigger: /error-handling-audit
 
 Audit a TypeScript codebase's error-handling discipline against an opinionated baseline organised in four layers — **throw and catch hygiene**, **async and network error handling**, **React error boundaries**, **logging and observability** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-The default mental model is TypeScript and React. Layers 1, 2, and 4 apply to any TypeScript codebase; layer 3 is React-specific and is silently skipped when React is not detected.
+The default mental model is TypeScript and React. Layers 1, 2, and 4 apply to any TypeScript codebase; when React is not detected, every layer 3 catalog check is emitted explicitly as `not-applicable`/`not-evaluated` with a null status.
 
 ## Posture: static-only, no opt-in modes
 
@@ -76,7 +76,7 @@ not distort the summary or Repository Quality Score denominator.
 | Top-level async errors captured | Async functions invoked from non-await contexts (`useEffect`, `setTimeout`, `addEventListener`, event handlers, promise constructors) capture rejections explicitly. | An `async` arrow passed as an event handler with no internal `try`/`catch`; an awaited call inside `useEffect` with no error path. |
 | AbortController for cancellable requests | Components that issue requests and may unmount while a request is pending use `AbortController` (or the data layer's signal) to cancel on unmount. | Bare `fetch` inside `useEffect` with no cleanup. |
 
-### Layer 3 — React error boundaries (skipped silently when React not detected)
+### Layer 3 — React error boundaries (explicitly not applicable when React is not detected)
 
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
@@ -105,8 +105,8 @@ not distort the summary or Repository Quality Score denominator.
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit uses the graph to trace which functions throw and how errors propagate, sharpening the top-level async-capture check. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and a TypeScript dependency. If absent, the skill stops and tells the user it currently supports TypeScript projects only.
-3. **Detects React.** Layer 3 is enabled only when `react` is in dependencies (directly or via a meta-framework that brings it in). When absent, layer 3 is recorded as skipped in `findings.json` and omitted from the chat summary.
+2. **Confirms a TypeScript project.** Detects `package.json`, `tsconfig.json`, and a TypeScript dependency. If TypeScript is absent, the skill writes a canonical not-applicable audit with every catalog check present once and a null status.
+3. **Detects React.** Layer 3 is enabled only when `react` is in dependencies (directly or via a meta-framework that brings it in). When absent, every Layer 3 catalog check is emitted explicitly as `not-applicable`/`not-evaluated` with a null status and remains visible in the full summary.
 4. **Detects the error-reporting service and the logger** for the diagnostic snapshot and for the layer 4 checks.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/error-handling-audit/snapshot.md` and prepends the same content to `findings.md`.
 6. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check.
@@ -114,7 +114,7 @@ not distort the summary or Repository Quality Score denominator.
    - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
    - `findings.json` — machine-readable.
    - `snapshot.md` — diagnostic snapshot on its own.
-   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), framework variant, detected reporting service, detected logger, applied filters, layer 3 skipped status when applicable.
+   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), framework variant, detected reporting service, detected logger, applied filters, and the reason any Layer 3 checks are not applicable.
 8. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
 
    > "Generate an implementation plan for the error-handling gaps? (yes/no)"
@@ -226,7 +226,7 @@ contains every catalog check exactly once):
   "skillName": "error-handling-audit",
   "skillVersion": "1.0.0",
   "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.0.0",
+  "checkCatalogVersion": "1.1.0",
   "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
   "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
@@ -297,9 +297,9 @@ Every corresponding catalog entry remains in `checks` with
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
+| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in `metadata.json`. The async-capture and propagation analysis falls back to broader sweeps with reduced precision. |
-| React detected but no entry point found | Custom application bootstrap that the skill cannot recognise. | Continue layer 3 with the boundary-placement checks; record the framework as `react-custom` and skip the entry-point-specific layer 4 check. |
+| React detected but no entry point found | Custom application bootstrap that the skill cannot recognise. | Continue layer 3 with the boundary-placement checks; record the framework as `react-custom` and emit the entry-point-specific check as applicable but `not-evaluated` with a null status and reason `react-entry-point-not-detected`. |
 | Multiple error-reporting services detected | Migration in progress or accidental dual-install. | Record both in the snapshot; treat both for the layer 4 checks (each must be initialised, configured, etc.). Surface the dual-install as a `partial` finding on a synthetic check "single-reporting-service". |
 | `useUnknownInCatchVariables` is true but catches still use `any` annotations | The compiler option does not retroactively change explicit annotations. | The TypeScript-catch-typing check still reports `violation` for explicit `any` annotations, with a remediation note explaining the option-vs-annotation distinction. |
 

@@ -66,7 +66,9 @@ The file contains:
 - per-audit scores and check counts;
 - highest-impact deductions;
 - missing audits and excluded candidates; and
-- catalog versions and fingerprints used by the calculation.
+- catalog versions and fingerprints used by the calculation; and
+- the applied status points, check weights, and per-audit weights from the
+  fingerprinted score policy.
 
 The file does not duplicate raw evidence or absolute paths. Follow the relative
 source report pointer to inspect evidence in the originating audit.
@@ -86,9 +88,14 @@ is diagnostic input inventory, not a second score report.
 ## metadata.json
 
 Metadata contains the score run identifier, timestamps, skill and policy
-versions, target commit, worktree-discovery mode, input file fingerprints,
-catalog fingerprints, and final status reason codes. Its run identifier must
-match `score.json`.
+versions, target commit, worktree-discovery mode, the applied score policy,
+input file fingerprints, catalog fingerprints, and final status reason codes.
+Its run identifier must match `score.json`.
+
+Each JSON input is parsed and fingerprinted from the same stable byte snapshot.
+Immediately before publication, the calculator rechecks every fingerprint plus
+the target commit and source-tree cleanliness. A change triggers one complete
+retry; a second change produces no new completion marker.
 
 ## Comparability
 

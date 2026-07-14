@@ -60,7 +60,7 @@ For each direct sub-folder of `$PLAYBOOK_ROOT` that contains a `SKILL.md`, build
 - `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
-Apply `--include` and `--exclude` filters from the command line.
+Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure. `repository-quality-score` is not standalone: when it is selected, read `repository-quality-score/score-policy.json` and automatically add every folder named in `audits[].name` to the install plan. Show these additions in `--dry-run` output. If `--exclude` names any required audit while `repository-quality-score` is selected, fail before copying and explain the conflict; never install a scorer whose catalogs are missing.
 
 ### Step 4 — Detect stubs
 
@@ -97,7 +97,7 @@ installed (stub):           security-audit
 installed (stub):           performance-audit
 ...
 
-15 skills installed into ./.claude/skills/
+<installed-count> skills installed into ./.claude/skills/
 Open a new Claude Code chat in this directory to pick up the new slash commands.
 ```
 
@@ -106,6 +106,7 @@ Open a new Claude Code chat in this directory to pick up the new slash commands.
 - Re-running with no flags is safe. Files only change if the source is newer (or `--force` is set).
 - This skill never deletes a destination skill that is not in the source — manual cleanup only.
 - This skill never touches `~/.claude/skills/`. For machine-wide install, use `/install-architect-playbook-globally`.
+- Selecting `repository-quality-score` always installs its policy audit catalogs as one dependency-closed set.
 
 ## Safety
 
