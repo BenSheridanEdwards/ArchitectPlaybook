@@ -28,6 +28,7 @@ SUPPORTED_CATALOG_SCHEMA_VERSION = "1.1.0"
 SUPPORTED_POLICY_SCHEMA_VERSION = "1.0.0"
 MAX_JSON_BYTES = 10 * 1024 * 1024
 MAX_JSON_INTEGER_DIGITS = 1_000
+MAX_JSON_NESTING_DEPTH = 100
 VALID_STATUSES = {"present", "partial", "missing", "violation"}
 VALID_APPLICABILITY = {"applicable", "not-applicable"}
 VALID_EVALUATION_STATES = {"evaluated", "not-evaluated"}
@@ -127,6 +128,30 @@ def _parse_bounded_json_integer(value: str) -> int:
     return int(value)
 
 
+def _reject_excessive_json_nesting(raw: str) -> None:
+    """Reject deeply nested JSON without depending on interpreter recursion limits."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_NESTING_DEPTH:
+                raise ValueError("JSON nesting exceeds the supported depth limit")
+        elif character in "]}":
+            depth -= 1
+
+
 def _stat_identity(stat: os.stat_result) -> tuple[int, int, int, int]:
     return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
 
@@ -174,6 +199,7 @@ def strict_json_load(path: Path, fingerprints: dict[Path, dict[str, Any]]) -> An
             resolved, maximum_bytes=MAX_JSON_BYTES
         )
         raw = raw_bytes.decode("utf-8")
+        _reject_excessive_json_nesting(raw)
         value = json.loads(
             raw,
             object_pairs_hook=_reject_duplicate_pairs,

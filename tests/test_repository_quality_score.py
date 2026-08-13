@@ -572,6 +572,26 @@ class RepositoryQualityScoreTests(unittest.TestCase):
             self._score_json()["excludedCandidates"][0]["reason"],
         )
 
+    def test_json_nesting_limit_is_explicit_and_ignores_string_delimiters(self) -> None:
+        fingerprints: dict[Path, dict[str, Any]] = {}
+        path = self.repository / "nesting-boundary.json"
+        path.write_text(
+            "[" * 99 + '{"literal":"[[[{{{\\"still-string"}' + "]" * 99,
+            encoding="utf-8",
+        )
+
+        parsed = rqs_calculator.strict_json_load(path, fingerprints)
+        nested = parsed
+        for _ in range(99):
+            nested = nested[0]
+
+        self.assertEqual(nested["literal"], '[[[{{{\"still-string')
+        path.write_text("[" * 101 + "0" + "]" * 101, encoding="utf-8")
+        with self.assertRaisesRegex(
+            rqs_calculator.ScoreInputError, "cannot parse JSON input"
+        ):
+            rqs_calculator.strict_json_load(path, fingerprints)
+
     def test_unknown_semantic_findings_schema_is_not_treated_as_legacy(self) -> None:
         self._write_findings(
             "audit-one",
