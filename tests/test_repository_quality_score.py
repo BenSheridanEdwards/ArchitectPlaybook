@@ -138,8 +138,14 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         not_applicable = not_applicable or set()
         not_evaluated = not_evaluated or set()
         checks: list[dict[str, Any]] = []
+        catalog_checks = catalog["checks"]
+        self.assertEqual(
+            len(catalog_checks),
+            len(statuses),
+            "fixture statuses must cover every catalog check",
+        )
         for index, (catalog_check, status) in enumerate(
-            zip(catalog["checks"], statuses, strict=True)
+            zip(catalog_checks, statuses)
         ):
             if index in not_applicable:
                 checks.append(

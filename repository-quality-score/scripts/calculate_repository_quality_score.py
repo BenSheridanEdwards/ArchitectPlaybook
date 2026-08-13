@@ -27,6 +27,7 @@ FINDINGS_SCHEMA_VERSION = "2.0.0"
 SUPPORTED_CATALOG_SCHEMA_VERSION = "1.1.0"
 SUPPORTED_POLICY_SCHEMA_VERSION = "1.0.0"
 MAX_JSON_BYTES = 10 * 1024 * 1024
+MAX_JSON_INTEGER_DIGITS = 1_000
 VALID_STATUSES = {"present", "partial", "missing", "violation"}
 VALID_APPLICABILITY = {"applicable", "not-applicable"}
 VALID_EVALUATION_STATES = {"evaluated", "not-evaluated"}
@@ -119,6 +120,13 @@ def _reject_constant(value: str) -> None:
     raise ScoreInputError("non-finite JSON number is not allowed")
 
 
+def _parse_bounded_json_integer(value: str) -> int:
+    digits = value[1:] if value.startswith("-") else value
+    if len(digits) > MAX_JSON_INTEGER_DIGITS:
+        raise ValueError("JSON integer exceeds the supported digit limit")
+    return int(value)
+
+
 def _stat_identity(stat: os.stat_result) -> tuple[int, int, int, int]:
     return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
 
@@ -170,6 +178,7 @@ def strict_json_load(path: Path, fingerprints: dict[Path, dict[str, Any]]) -> An
             raw,
             object_pairs_hook=_reject_duplicate_pairs,
             parse_constant=_reject_constant,
+            parse_int=_parse_bounded_json_integer,
         )
         fingerprints[resolved] = fingerprint
         return value
