@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
   "skillName": "quality-gates-audit",
   "humanCanonicalSource": "SKILL.md",
   "description": "Machine-readable inventory of quality-gates audit checks for validation and generated maps.",
   "statusTaxonomy": {
     "present": "The expected invariant is fully satisfied.",
-    "partial": "Some but not all detection signals for the gate resolve; the skill reports this as misconfigured.",
+    "partial": "Some but not all detection signals for the gate resolve; classification may further describe it as misconfigured.",
     "missing": "None of the detection signals for the gate resolve.",
     "violation": "A configured gate is present but wired in a way that defeats its purpose."
   },

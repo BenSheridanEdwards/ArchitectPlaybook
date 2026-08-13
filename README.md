@@ -1,6 +1,6 @@
 # Architect Playbook
 
-A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions with `--worktree`, fix what they find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
+A self-contained, self-improving collection of Claude Code slash-command skills for auditing any codebase. Walk onto a project, install the skills, run multiple audits in parallel from separate chat sessions with `--worktree`, calculate an explainable Repository Quality Score, fix what the audits find, review the fixes in a Git worktree, and let `/system-self-improve` patch the audits themselves whenever a review surfaces a gap.
 
 ## Audit types
 
@@ -9,6 +9,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - **Risk:** **[Security](security-audit/SKILL.md)** — app and browser security · **[Dependency Health](dependency-audit/SKILL.md)** — package and lockfile risk.
 - **Experience:** **[Accessibility](accessibility-audit/SKILL.md)** — WCAG and usability · **[Performance](performance-audit/SKILL.md)** — speed and rendering cost · **[Error Handling](error-handling-audit/SKILL.md)** — failure states and recovery.
 - **Code:** **[Architecture](architecture-audit/SKILL.md)** — boundaries and coupling · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
+- **Measure:** **[Repository Quality Score](repository-quality-score/SKILL.md)** — deterministic audit roll-up, category scores, and assessment coverage.
 - **Review:** **[Ben Architect Review](ben-architect-review/SKILL.md)** — principles-based architectural pull request reviews using Ben's judgement.
 - **Knowledge:** **[Documentation](documentation-audit/SKILL.md)** — docs and drift · **[Agentic Setup](agentic-audit/SKILL.md)** — agent instructions and safety rails.
 
@@ -19,6 +20,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - [Flags](#flags)
 - [The findings-file contract](#the-findings-file-contract)
 - [How audits grade issues](#how-audits-grade-issues)
+- [How Repository Quality Score works](#how-repository-quality-score-works)
 - [The full skill list](#the-full-skill-list)
   - [Setup utilities](#setup-utilities)
   - [Audits](#audits)
@@ -49,7 +51,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
    ```
    /install-architect-playbook-globally
    ```
-   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally` already committed so this one bootstrap command is available the moment you open the cloned repo — no manual copy step needed.
+   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally/SKILL.md` as a real bootstrap skill directory, kept content-identical to the top-level installer by repository validation. It works on Windows and Unix checkouts without Git symlink support.
 
    *(Optional, for teams: once you `cd` into a target project, you can also run `/install-architect-playbook-locally` to pin the skills alongside that project in version control. Most users don't need this.)*
 
@@ -65,11 +67,20 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
    ```
    Open multiple chats and add `--worktree` in each for true parallel execution.
 
-4. **Fix the findings** in the same chat that produced them.
+4. **Calculate the Repository Quality Score** after the audit sessions finish.
+   ```
+   /repository-quality-score
+   ```
+   The calculator discovers current-commit findings in the current and
+   registered worktrees, then reports the score separately from assessment
+   coverage. It does not rerun audits or treat missing audits as zero.
 
-5. **Re-run the audit** to review the fix (best done in a fresh chat or worktree).
+5. **Fix the findings** in the same chat that produced them.
 
-6. **Evolve the playbook** if a gap is found:
+6. **Re-run the audit** to review the fix (best done in a fresh chat or worktree),
+   then recalculate the score when you want a new roll-up.
+
+7. **Evolve the playbook** if a gap is found:
    ```
    /system-self-improve
    ```
@@ -91,7 +102,8 @@ worktree each (`--worktree`).
 | 5 — Risk | `/security-audit`, `/dependency-audit` | Close the vulnerabilities and supply-chain gaps. |
 | 6 — Non-functionals | `/performance-audit`, `/accessibility-audit`, `/error-handling-audit`, `/bundle-build-audit` | Optimise last, once behaviour and structure have settled. |
 | 7 — Knowledge | `/documentation-audit` | Detect drift once reality has stopped moving. |
-| 8 — Review and loop | `/ben-architect-review` → re-run any failed audits → `/system-self-improve` | Review the changes, close the remaining gaps, and evolve the audits that missed something. |
+| 8 — Measure | `/repository-quality-score` | Aggregate compatible current-commit audit evidence into category scores, an overall score, and separate coverage. |
+| 9 — Review and loop | `/ben-architect-review` → re-run any failed audits → `/repository-quality-score` → `/system-self-improve` | Review the changes, close the remaining gaps, refresh the score, and evolve the audits that missed something. |
 
 ## Flags
 
@@ -124,7 +136,7 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
     findings.md       human-readable report you can read at a glance
     findings.json     machine-readable list of issues for downstream skills
     snapshot.md       the Layer 0 diagnostic snapshot, on its own
-    metadata.json     skill version, run timestamp, graphify revision hash
+    metadata.json     matching run, catalog, repository, and execution identity
 ```
 
 - **Chat output** is human-first and concise: a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks.
@@ -132,7 +144,17 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix.
 - **`/system-self-improve`** reads a review's gap report and proposes an edit to the originating audit's `SKILL.md`.
 
-Current dogfood reports for this repository are committed under `.architect-audits/` for pre-audit setup, quality gates, testing, and architecture. Each report includes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` so downstream sessions can consume the same contract they expect from target projects.
+Canonical audit output uses findings schema `2.0.0`. `findings.json` and
+`metadata.json` share one run identifier, exact Git commit, source-cleanliness
+result, catalog version, timestamps, filters, overrides, enrichment arguments,
+and graph availability. Every `checks.json` entry appears exactly once with its
+full `checkId`, applicability, evaluation state, evidence quality,
+classification, status, and redacted evidence. Non-applicable and
+applicable-but-not-evaluated checks have a null status rather than an invented
+pass or failure. See the maintainer contract in
+[`.agents/AUDIT_FINDINGS_CONTRACT.md`](.agents/AUDIT_FINDINGS_CONTRACT.md).
+
+Historical dogfood reports for this repository are committed under `.architect-audits/` for pre-audit setup, quality gates, testing, and architecture. They predate findings schema `2.0.0` and remain legacy examples; the score calculator may adapt compatible reports only as provisional evidence. New or refreshed audit runs must use the canonical contract described above.
 
 ## How audits grade issues
 
@@ -146,6 +168,35 @@ The full detailed report saved to `.architect-audits/<audit-name>/findings.md` g
 The concise Top 5 recommendations you see by default in chat focus on **missing** and **violation** items (the highest-impact issues), plus the most important **partial** findings. The full report on disk shows the complete status for every check.
 
 `/system-self-improve` uses a different outcome model (`advanced | blocked | skipped`).
+
+## How Repository Quality Score works
+
+`/repository-quality-score` is an aggregator, not another audit. It validates
+the audit output protocol and uses the bundled standard-library Python
+calculator plus [`score-policy.json`](repository-quality-score/score-policy.json).
+The model never estimates or adjusts the number in prose.
+
+- `present` earns 100 percent of a check's weight; `partial` earns 50 percent;
+  `missing` and `violation` earn zero.
+- Standard checks weigh 1.0 and catalog checks marked `softCheck` weigh 0.5.
+- Each audit is normalized to 100, then the policy's audit categories are
+  averaged equally so a large catalog cannot dominate a small one.
+- Non-applicable checks are excluded. Applicable checks that were not evaluated
+  are also excluded from score arithmetic but reduce coverage.
+- Missing audits reduce coverage and never become zero scores.
+
+The result is **official** only when every policy audit has complete,
+canonical, unfiltered evidence for the current clean commit. A numeric result
+with missing, legacy, degraded, filtered, customized, or dirty-tree evidence is
+**provisional**. With no scoreable audit category, the result is
+**unavailable** and no number is shown. Quality bands are Strong (90–100), Sound
+(75–89.99), Needs attention (60–74.99), and High risk (below 60).
+
+The score summarizes the playbook's evidence; it is not a security,
+accessibility, legal, or regulatory certification. The full output contract is
+in the [Repository Quality Score reference](repository-quality-score/references/score-output-contract.md).
+For a non-technical explanation with formulas and a worked example, read
+[Repository Quality Score explained](docs/repository-quality-score-explained.md).
 
 ## The full skill list
 
@@ -211,6 +262,12 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 | [Linting](linting-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |
 | [Documentation](documentation-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-link-check` |
 | [Agentic Setup](agentic-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
+
+### Scoring
+
+| Trigger | Purpose |
+| --- | --- |
+| [`/repository-quality-score`](repository-quality-score/SKILL.md) | Aggregate completed audit findings into deterministic per-audit scores, one overall score, coverage, deductions, and an official, provisional, or unavailable status. Optional: `--current-worktree-only`. |
 
 ### Review
 

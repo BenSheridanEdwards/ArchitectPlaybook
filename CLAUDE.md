@@ -46,8 +46,18 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
   - `.architect-audits/<skill-name>/findings.md` — human-readable report.
   - `.architect-audits/<skill-name>/findings.json` — machine-readable for downstream skills.
   - `.architect-audits/<skill-name>/snapshot.md` — diagnostic snapshot.
-  - `.architect-audits/<skill-name>/metadata.json` — skill version, run timestamp, graphify revision hash.
-- **`checks.json` mirrors the layers.** When an audit ships a `checks.json` beside its `SKILL.md`, every check's `layer` must match a layer (or lifecycle stage) heading in the body, and the file must stay aligned whenever a check is added, removed, renamed, or moved. The validator enforces this.
+  - `.architect-audits/<skill-name>/metadata.json` — matching run, catalog, repository, and execution identity.
+- **`checks.json` mirrors the layers.** Every implemented audit ships catalog
+  schema `1.1.0` plus a semantic `catalogVersion`. Every check's `layer` must
+  match a layer (or lifecycle stage) heading in the body, and the catalog must
+  stay aligned whenever a check is added, removed, renamed, moved, reweighted,
+  or materially redefined. The validator enforces this.
+- **Canonical audit findings use schema `2.0.0`.** `findings.json` and
+  `metadata.json` share the same run identity, catalog identity, exact commit,
+  source cleanliness, timestamps, and execution options. Every catalog check is
+  emitted exactly once with explicit applicability, evaluation state, evidence
+  quality, classification, status, and evidence. Follow
+  [.agents/AUDIT_FINDINGS_CONTRACT.md](.agents/AUDIT_FINDINGS_CONTRACT.md).
 
 ## Cross-session handoff
 
@@ -55,6 +65,12 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 
 - A fix skill reads `.architect-audits/<skill-name>/findings.json` from the same project.
 - A review skill reads the audit's findings plus the diff produced by the fix.
+- `/repository-quality-score` is a read-only cross-session consumer. It reads
+  audit findings only from the current and registered Git worktrees, uses one
+  atomic current-commit run per audit, and delegates all arithmetic to its
+  bundled Python calculator and versioned policy. It must never inspect source
+  code to fill an evidence gap, merge checks from different runs, or write
+  outside `.architect-audits/repository-quality-score/`.
 - `/system-self-improve` reads the review's gap report and rewrites the originating audit's `SKILL.md` so the same gap is caught next time.
 
 ## Self-improvement
@@ -71,7 +87,7 @@ Audits, fixes, and reviews each run in different Claude Code chat sessions. They
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ArchitectPlaybook** (675 symbols, 754 relationships, 8 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ArchitectPlaybook** (1167 symbols, 1596 relationships, 31 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

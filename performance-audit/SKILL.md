@@ -99,7 +99,7 @@ Layer 0 is informational only and has no status.
 | No N+1 fetch patterns | Lists don't fire one fetch per row from inside list items. | A `useQuery` (or equivalent) called inside a list item's render path. |
 | Request deduplication available | The detected data layer deduplicates concurrent requests for the same key. All four major libraries provide this by default; flagged when using a custom client without it. | A custom data layer with no deduplication. |
 | Prefetching for predictable navigation | Links to known navigation targets prefetch (Next.js `<Link>` default behaviour, TanStack Query's `prefetchQuery`, SWR's prefetch helpers). Soft check — reported as `partial`. | A custom `<a>`-based navigation in apps where the data layer supports prefetching. |
-| Streaming and Suspense for slow data (Next.js App Router only) | Long-loading data sections in Next.js App Router are wrapped in Suspense boundaries with meaningful fallbacks. | Slow data fetches in route handlers or server components that block the entire route render. Skipped silently when not in Next.js App Router. |
+| Streaming and Suspense for slow data (Next.js App Router only) | Long-loading data sections in Next.js App Router are wrapped in Suspense boundaries with meaningful fallbacks. Explicitly not applicable outside Next.js App Router. | Slow data fetches in route handlers or server components that block the entire route render. |
 | Server-rendered data not re-fetched on client | Data already available from a server component, route loader, or initial server render is not re-fetched on the client. | Patterns where server-rendered data is also fetched via a client-side hook. |
 
 ### Layer 3 — Assets, media, and Core Web Vitals
@@ -130,7 +130,7 @@ Layer 0 is informational only and has no status.
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit identifies hot render paths (god components rendered on every navigation, central data hooks consumed by many components) and uses centrality to prioritise the implementation plan. Without the graph, the audit operates on per-file pattern detection with reduced precision.
-2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If any are absent, the skill stops and tells the user it currently supports TypeScript and React frontend projects only.
+2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If TypeScript or React is absent, the skill writes a canonical not-applicable audit with every catalog check explicitly present and a null status.
 3. **Detects framework, data layer, performance provider, and image primitive** for the diagnostic snapshot and for resolving framework-conditional checks.
 4. **When `--with-lighthouse-results` is set**, reads the JSON file at the resolved path and extracts LCP, INP, CLS, TBT, FCP, and the overall performance score. If the file is missing or unparseable, prints to the chat and prepends to `findings.md`: "`--with-lighthouse-results` was requested but no usable results file was found. Run `/preflight --audit=performance --install --scaffold-configs` to install Lighthouse and scaffold a minimal `.lighthouserc.json`, then run Lighthouse to produce the results file and re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Records `recoveryHint: "/preflight --audit=performance --install --scaffold-configs"` on the LCP-image and performance-budget checks that degraded in `findings.json`. The run-dependent enrichment of those checks degrades to `partial` with a clear gap; the static analysis still runs.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/performance-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -153,11 +153,10 @@ Layer 0 is informational only and has no status.
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f package.json || { echo "performance-audit: no package.json detected. This skill currently supports TypeScript and React frontend projects only."; exit 1; }
-test -f tsconfig.json || { echo "performance-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "performance-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
 
-Confirm React: `react` in dependencies (directly or via Next.js, Remix, etc.). When absent, stop with a friendly message.
+Confirm TypeScript and React (`react` directly or via Next.js, Remix, etc.). When either is absent, write all four canonical output files, set `auditApplicability.status` to `not-applicable`, and emit every `checks.json` entry once as `not-applicable`/`not-evaluated` with `status: null`.
 
 ### Step 2 — Detect framework and runtime stack
 
@@ -224,13 +223,40 @@ When the user agrees, build `implementation-plan.md`, **ordered by Core Web Vita
 
 The plan is descriptive, not executable. It does not edit source files and it does not install packages.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "performance-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:16Z",
   "framework": "next-app-router",
@@ -267,7 +293,13 @@ The plan is descriptive, not executable. It does not edit source files and it do
   "checks": [
     {
       "layer": "render-performance",
-      "check": "long-lists-virtualized",
+      "checkId": "performance-audit.long-lists-virtualized",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "threshold-violation",
       "status": "violation",
       "thresholdApplied": 50,
       "evidence": [],
@@ -297,8 +329,8 @@ The plan is descriptive, not executable. It does not edit source files and it do
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
-| React not detected | The project does not depend on `react` directly or through a meta-framework. | Stop. Inform the user that this skill currently supports React frontends only. |
+| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
+| React not detected | The project does not depend on `react` directly or through a meta-framework. | Write the same canonical not-applicable audit result; do not silently omit performance from RQS coverage. |
 | Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The "frequently rendered" determination on the React.memo check falls back to per-file detection; the implementation plan loses centrality-based prioritisation. |
 | `--with-lighthouse-results` set but file missing | Lighthouse has not been run, or the path is wrong. | Record the failure in metadata. The LCP-image cross-validation and performance-score budget checks degrade to `partial`. The static analysis still runs. **Recovery:** run `/preflight --audit=performance --install --scaffold-configs` to install Lighthouse and scaffold a config, then run Lighthouse to produce the results file and re-run with `--with-lighthouse-results`. |
 | Lighthouse results file is from a different application | Stale artefact from another project. | The audit cannot detect this with confidence. Trust the file. The user is responsible for ensuring Lighthouse results match the project under audit. |

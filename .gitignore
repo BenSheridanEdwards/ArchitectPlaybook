@@ -5,6 +5,8 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/
+__pycache__/
+*.py[cod]
 
 # Local Claude Code state created when this playbook is itself audited
 .claude/settings.local.json

@@ -147,7 +147,7 @@ This layer encodes the well-known pitfalls in interaction style, async handling,
 | --- | --- | --- |
 | `userEvent` preferred over `fireEvent` | At least the threshold percentage (default 80%; tunable via `--threshold-user-event-ratio`) of interaction calls use `userEvent` rather than `fireEvent`. `userEvent` simulates the full sequence of events a real user produces (focus, keydown, input, change), where `fireEvent` fires only one. | Ratio below the threshold. |
 | `find*` used for elements not yet present | When waiting for an element to appear, tests use `findBy*`, not `waitFor(() => getBy*())`. `findBy*` already retries until a timeout and produces clearer error messages. | `waitFor` callbacks containing only a `getBy*` lookup. |
-| `query*` only for absence assertions | `queryBy*` is used only with `not.toBeInTheDocument()` or analogous absence checks. `queryBy*` returns `null` instead of throwing, which is the only behaviour that makes "is this element absent?" assertable; using it for presence assertions silently skips the check. | `queryBy*` used in a positive-presence assertion. |
+| `query*` only for absence assertions | `queryBy*` is used only with `not.toBeInTheDocument()` or analogous absence checks. `queryBy*` returns `null` instead of throwing, which is the only behaviour that makes "is this element absent?" assertable; using it for presence assertions can pass without proving presence. | `queryBy*` used in a positive-presence assertion. |
 | `waitFor` callback contains a single assertion | Each `waitFor` call wraps exactly one `expect`. With several assertions in one callback, the first failure causes a re-run of all of them, slowing the suite and obscuring which one actually failed. | `waitFor` callbacks with multiple `expect` calls. |
 | `waitFor` callback is not empty | `waitFor(() => {})` followed by an assertion outside is wrong; the assertion belongs inside the callback so `waitFor` knows what it is waiting for. | Empty `waitFor` callbacks. |
 | No side effects in `waitFor` | The `waitFor` callback contains only assertions — no `fireEvent`, `userEvent`, or other state mutation. `waitFor` re-runs its callback until it succeeds, so any side effect inside fires repeatedly. | `fireEvent` or `userEvent` calls inside `waitFor`. |
@@ -173,7 +173,7 @@ This layer encodes the testing philosophy stated above.
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit cross-references graph nodes against test-file imports to identify components with no test, and ranks coverage gaps by graph centrality. Without the graph, the check falls back to per-folder heuristics with reduced precision.
-2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If any are absent, the skill stops and tells the user it currently supports TypeScript and React projects only.
+2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. When TypeScript or React is absent, it writes a canonical not-applicable audit with every catalog check present once, explicitly `not-applicable`/`not-evaluated`, and a null status.
 3. **Detects the test runner, component testing library, and end-to-end framework** for the diagnostic snapshot and for layer-1 and layer-4 checks.
 4. **When `--with-run` is set**, invokes the detected unit-test runner in coverage mode (`vitest run --coverage --reporter=json` or `jest --coverage --json`), captures the JSON output, and folds it into the snapshot. Never runs Playwright or Cypress.
 5. **Walks every test file** to compute the diagnostic distributions (query priority breakdown, `userEvent`/`fireEvent` ratio, `getByTestId` count, `container.querySelector` count, snapshot count and sizes, flaky-pattern signal counts).
@@ -197,11 +197,10 @@ This layer encodes the testing philosophy stated above.
 ### Step 1 — Confirm the prerequisites
 
 ```bash
-test -f package.json || { echo "testing-audit: no package.json detected. This skill currently supports TypeScript and React projects only."; exit 1; }
-test -f tsconfig.json || { echo "testing-audit: no tsconfig.json detected. This skill currently supports TypeScript projects only."; exit 1; }
+test -f package.json || { echo "testing-audit: no package.json detected; change directory to the project root."; exit 1; }
 ```
 
-Confirm React: `react` in dependencies (directly or via Next.js, Remix, etc.). When absent, stop with a friendly message.
+Confirm TypeScript and React (`react` directly or via Next.js, Remix, etc.). When either domain prerequisite is absent, do not omit the audit: write all four canonical output files, set `auditApplicability.status` to `not-applicable`, use a stable reason such as `typescript-react-project-not-detected`, and emit every `checks.json` entry once as `not-applicable`/`not-evaluated` with `status: null`.
 
 ### Step 2 — Detect the test runner and surrounding tools
 
@@ -210,7 +209,7 @@ Read `package.json` `devDependencies`:
 - `vitest` → Vitest. Resolve version from the lockfile.
 - `jest` → Jest. Resolve version from the lockfile.
 - Both → record both, run the audit against whichever has a configuration file. The "single test runner" check reports `violation`.
-- Neither → stop with a friendly message recommending Vitest or Jest before running this audit.
+- Neither → continue. Mark the test-runner foundation check `missing`; mark only runner-dependent execution and coverage checks applicable but `not-evaluated` with reason `test-runner-not-detected`; continue evaluating source-level test-design checks when test files exist. Recommend Vitest or Jest in the findings.
 
 Detect `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `eslint-plugin-testing-library`, `eslint-plugin-jest-dom`, `playwright`, `@playwright/test`, `cypress`.
 
@@ -299,13 +298,40 @@ When the user agrees, build `implementation-plan.md`, ordered by testing-philoso
 
 The plan is descriptive, not executable. It does not edit tests, install packages, or modify configuration.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "testing-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:14Z",
   "testRunner": { "name": "vitest", "version": "1.6.0" },
@@ -342,7 +368,13 @@ The plan is descriptive, not executable. It does not edit tests, install package
   "checks": [
     {
       "layer": "test-design-and-coverage",
-      "check": "no-utility-class-assertions",
+      "checkId": "testing-audit.no-hard-coded-utility-class-assertions",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "brittle-assertion",
       "status": "violation",
       "evidence": [],
       "samples": [
@@ -372,9 +404,9 @@ The plan is descriptive, not executable. It does not edit tests, install package
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Stop. Inform the user that the skill currently supports TypeScript projects only. |
-| React not detected | The project does not depend on `react` directly or via a meta-framework. | Stop. Inform the user that this skill currently supports React projects only. |
-| Neither Vitest nor Jest installed | The project has no recognised test runner. | Stop with a friendly message recommending `/quality-gates-audit` (which surfaces the broader gap) and the installation of Vitest or Jest before re-running. |
+| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
+| React not detected | The project does not depend on `react` directly or via a meta-framework. | Write the same canonical not-applicable audit result; do not silently omit testing from RQS coverage. |
+| Neither Vitest nor Jest installed | The project has no recognised test runner. | Continue. Record the runner foundation check as `missing`, runner-dependent checks as applicable but `not-evaluated`, and evaluate independent source checks. Recommend `/quality-gates-audit` and Vitest or Jest. |
 | Both Vitest and Jest installed | Mid-migration or accidental dual install. | Continue. Run the audit against whichever has a configuration file. Surface dual-installation as a `violation` on the layer 1 "single test runner" check. |
 | `--with-run` set but runner fails to start | Binary missing, configuration invalid, monorepo path-resolution issue. | Record the failure and the captured stderr in metadata. Run-dependent checks degrade to `partial`. Continue with the static analysis. **Recovery:** run `/preflight --audit=testing --install` to install `vitest` or `jest`, then re-run with `--with-run`. |
 | Test files exist but match no recognised pattern | Custom test file naming. | Run with the patterns declared in the runner configuration. When that fails, fall back to scanning files that import `@testing-library/react`. |

@@ -1,5 +1,6 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "catalogVersion": "1.1.0",
   "skillName": "error-handling-audit",
   "humanCanonicalSource": "SKILL.md",
   "description": "Machine-readable inventory of error-handling audit checks for validation and generated maps.",
@@ -114,49 +115,49 @@
     },
     {
       "checkId": "error-handling-audit.root-error-boundary-present",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Root error boundary present",
       "expectation": "At least one error boundary wraps the application root.",
       "violationSignal": "No root boundary detected."
     },
     {
       "checkId": "error-handling-audit.route-or-feature-level-boundaries",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Route- or feature-level boundaries",
       "expectation": "Boundaries exist at route or feature-cluster level, not only at the root.",
       "violationSignal": "Only a single root boundary present in an application with multiple routes or features."
     },
     {
       "checkId": "error-handling-audit.fallback-ui-offers-recovery",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Fallback UI offers recovery",
       "expectation": "Boundary fallback components include at least one recovery affordance.",
       "violationSignal": "A fallback that only renders an error message with no action."
     },
     {
       "checkId": "error-handling-audit.boundary-forwards-to-reporting-service",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Boundary forwards to reporting service",
       "expectation": "The boundary's error handler calls the detected error-reporting service.",
       "violationSignal": "A boundary that only renders the fallback without reporting."
     },
     {
       "checkId": "error-handling-audit.suspense-paired-with-error-boundary",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Suspense paired with error boundary",
       "expectation": "Every Suspense that wraps async-loaded data has an error boundary as an ancestor.",
       "violationSignal": "A Suspense with no error boundary upstream."
     },
     {
       "checkId": "error-handling-audit.no-try-catch-around-jsx-render",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "No try/catch around JSX render",
       "expectation": "Render functions do not wrap return values in try/catch, since that does not catch render errors.",
       "violationSignal": "A try/catch whose try block returns JSX."
     },
     {
       "checkId": "error-handling-audit.mutation-errors-handled-at-call-site",
-      "layer": "react-error-boundaries-skipped-silently-when-react-not-detected",
+      "layer": "react-error-boundaries-explicitly-not-applicable-when-react-is-not-detected",
       "title": "Mutation errors handled at call site",
       "expectation": "Data-layer mutations have explicit onError handlers, or the consuming component handles isError.",
       "violationSignal": "Mutations with no error handling and no consuming isError branch."

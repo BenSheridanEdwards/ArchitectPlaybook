@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -47,8 +48,17 @@ It does not mutate the repository.
 
 VALID_SKILL_WITH_LAYER = VALID_SKILL + "\n### Layer 1 - Test runner\n\n"
 
+VALID_RQS_CONTRACT = """
+## Repository Quality Score findings contract
+
+`findings.json` uses schema `2.0.0` with `runIdentifier`, `runStartedAt`,
+`runFinishedAt`, `checkCatalogVersion`, `applicability`, `evaluationState`, and
+`evidenceQuality`. `metadata.json` repeats the shared run identity.
+"""
+
 VALID_CHECKS_JSON = """{
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
   "skillName": "example-audit",
   "humanCanonicalSource": "SKILL.md",
   "statusTaxonomy": {
@@ -135,6 +145,66 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_check_metadata(root, findings)
             self.assertEqual(findings, [])
 
+    def test_implemented_audit_requires_check_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("must ship checks.json" in finding.message for finding in findings))
+
+    def test_check_metadata_requires_catalog_version_and_boolean_soft_check(self) -> None:
+        broken = VALID_CHECKS_JSON.replace('  "catalogVersion": "1.0.0",\n', "")
+        broken = broken.replace(
+            '      "violationSignal": "Multiple test runners are configured."',
+            '      "violationSignal": "Multiple test runners are configured.",\n      "softCheck": "yes"',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+            (skill_dir / "checks.json").write_text(broken, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("catalogVersion" in finding.message for finding in findings))
+            self.assertTrue(any("softCheck must be a boolean" in finding.message for finding in findings))
+
+    def test_check_metadata_requires_soft_check_wording_in_canonical_row(self) -> None:
+        soft_catalog = VALID_CHECKS_JSON.replace(
+            '      "violationSignal": "Multiple test runners are configured."',
+            '      "violationSignal": "Multiple test runners are configured.",\n      "softCheck": true',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                VALID_SKILL_WITH_LAYER
+                + "\n| Check | Expectation | Violation signal |\n"
+                + "| --- | --- | --- |\n"
+                + "| Single test runner | Exactly one runner. | Multiple runners. |\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "checks.json").write_text(soft_catalog, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("must be documented as a soft check" in finding.message for finding in findings))
+
+            skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(
+                skill_text.replace(
+                    "| Single test runner | Exactly one runner. |",
+                    "| Single test runner | Exactly one runner. Soft check. |",
+                ),
+                encoding="utf-8",
+            )
+            findings = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
     def test_check_metadata_rejects_duplicate_ids_and_unknown_layers(self) -> None:
         broken = VALID_CHECKS_JSON.replace('"test-runner"', '"missing-layer"')
         broken = broken.replace(
@@ -186,6 +256,91 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_check_metadata(root, findings)
             self.assertEqual(findings, [])
 
+    def test_score_feature_requires_canonical_audit_contract_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            score = root / "repository-quality-score"
+            score.mkdir()
+            (score / "SKILL.md").write_text("score\n", encoding="utf-8")
+            audit = root / "example-audit"
+            audit.mkdir()
+            (audit / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+
+            findings: list[Any] = []
+            validate_playbook.validate_audit_findings_contract(root, findings)
+
+            self.assertTrue(any("must document" in finding.message for finding in findings))
+
+    def test_canonical_audit_contract_rejects_legacy_result_keys_and_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            score = root / "repository-quality-score"
+            score.mkdir()
+            (score / "SKILL.md").write_text("score\n", encoding="utf-8")
+            audit = root / "example-audit"
+            audit.mkdir()
+            (audit / "SKILL.md").write_text(
+                VALID_SKILL_WITH_LAYER
+                + VALID_RQS_CONTRACT
+                + '\n```json\n{"check": "old", "status": "misconfigured"}\n```\n',
+                encoding="utf-8",
+            )
+
+            findings: list[Any] = []
+            validate_playbook.validate_audit_findings_contract(root, findings)
+
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("full checkId" in message for message in messages))
+            self.assertTrue(any("classification" in message for message in messages))
+
+    def test_canonical_findings_examples_must_match_check_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            score = root / "repository-quality-score"
+            score.mkdir()
+            (score / "SKILL.md").write_text("score\n", encoding="utf-8")
+            audit = root / "example-audit"
+            audit.mkdir()
+            example = {
+                "schemaVersion": "2.0.0",
+                "skillName": "example-audit",
+                "checkCatalogSchemaVersion": "1.1.0",
+                "checkCatalogVersion": "9.9.9",
+                "checks": [
+                    {
+                        "checkId": "example-audit.unknown-check",
+                        "layer": "wrong-layer",
+                    },
+                    {
+                        "checkId": "example-audit.single-test-runner",
+                        "layer": "wrong-layer",
+                    },
+                    {"checkId": "example-audit.single-test-runner"},
+                ]
+            }
+            (audit / "SKILL.md").write_text(
+                VALID_SKILL_WITH_LAYER
+                + VALID_RQS_CONTRACT
+                + "\n```json\n"
+                + json.dumps(example)
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            (audit / "checks.json").write_text(
+                VALID_CHECKS_JSON, encoding="utf-8"
+            )
+
+            findings: list[Any] = []
+            validate_playbook.validate_audit_findings_contract(root, findings)
+
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("absent from checks.json" in message for message in messages))
+            self.assertTrue(any("must be test-runner" in message for message in messages))
+            self.assertTrue(any("layer is missing" in message for message in messages))
+            self.assertTrue(
+                any("checkCatalogVersion must be 1.0.0" in message for message in messages)
+            )
+
     def test_markdown_links_ignore_code_fences(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -194,6 +349,112 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_markdown_links(root, findings)
             self.assertEqual(findings, [])
+
+    def test_readme_skill_links_use_posix_paths_on_every_platform(self) -> None:
+        links = validate_playbook.readme_skill_links("[Example](example-audit/SKILL.md)\n")
+        self.assertEqual(links, {"example-audit/SKILL.md"})
+
+    def test_score_policy_audit_list_must_match_catalogs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audit = root / "example-audit"
+            audit.mkdir()
+            (audit / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+            (audit / "checks.json").write_text(VALID_CHECKS_JSON, encoding="utf-8")
+            score = root / "repository-quality-score"
+            (score / "scripts").mkdir(parents=True)
+            (score / "references").mkdir()
+            (score / "evals").mkdir()
+            for relative_path in validate_playbook.SCORE_BUNDLE_FILES:
+                path = score / relative_path
+                if not path.exists():
+                    path.write_text("placeholder\n", encoding="utf-8")
+            policy = {
+                "schemaVersion": "1.0.0",
+                "policyVersion": "1.0.0",
+                "scorePrecision": 2,
+                "statusPoints": {
+                    "present": "1.0",
+                    "partial": "0.5",
+                    "missing": "0.0",
+                    "violation": "0.0",
+                },
+                "checkWeights": {"standard": "1.0", "soft": "0.5"},
+                "audits": [{"name": "unknown-audit", "weight": "1.0"}],
+                "bands": [
+                    {"name": "Strong", "minimum": "90.00"},
+                    {"name": "High risk", "minimum": "0.00"},
+                ],
+            }
+            (score / "score-policy.json").write_text(json.dumps(policy), encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_score_policy(root, findings)
+            self.assertTrue(any("policy audit list is out of sync" in finding.message for finding in findings))
+
+    def test_bootstrap_contract_rejects_materialized_tracked_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text(
+                ".claude/skills/install-architect-playbook-globally\n",
+                encoding="utf-8",
+            )
+            installer = root / "install-architect-playbook-globally"
+            installer.mkdir()
+            (installer / "SKILL.md").write_text(
+                "---\n"
+                "name: install-architect-playbook-globally\n"
+                "description: Installer.\n"
+                "trigger: /install-architect-playbook-globally\n"
+                "---\n",
+                encoding="utf-8",
+            )
+            entry = root / ".claude" / "skills" / "install-architect-playbook-globally"
+            entry.parent.mkdir(parents=True)
+            entry.write_text(
+                "../../install-architect-playbook-globally\n", encoding="utf-8"
+            )
+            findings: list[Any] = []
+
+            validate_playbook.validate_bootstrap_contract(root, findings)
+
+            self.assertTrue(
+                any("must be a real directory" in finding.message for finding in findings)
+            )
+
+    def test_bootstrap_contract_rejects_copy_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text(
+                ".claude/skills/install-architect-playbook-globally\n",
+                encoding="utf-8",
+            )
+            installer = root / "install-architect-playbook-globally"
+            installer.mkdir()
+            source_text = (
+                "---\n"
+                "name: install-architect-playbook-globally\n"
+                "description: Installer.\n"
+                "trigger: /install-architect-playbook-globally\n"
+                "---\n"
+            )
+            (installer / "SKILL.md").write_text(source_text, encoding="utf-8")
+            bootstrap = (
+                root
+                / ".claude"
+                / "skills"
+                / "install-architect-playbook-globally"
+            )
+            bootstrap.mkdir(parents=True)
+            (bootstrap / "SKILL.md").write_text(
+                source_text + "drift\n", encoding="utf-8"
+            )
+
+            findings: list[Any] = []
+            validate_playbook.validate_bootstrap_contract(root, findings)
+
+            self.assertTrue(
+                any("must exactly match" in finding.message for finding in findings)
+            )
 
     def test_cli_accepts_current_repository(self) -> None:
         result = subprocess.run(

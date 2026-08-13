@@ -8,7 +8,7 @@ trigger: /documentation-audit
 
 Audit a TypeScript project's documentation against an opinionated baseline organised in four layers — **project entry and onboarding**, **architectural and decision documentation**, **code-level documentation**, **operational documentation and drift** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
 
-The default mental model is a TypeScript and React application, but most checks apply equally to any TypeScript project (libraries, services, monorepos). The operational layer adapts to the project shape — library-only projects silently skip the deployment, rollback, and monitoring checks while still running drift detection.
+The default mental model is a TypeScript and React application, but most checks apply equally to any TypeScript project (libraries, services, monorepos). The operational layer adapts to the project shape — library-only projects record deployment, rollback, and monitoring checks explicitly as `not-applicable`/`not-evaluated` with null statuses while still running drift detection.
 
 ## How this differs from neighbouring audits
 
@@ -61,7 +61,7 @@ A check resolves to one of four statuses:
 - **missing** — a structural prerequisite is absent (no README at all, for example).
 - **violation** — the audit identified concrete documentation or drift that breaks the invariant.
 
-Layer 0 is informational only and has no status. Layer 4's operational checks (deployment, rollback, monitoring, feature flags) are silently skipped when the project is library-only or no deployable target is detected.
+Layer 0 is informational only and has no status. Layer 4's operational checks (deployment, rollback, monitoring, feature flags) are explicitly `not-applicable`/`not-evaluated` with null statuses when the project is library-only or no deployable target is detected.
 
 ### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
 
@@ -108,23 +108,23 @@ The audit treats TSDoc and JSDoc as equivalent. TSDoc is a TypeScript-specific s
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
 | TSDoc/JSDoc on exported public APIs | Functions, hooks, components, and types exported from package entry points or public barrels carry a TSDoc/JSDoc block describing what they do. Coverage thresholds (tunable via `--threshold-public-api-doc-coverage`): `present` ≥ 60%, `partial` 30–60%, `violation` < 30%. | Public exports broadly undocumented. |
-| Comments explain WHY, not WHAT | Comments add information that the code itself does not convey: a hidden constraint, a workaround for a specific bug, behaviour that would surprise a reader. Comments that restate what the next line obviously does are flagged. Heuristic — reported as `partial` rather than `violation` because the heuristic is imperfect. | High counts of restating-the-code comments. |
+| Comments explain WHY, not WHAT | Comments add information that the code itself does not convey: a hidden constraint, a workaround for a specific bug, behaviour that would surprise a reader. Comments that restate what the next line obviously does are flagged. Soft check — heuristic and reported as `partial` rather than `violation` because the heuristic is imperfect. | High counts of restating-the-code comments. |
 | No commented-out code | Code is deleted, not commented out. Git history is the audit log. | Blocks of commented-out code (multiple consecutive comment lines containing valid syntax). |
 | TODOs include owner and reference | Every `TODO`/`FIXME` comment includes either an owner identifier (`TODO(@username)`, `TODO(team-frontend)`) or a tracking-system reference (`TODO(JIRA-123)`, `TODO(#456)`). Soft check — reported as `partial` when adherence is mixed. | Bare `TODO`/`FIXME` comments with no owner or reference. |
 | TODOs not stale | No TODO is older than the threshold (default 90 days; tunable via `--threshold-todo-staleness-days`). Age is measured by the most recent Git modification of the line. Soft check — reported as `partial`. | TODOs older than the threshold. |
 | No empty doc comments | No `/** */` blocks with no content. They suggest documentation was started and abandoned. | Empty TSDoc/JSDoc blocks. |
-| Storybook stories for design-system components | When Storybook is detected and a design-system directory is identified (heuristic: `components/ui/`, `packages/ui/`, `src/design-system/`), every component has a story file. Soft check — reported as `partial` based on coverage rate. Skipped silently when no design system is detected. | Design-system components without stories. |
+| Storybook stories for design-system components | When Storybook is detected and a design-system directory is identified (heuristic: `components/ui/`, `packages/ui/`, `src/design-system/`), every component has a story file. Soft check — reported as `partial` based on coverage rate. Explicitly not applicable when no design system is detected. | Design-system components without stories. |
 
 ### Layer 4 — Operational documentation and drift
 
-The operational checks (deployment, rollback, monitoring, feature flags) require the project to ship to a deployable target. The audit detects project shape from configuration: a `next.config.*`, `vercel.json`, `netlify.toml`, `Dockerfile`, server entry point, or framework-conventional deployable layout signals a deployable application; a `package.json` with `main`/`module`/`exports` and no application entry signals a library. When the project is library-only, the operational checks are silently skipped. **The drift checks always run, regardless of project shape.**
+The operational checks (deployment, rollback, monitoring, feature flags) require the project to ship to a deployable target. The audit detects project shape from configuration: a `next.config.*`, `vercel.json`, `netlify.toml`, `Dockerfile`, server entry point, or framework-conventional deployable layout signals a deployable application; a `package.json` with `main`/`module`/`exports` and no application entry signals a library. When the project is library-only, every operational catalog check is emitted explicitly as `not-applicable`/`not-evaluated` with `status: null` and an applicability reason. **The drift checks always run, regardless of project shape.**
 
 | Check | Expectation | Violation signal |
 | --- | --- | --- |
-| Deployment documented | A document describes how the project is deployed: `docs/deploy.md`, `docs/deployment.md`, a deployment section in the README, or framework-conventional deployment notes. Skipped silently when no deployable target is detected. | Deployable project with no deployment documentation. |
-| Rollback procedure documented | A document describes how to roll back a bad deployment. Skipped silently when no deployable target is detected. Soft check — reported as `partial` when deployment is documented but rollback is not. | Deployment documented; rollback not documented. |
-| Monitoring and alerting documented | Documentation references the monitoring or observability stack (Sentry, Datadog, Grafana, CloudWatch dashboards, on-call rotations). Skipped silently for non-deployed projects. Soft check — reported as `partial`. | No references in documentation. |
-| Feature-flag documentation | When a feature-flag library is detected (LaunchDarkly, GrowthBook, Statsig, ConfigCat, Unleash, custom flag service), feature flags are documented (which exist, who owns them, the conditions for ramp-up and removal). Skipped silently when no feature-flag library is detected. Soft check — reported as `partial`. | Feature-flag library used; no flag documentation. |
+| Deployment documented | A document describes how the project is deployed: `docs/deploy.md`, `docs/deployment.md`, a deployment section in the README, or framework-conventional deployment notes. Explicitly not applicable when no deployable target is detected. | Deployable project with no deployment documentation. |
+| Rollback procedure documented | A document describes how to roll back a bad deployment. Explicitly not applicable when no deployable target is detected. Soft check — reported as `partial` when deployment is documented but rollback is not. | Deployment documented; rollback not documented. |
+| Monitoring and alerting documented | Documentation references the monitoring or observability stack (Sentry, Datadog, Grafana, CloudWatch dashboards, on-call rotations). Explicitly not applicable for non-deployed projects. Soft check — reported as `partial`. | No references in documentation. |
+| Feature-flag documentation | When a feature-flag library is detected (LaunchDarkly, GrowthBook, Statsig, ConfigCat, Unleash, custom flag service), feature flags are documented (which exist, who owns them, the conditions for ramp-up and removal). Explicitly not applicable when no feature-flag library is detected. Soft check — reported as `partial`. | Feature-flag library used; no flag documentation. |
 | README script-drift detection | Commands shown in the README correspond to scripts that exist in `package.json`. (Mirrors Layer 1's check from a drift-detection angle; deliberate, because both audiences benefit.) Always runs. | README references missing or renamed scripts. |
 | Documentation freshness | The ratio of documentation files modified within the staleness threshold (default 180 days; tunable via `--threshold-doc-staleness-days`) to the total documentation file count is healthy. Soft check — reported as `partial` when more than half of docs are older than the threshold. Always runs. | Pervasive documentation staleness. |
 | Internal links resolve | Markdown links to other files in the repository (`./docs/foo.md`, `../README.md`, `[text](#anchor)`) resolve to existing files and anchors. Always runs, regardless of `--with-link-check`. | Broken internal links or anchors. |
@@ -133,7 +133,7 @@ The operational checks (deployment, rollback, monitoring, feature flags) require
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit cross-references feature folders against graph centrality so the per-feature documentation check (and the implementation plan) prioritises the most-consumed features. Without the graph, the audit falls back to per-folder coverage rates with no centrality weighting.
-2. **Confirms a Node.js project.** Detects `package.json`. If absent, the skill stops and tells the user it currently supports Node.js projects.
+2. **Confirms a Node.js project.** Detects `package.json`. If a valid repository root has no Node.js manifest, the skill writes a canonical not-applicable audit with every catalog check present once and a null status.
 3. **Detects project shape** (deployable application, library, monorepo, hybrid) for the operational-layer dispatch.
 4. **Detects observability and feature-flag stacks** (for layer 4 conditional checks): Sentry, Datadog, LaunchDarkly, GrowthBook, etc., from `dependencies`.
 5. **When `--with-link-check` is set**, collects every external URL from documentation files and HEAD-requests them with a short timeout. Records reachability status per URL. Internal links and anchors are always checked against the file system.
@@ -217,7 +217,7 @@ Aggregate the collected data into the items listed in Layer 0. Write `snapshot.m
 
 ### Step 8 — Resolve each check
 
-For each check in the active layer list, walk its detection logic. Layer 4's operational checks are skipped silently when the detected project shape is library-only with no deployable signal. Threshold-bearing checks compare aggregated values to the configured thresholds.
+For each check in the active layer list, walk its detection logic. Emit every Layer 4 operational check explicitly as `not-applicable`/`not-evaluated` with a null status when the detected project shape is library-only with no deployable signal. Threshold-bearing checks compare aggregated values to the configured thresholds.
 
 For each check, record evidence and up to ten representative samples plus a total count.
 
@@ -260,13 +260,40 @@ When the user agrees, build `implementation-plan.md`, ordered by audience:
 
 The plan is descriptive, not executable. It does not write documentation, edit source, or fix links.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "documentation-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:21Z",
   "projectShape": "deployable-application",
@@ -303,7 +330,13 @@ The plan is descriptive, not executable. It does not write documentation, edit s
   "checks": [
     {
       "layer": "operational-documentation-and-drift",
-      "check": "readme-script-drift-detection",
+      "checkId": "documentation-audit.readme-script-drift-detection",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "documentation-drift",
       "status": "violation",
       "evidence": ["README.md"],
       "samples": [

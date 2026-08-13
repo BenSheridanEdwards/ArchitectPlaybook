@@ -1,5 +1,6 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "catalogVersion": "1.1.0",
   "skillName": "react-audit",
   "humanCanonicalSource": "SKILL.md",
   "description": "Machine-readable inventory of React audit checks for validation and generated maps.",
@@ -217,7 +218,7 @@
     },
     {
       "checkId": "react-audit.useid-for-accessible-ids",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "useId for accessible IDs",
       "expectation": "Generated IDs used to wire up labels, ARIA attributes, and form controls use useId.",
       "violationSignal": "Hand-rolled ID generation when React 18+ is available.",
@@ -225,7 +226,7 @@
     },
     {
       "checkId": "react-audit.usetransition-for-non-urgent-updates",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "useTransition or startTransition for non-urgent updates",
       "expectation": "Deferrable updates use useTransition or startTransition.",
       "violationSignal": "Detected hot patterns where transitions would help and are absent.",
@@ -235,14 +236,14 @@
     },
     {
       "checkId": "react-audit.suspense-boundaries-for-async-data",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "Suspense boundaries for async data",
       "expectation": "When the framework or library supports Suspense for data fetching, Suspense boundaries with meaningful fallbacks are used.",
       "violationSignal": "Async data fetched without surrounding Suspense in projects that opted into Suspense-based fetching."
     },
     {
       "checkId": "react-audit.use-client-minimal-and-deliberate",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "'use client' used minimally and deliberately",
       "expectation": "Client-component boundaries sit at the leaves of the tree, not at the root.",
       "violationSignal": "Excessive 'use client' fragmentation, or 'use client' files importing server-only modules.",
@@ -253,7 +254,7 @@
     },
     {
       "checkId": "react-audit.server-actions-used-appropriately",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "Server Actions used appropriately",
       "expectation": "Mutating operations in App Router projects use Server Actions when appropriate.",
       "violationSignal": "Patterns where Server Actions would be the natural choice but route handlers are used instead.",
@@ -263,7 +264,7 @@
     },
     {
       "checkId": "react-audit.useoptimistic-for-optimistic-mutations",
-      "layer": "react-1819-idioms-skipped-silently-when-react-below-18",
+      "layer": "react-1819-idioms-explicitly-not-applicable-when-react-is-below-18",
       "title": "useOptimistic for optimistic mutations",
       "expectation": "Optimistic UI updates use useOptimistic rather than hand-rolled optimistic state.",
       "violationSignal": "Hand-rolled optimistic updates in React 19 codebases.",

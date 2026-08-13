@@ -4,13 +4,13 @@ This document describes the architectural intent behind the playbook so future c
 
 ## What the playbook is
 
-A collection of Claude Code slash-command skills that grade a TypeScript codebase against opinionated baselines and propose implementation plans for the gaps. The skills are stateless prompts (Markdown files with YAML frontmatter); the only execution context is whatever Claude Code chat session invokes them. There is no compiled binary, no service, no daemon — just structured prose that Claude follows.
+A collection of Claude Code slash-command skills that grade a TypeScript codebase against opinionated baselines and propose implementation plans for the gaps. Most behavior is encoded in stateless Markdown prompts with YAML frontmatter. Small Python standard-library programs provide deterministic repository validation and Repository Quality Score calculation where prose must not own machine decisions. There is no compiled application, service, daemon, package installation, or build step.
 
 This shape is what makes the playbook self-contained: cloning the repo and copying the skills into `.claude/skills/` is the entire installation. There are no dependencies to resolve, no version conflicts to manage.
 
-## The three skill categories
+## The five skill categories
 
-Skills fall into three categories with deliberately different shapes:
+Skills fall into five categories with deliberately different shapes:
 
 ### Setup utilities
 
@@ -18,7 +18,24 @@ Skills fall into three categories with deliberately different shapes:
 
 ### Audits
 
-The thirteen `*-audit` skills plus the layer-2-onwards parts of `pre-audit-setup`'s knowledge-graph dependency model. Audits are read-only by default; they grade a codebase against an opinionated baseline and write findings to `.architect-audits/<audit-name>/`. Audits never mutate the codebase. They follow a strict canonical shape (see "The audit shape" below).
+The fourteen `*-audit` skills plus the layer-2-onwards parts of `pre-audit-setup`'s knowledge-graph dependency model. Audits are read-only by default; they grade a codebase against an opinionated baseline and write findings to `.architect-audits/<audit-name>/`. Audits never mutate the codebase. They follow a strict canonical shape (see "The audit shape" below).
+
+### Aggregation
+
+`repository-quality-score`. A read-only consumer of completed audit evidence,
+not an audit of source code. It validates findings and catalog compatibility,
+selects one atomic current-commit run per audit, and delegates every numeric
+decision to its bundled standard-library Python calculator and versioned policy.
+It writes only to `.architect-audits/repository-quality-score/` and never fills
+evidence gaps by inspecting source code. Architecture Decision
+[0002](docs/decisions/0002-repository-quality-score-and-audit-result-contract.md)
+records this boundary.
+
+### Review
+
+`ben-architect-review`. A principles-based pull-request review that applies
+Ben's architectural judgement. It does not calculate Repository Quality Score
+or replace the domain audits.
 
 ### Meta
 
@@ -32,7 +49,7 @@ Every audit body uses the same skeleton. Drift from this skeleton breaks the pla
 
 Layer 0 is informational only — a snapshot of the current state of the audited concern (counts, detected libraries, framework variants, threshold values used) that helps the human reading the report. It has no pass/fail status.
 
-Layers 1 through 4 grade specific concerns within the audit's domain. Each layer is a table of checks; each check has an Expectation and a Violation signal. Layers are organised by audit-internal cohesion — for `/security-audit` they're attack classes, for `/performance-audit` they're runtime cost dimensions, for `/architecture-audit` they're invariant categories. Three layers can be skipped silently when a structural prerequisite is absent (e.g., Layer 3 of `/error-handling-audit` skips when React is not detected; Layer 4 of `/react-audit` skips on React below 18).
+Layers 1 through 4 grade specific concerns within the audit's domain. Each layer is a table of checks; each check has an Expectation and a Violation signal. Layers are organised by audit-internal cohesion — for `/security-audit` they're attack classes, for `/performance-audit` they're runtime cost dimensions, for `/architecture-audit` they're invariant categories. Some layers can be structurally inapplicable when a prerequisite is absent (for example, Layer 3 of `/error-handling-audit` when React is absent, or Layer 4 of `/react-audit` below React 18). Their catalog checks remain in canonical findings as `not-applicable`/`not-evaluated` with null status; they are never silently omitted or graded as missing.
 
 The decision to standardise on four layers plus Layer 0 is recorded in [ADR 0001](docs/decisions/0001-four-layer-baseline-with-layer-zero-snapshot.md).
 
@@ -99,15 +116,48 @@ Audits, fixes, and reviews each run in different chat sessions. They cannot shar
     findings.md              human-readable report
     findings.json            machine-readable list of issues
     snapshot.md              the Layer 0 diagnostic snapshot, on its own
-    metadata.json            skill version, run timestamp, graphify revision, applied filters
+    metadata.json            matching run, catalog, target, and execution identity
     implementation-plan.md   only if the user agreed to generate one
 ```
 
-`findings.md` always includes the snapshot at the top followed by check results grouped by layer. `findings.json` is structured for downstream tooling — its top-level shape is `{skillVersion, runStartedAt, runFinishedAt, snapshot, summary, checks}` with optional skill-specific fields.
+`findings.md` always includes the snapshot at the top followed by check results
+grouped by layer. Canonical `findings.json` uses schema `2.0.0` and identifies
+the run, skill, catalog, start and finish timestamps, exact target commit,
+source-tree cleanliness, execution options, snapshot, summary, and complete
+catalog-aligned check array. `metadata.json` repeats the common identity fields;
+consumers reject mismatches as partial writes. The field-level rules live in
+[`.agents/AUDIT_FINDINGS_CONTRACT.md`](.agents/AUDIT_FINDINGS_CONTRACT.md).
+
+Each check separates applicability, evaluation state, evidence quality,
+classification, and the four-status result. This prevents a missing tool, a
+filtered check, and a proved non-applicable check from collapsing into the same
+meaning. `misconfigured` is a classification; quality-gate results still use
+the four canonical statuses.
 
 **Chat output is human-first and concise.** Every audit prints a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks. This keeps the chat scannable while the on-disk files carry the complete diagnostic.
 
 The contract is what makes the multi-chat workflow tractable. A chat opened in a worktree to fix issues reads `findings.json`. A chat opened in another worktree to review the fix re-runs the originating audit and produces a new `findings.md` plus an optional `review-gap-report.md` if it found something the original audit missed.
+
+## Repository Quality Score data flow
+
+The scoring policy is versioned separately from audit catalogs. Catalog schema
+`1.1.0` defines structure; each audit's semantic `catalogVersion` identifies the
+meaning of its check inventory. Score policy `1.0.0` owns status points, soft
+weights, audit weights, rounding precision, and quality bands.
+
+The calculator discovers only the current worktree and worktrees registered by
+Git, never arbitrary sibling directories. It accepts only current-commit runs,
+prefers canonical and uncustomized evidence deterministically, and never merges
+checks from separate audit executions. It fingerprints all inputs, verifies
+them again before publishing, and writes `score.json` last as the completion
+marker.
+
+Score and coverage remain separate. Each audit category is normalized before
+equal-category aggregation. Missing audits and applicable non-evaluated checks
+reduce coverage rather than becoming automatic failures. A score is official
+only for a current clean commit with compatible, complete, canonical,
+unfiltered evidence for every policy audit; otherwise it is provisional or
+unavailable.
 
 ## The self-improvement loop
 

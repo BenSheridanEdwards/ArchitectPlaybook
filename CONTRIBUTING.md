@@ -23,6 +23,11 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - The opinionated baseline organised in **four layers plus a Layer 0 diagnostic snapshot**. Layer 0 is informational only and has no status; layers 1–4 grade against the four-status taxonomy (`present | partial | missing | violation`).
    - "What this skill does" — a numbered walk through the skill's behaviour.
    - "Implementation steps" — the concrete steps Claude follows when invoked.
+   - "Repository Quality Score findings contract" plus a canonical schema
+     `2.0.0` findings example. Every `checks.json` entry appears exactly once
+     with full `checkId`, applicability, evaluation state, evidence quality,
+     classification, status, and evidence. `metadata.json` repeats the shared
+     run identity.
    - "Findings file shape" with a JSON example.
    - "Idempotency rules", "Failure modes and remediation", "What this skill explicitly does NOT do".
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
@@ -32,6 +37,14 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    ```
    feat: implement <skill-name> skill
    ```
+
+An implemented `*-audit` also requires `checks.json` using catalog schema
+`1.1.0` and a semantic `catalogVersion`. Add the new audit to
+`repository-quality-score/score-policy.json` only when it is meant to contribute
+to the score; changing the policy audit roster requires a `policyVersion`
+increase and an architecture decision update. A non-audit aggregation skill,
+such as Repository Quality Score, documents why it does not use the four-layer
+audit shape.
 
 ## Improving an existing skill
 
@@ -46,6 +59,18 @@ The preferred path is the playbook's own self-improvement loop:
 This loop ensures changes to audit baselines are grounded in a real gap rather than speculation.
 
 Direct hand edits are also welcome when the change is too small or too obvious for the loop. Apply the same Conventional Commits and README-update-in-same-commit rules.
+
+When an audit check is added, removed, renamed, moved, reweighted, or materially
+redefined, update `SKILL.md` and `checks.json` together and increment that
+catalog's `catalogVersion`. Give a materially different invariant a new
+`checkId`. Update canonical findings examples and calculator fixtures when the
+change affects applicability, evaluation, evidence quality, or allowed status.
+
+Scoring policy changes are separate from catalog changes. Points, standard or
+soft weights, audit weights or roster, score precision, rounding, and band
+boundaries require a `policyVersion` increase, Architecture Decision 0002
+review, and exact calculator tests. Never change the policy merely to make a
+repository's score improve.
 
 ## Conventions
 
@@ -68,6 +93,11 @@ Direct hand edits are also welcome when the change is too small or too obvious f
 - [ ] No abbreviations introduced anywhere.
 - [ ] Conventional Commits subject on every commit in the branch.
 - [ ] If the change touches behaviour shared across skills (boundary tables, status taxonomy, two-phase flow), the change has been justified in an ADR under `docs/decisions/` or via `/system-self-improve` with a real gap report.
+- [ ] Audit `checks.json`, `catalogVersion`, canonical findings example, and
+      score-policy compatibility are updated together when applicable.
+- [ ] Scoring changes include deterministic calculator tests for points,
+      coverage, status qualification, rounding, bands, discovery, and output
+      safety.
 
 ## Reporting a gap
 

@@ -88,9 +88,9 @@ Layer 0 is informational only and has no status.
 | Session tokens not in `localStorage` | Long-lived session and authentication tokens (JWT, session ID) live in HttpOnly cookies, not in `localStorage` or `sessionStorage` (which are accessible to any script running on the page). | `localStorage.setItem`/`getItem` calls keyed on names matching auth patterns. |
 | Logout invalidates server session | Logout calls a server endpoint (and the call is awaited or its failure is handled), not just clearing local state. | A logout flow that only clears local store/state with no server request. |
 | Authentication state is server-derived | The "is the user logged in" check resolves against a server source of truth on each navigation or load — not from client-cached state alone. | Authentication state read only from client storage with no server validation step (route loader, middleware, or `useEffect` fetch). |
-| OAuth and OIDC flows use PKCE | Public clients (browser apps) use Proof Key for Code Exchange: a `code_verifier` is generated and a `code_challenge` is sent in the authorization request. | OAuth flow without PKCE for a public client. Skipped silently when no OAuth flow is detected. |
+| OAuth and OIDC flows use PKCE | Public clients (browser apps) use Proof Key for Code Exchange: a `code_verifier` is generated and a `code_challenge` is sent in the authorization request. Explicitly not applicable when no OAuth flow is detected. | OAuth flow without PKCE for a public client. |
 | OAuth flows use a `state` parameter | Every OAuth authorization request includes a CSRF-resistant `state`, validated on callback. | `state` absent from the request, or absent from callback validation. |
-| OIDC flows use a `nonce` | OpenID Connect flows include a `nonce` in the authorization request, validated on the ID token. | `nonce` absent or unvalidated. Skipped silently when no OIDC flow is detected. |
+| OIDC flows use a `nonce` | OpenID Connect flows include a `nonce` in the authorization request, validated on the ID token. Explicitly not applicable when no OIDC flow is detected. | `nonce` absent or unvalidated. |
 | Redirect URIs are explicitly handled | Post-authentication redirect destinations are validated against an allowlist or restricted to relative paths. They are never reflected from a query parameter without a check. | An `?next=...`/`?returnTo=...` parameter passed straight to `router.push` or `window.location` with no validation. |
 | Server-side authorization referenced | UI-only authorization checks (component guards, conditional rendering by role) are paired with server-enforced checks at the data-fetching layer. The audit cannot verify the server-side check exists; it flags reliance on UI-only patterns. Soft check — reported as `partial`. | Permission checks appear only in components and route guards; data-fetching layer has no role/permission references. |
 
@@ -103,7 +103,7 @@ Layer 0 is informational only and has no status.
 | No raw `innerHTML`/`outerHTML` writes | DOM mutations go through React, not via `element.innerHTML = userInput`. | Direct `innerHTML` or `outerHTML` writes with non-literal right-hand sides. |
 | URL `href` and `src` validated | User-controlled URLs used in `href`, `src`, or `formAction` are validated to allow only `http://`, `https://`, or relative paths — never `javascript:` or `data:`. | An `href={someInput}` or analogous expression with no protocol check. |
 | Open-redirect patterns guarded | Code that performs a redirect (`router.push`, `window.location.assign`, server response redirect) does not pass user-controlled URLs through unchecked. | A redirect call site whose destination originates from a query parameter or form input with no allowlist. |
-| Markdown and rich-text rendering use a safe pipeline | Projects rendering Markdown or rich text use a library configured to disallow HTML by default, or sanitize after rendering. | Markdown rendered with HTML pass-through enabled and no sanitization. Skipped silently when no Markdown or rich-text rendering is detected. |
+| Markdown and rich-text rendering use a safe pipeline | Projects rendering Markdown or rich text use a library configured to disallow HTML by default, or sanitize after rendering. Explicitly not applicable when no Markdown or rich-text rendering is detected. | Markdown rendered with HTML pass-through enabled and no sanitization. |
 | No bypassing React's escaping | `React.createElement` with raw HTML strings, custom JSX runtimes that disable escaping, or third-party "render unsafe" components are flagged. | Any of the above. |
 
 ### Layer 3 — Transport, headers, and cookies
@@ -183,7 +183,7 @@ Read `package.json`, framework configuration, and deployment configuration. Reso
 
 When `--with-scan` is set:
 
-- Detect `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security` in `devDependencies`. If present and already configured in the project's ESLint configuration, run `npx eslint . --format json` and parse the output (filter to only the security-plugin rules). If present but not configured, skip with a metadata note.
+- Detect `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security` in `devDependencies`. If present and already configured in the project's ESLint configuration, run `npx eslint . --format json` and parse the output (filter to only the security-plugin rules). If present but not configured, do not execute it; record that fact in metadata and mark only scanner-dependent enrichment as degraded with an evaluation reason.
 - Detect `semgrep` on PATH (`command -v semgrep`). If present, run `semgrep --config=p/owasp-top-ten --config=p/javascript --json` (no `--autofix`) and parse the output.
 
 If any scanner fails to start, record the failure and continue. Scan-dependent enrichment of layer-2 and layer-4 checks degrades gracefully.
@@ -235,13 +235,40 @@ When the user agrees, build `implementation-plan.md`, **ordered by severity** ra
 
 The plan is descriptive, not executable. It does not modify configuration, install packages, or edit source.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "security-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:18Z",
   "framework": "next-app-router",
@@ -273,8 +300,14 @@ The plan is descriptive, not executable. It does not modify configuration, insta
   },
   "checks": [
     {
-      "layer": "authentication-and-sessions",
-      "check": "session-tokens-not-in-localstorage",
+      "layer": "authentication-authorization-and-sessions",
+      "checkId": "security-audit.session-tokens-not-in-browser-storage",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "client-token-storage",
       "status": "violation",
       "confidence": "high",
       "evidence": [],

@@ -91,7 +91,7 @@ Layer 0 is informational only and has no status.
 | Check | Tier | Expectation | Violation signal |
 | --- | --- | --- | --- |
 | No dependencies more than two majors behind | 3 | Each direct dependency is at most the threshold number of major versions behind its latest release (default 2; tunable via `--threshold-major-versions-behind`). | Direct dependency exceeds the threshold. Reported with current and latest. |
-| No deprecated-major usage | 3 | When a package's current major is upstream-deprecated, even a one-minor lag is reported as `partial`. | Deprecated-major usage. |
+| No deprecated-major usage | 3 | When a package's current major is upstream-deprecated, even a one-minor lag is reported as `partial`. Soft check — registry deprecation semantics are advisory and ecosystem-dependent. | Deprecated-major usage. |
 | No abandoned packages | 3 | No direct dependency has gone more than the threshold months without a publish (default 24; tunable via `--threshold-abandonment-months`). Soft check — reported as `partial`. | Direct dependencies whose latest publish is older than the threshold. |
 | No officially deprecated packages | 3 | No direct dependency carries a `deprecated` flag in the registry. | Deprecated direct dependency. Reported with the deprecation message and the recommended replacement when the registry provides one. |
 | Peer dependencies satisfied | 2 | Every declared peer dependency in the tree resolves to a satisfying version. | Unsatisfied peer dependency warnings from `npm ls --all`/`pnpm list --depth Infinity`/equivalent. |
@@ -121,7 +121,7 @@ The skill **never** encodes a legal policy. Compliance findings are signals for 
 ## What this skill does
 
 1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the unused-dependency and misplaced-dependency checks use the graph as the import truth (high confidence). When absent, both checks fall back to a regex/AST sweep and record `confidence: "low"` on their findings. The audit still runs in full either way.
-2. **Confirms a Node.js project.** Detects `package.json`. If absent, the skill stops and tells the user it currently supports Node.js projects only.
+2. **Confirms a Node.js project.** Detects `package.json`. If absent at the intended repository root, the skill writes a canonical not-applicable audit; if no project root can be established, it asks the user to change directory.
 3. **Detects the package manager and tier.** Infers the package manager from the lockfile present (and falls back to the `packageManager` field in `package.json`). Determines the input tier based on the presence of `node_modules` and the `--with-network` flag.
 4. **When `--with-network` is set**, runs the package manager's read-only audit and outdated commands and captures their JSON output. Never runs install, update, or any mutating operation.
 5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/dependency-audit/snapshot.md` and prepends the same content to `findings.md`.
@@ -154,7 +154,7 @@ Detect the package manager:
 - `yarn.lock` → yarn (Berry detected by absence of `node-modules` linker default and presence of `.yarnrc.yml`).
 - `bun.lockb` → bun.
 
-When multiple lockfiles are present, fall back to the `packageManager` field in `package.json`. When none of these resolves, stop and tell the user.
+When multiple lockfiles are present, fall back to the `packageManager` field in `package.json`. When none of these resolves, continue: record the package-manager foundation check as `missing`, mark package-manager-command and lockfile-dependent checks applicable but `not-evaluated`, and evaluate manifest-only checks where possible.
 
 ### Step 2 — Determine the input tier
 
@@ -223,13 +223,40 @@ When the user agrees, build `implementation-plan.md`:
 
 The plan is descriptive, not executable. It does not run any install, upgrade, or removal commands.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
 ## Findings file shape
 
-`findings.json`:
+`findings.json` (the example shows one representative check; emitted output
+contains every catalog check exactly once):
 
 ```json
 {
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "dependency-audit",
   "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
   "runStartedAt": "2026-04-26T13:47:00Z",
   "runFinishedAt": "2026-04-26T13:47:14Z",
   "packageManager": { "name": "pnpm", "version": "9.4.0" },
@@ -259,7 +286,13 @@ The plan is descriptive, not executable. It does not run any install, upgrade, o
   "checks": [
     {
       "layer": "hygiene",
-      "check": "no-unused-dependencies",
+      "checkId": "dependency-audit.no-unused-dependencies",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "unused-dependency",
       "status": "violation",
       "tier": 1,
       "confidence": "high",
@@ -289,7 +322,7 @@ The plan is descriptive, not executable. It does not run any install, upgrade, o
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Stop. Inform the user that the skill currently supports npm, pnpm, yarn, and bun only. |
+| No supported package manager | None of the recognised lockfiles is present and `packageManager` is unset. | Continue. Record the package-manager foundation as `missing`, dependent checks as applicable but `not-evaluated`, and evaluate manifest-only checks. List npm, pnpm, yarn, and bun in the remediation. |
 | `node_modules` absent | The user has not run install, or `node_modules` is in a non-standard location. | Continue at tier 1. Record `tier: 1` in metadata. Tier-2 checks degrade to `partial` with the gap "needs tier 2 — run install first". |
 | `--with-network` set but network command fails | Registry unreachable, authentication required, audit endpoint rate-limited. | Record the failure and the command output in metadata. Tier-3 checks degrade to `partial`. Do not crash. |
 | Multiple lockfiles present | Mid-migration between package managers, or accidental commit. | Pick the lockfile referenced by the `packageManager` field if set; otherwise the most recently modified. Record the conflict in the snapshot. The package-manager-mixing hygiene check will report `violation`. |

@@ -1,5 +1,6 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
   "skillName": "dependency-audit",
   "humanCanonicalSource": "SKILL.md",
   "description": "Machine-readable inventory of dependency-health audit checks for validation and generated maps.",

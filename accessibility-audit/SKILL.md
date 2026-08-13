@@ -43,7 +43,7 @@ A check resolves to one of four statuses:
 | Axe in development                 | `@axe-core/react` is initialised in development mode so violations are logged to the browser console during local work.                               | devDependency on `@axe-core/react`; an entry-point file (typically `src/main.tsx`, `src/index.tsx`, or `pages/_app.tsx`) imports it and calls `axe(React, ReactDOM, ...)` behind a development guard.                                          |
 | Component-test integration         | `jest-axe` or `vitest-axe` is available, and at least one component test asserts `expect(...).toHaveNoViolations()`.                                  | devDependency on `jest-axe` or `vitest-axe`; at least one test file imports the matcher and uses it.                                                                                                                                           |
 | End-to-end accessibility scan      | `@axe-core/playwright` (or the Cypress equivalent) is configured, and at least one end-to-end specification runs an axe scan against a rendered page. | devDependency on `@axe-core/playwright` or `cypress-axe`; a spec file imports and invokes the scanner.                                                                                                                                         |
-| Storybook accessibility addon      | If Storybook is in use, `@storybook/addon-a11y` is registered.                                                                                        | Storybook configuration file (`.storybook/main.*`) lists the addon in `addons`. Skipped silently if Storybook is not detected.                                                                                                                 |
+| Storybook accessibility addon      | If Storybook is in use, `@storybook/addon-a11y` is registered. Explicitly not applicable when Storybook is not detected.                              | Storybook configuration file (`.storybook/main.*`) lists the addon in `addons`.                                                                                                                         |
 | Continuous integration enforcement | A continuous-integration workflow step runs the unit and end-to-end accessibility checks and fails the build on violations.                           | Workflow file under `.github/workflows/`, `.gitlab-ci.yml`, or equivalent contains a step invoking the relevant test command.                                                                                                                  |
 
 ### Layer 2 — Component patterns
@@ -78,7 +78,7 @@ These checks require reading components. Use the knowledge graph to find the rig
 ## What this skill does
 
 1. **Reads the knowledge graph first.** If `graphify-out/graph.json` exists, read `graphify-out/GRAPH_REPORT.md` to identify component clusters, the application shell, and route entry points before searching raw files.
-2. **Confirms a React project.** Detects React via `package.json` dependencies. If absent, the skill stops and tells the user it currently supports React only.
+2. **Confirms a React project.** Detects React via `package.json` dependencies. If absent, the skill writes a canonical not-applicable audit with every catalog check explicitly `not-applicable`/`not-evaluated` and a null status.
 3. **Detects the framework variant** and records it in `metadata.json`.
 4. **Walks every check** across the three layers. Records a status per check and representative file references.
 5. **Writes phase 1 outputs** to `.architect-audits/accessibility-audit/` (findings.md, findings.json, metadata.json, snapshot.md).
@@ -94,7 +94,7 @@ If the graph does not exist, fall back to heuristic discovery: `find src -name "
 
 ### Step 2 — Confirm React and detect the framework variant
 
-Check `package.json` for `react` in `dependencies` or `devDependencies`. If React is absent, stop and tell the user this skill currently supports React projects only.
+Check `package.json` for `react` in `dependencies` or `devDependencies`. If React is absent, do not omit the audit: write all four canonical output files, set `auditApplicability.status` to `not-applicable` with reason `react-project-not-detected`, and emit every `checks.json` entry exactly once as `not-applicable`/`not-evaluated` with `status: null`.
 
 Detect the framework variant and record it in `metadata.json`:
 - **Next.js** — `next` in dependencies; presence of `app/` or `pages/` directory.
@@ -113,7 +113,7 @@ Checks to walk (see baseline tables above for detection signals):
 - Axe in development
 - Component-test integration
 - End-to-end accessibility scan
-- Storybook accessibility addon (skip silently if Storybook is absent)
+- Storybook accessibility addon (record explicitly as `not-applicable`/`not-evaluated` with `status: null` when Storybook is absent)
 - Continuous integration enforcement
 
 ### Step 4 — Walk Layer 2 (component patterns) and Layer 3 (application shell)
@@ -122,7 +122,7 @@ Checks to walk (see baseline tables above for detection signals):
 
 **Layer 3** requires reading the HTML shell, root layout, and framework-specific entry points. Record status and representative file references for each check.
 
-When `--severity=error` is active, record only checks with status `violation` or `missing`. Skip `partial` and `present`.
+When `--severity=error` is active, keep every catalog check in `findings.json`. Checks excluded by the filter are emitted as applicable but `not-evaluated` with `status: null` and reason `severity-filter`; the run records `filtersApplied: true` and remains provisional for RQS. Limit the chat and human-readable recommendations to `violation` and `missing` findings.
 
 ### Step 5 — Write phase 1 outputs
 
@@ -144,6 +144,59 @@ _"Generate an implementation plan for the gaps identified above? (yes/no)"_
 
 Do not proceed to phase 2 without an explicit affirmative.
 
+## Repository Quality Score findings contract
+
+`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
+top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
+`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
+`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
+repository, exact Git commit, and whether the audited source tree was clean.
+`execution` records `filtersApplied`, `filterArguments`, threshold and policy
+overrides, `enrichmentArguments`, and graph availability.
+
+Emit every entry from `checks.json` exactly once and use its full `checkId` and
+layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
+`classification`, canonical `status`, and `evidence`. A check that does not apply
+is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
+unresolved applicable check is `applicable`/`not-evaluated` with a null status;
+never guess a pass or failure. `metadata.json` repeats the common run, target,
+catalog, and execution identity. The complete contract is
+`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
+
+Canonical `findings.json` uses this envelope; the real `checks` array contains
+every catalog entry exactly once:
+
+```json
+{
+  "schemaVersion": "2.0.0",
+  "runIdentifier": "<uuid>",
+  "skillName": "accessibility-audit",
+  "skillVersion": "1.0.0",
+  "checkCatalogSchemaVersion": "1.1.0",
+  "checkCatalogVersion": "1.0.0",
+  "runStartedAt": "2026-07-13T10:00:00Z",
+  "runFinishedAt": "2026-07-13T10:02:00Z",
+  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
+  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
+  "checks": [
+    {
+      "checkId": "accessibility-audit.jsx-accessibility-lint-plugin",
+      "layer": "tooling-and-automation",
+      "applicability": "applicable",
+      "applicabilityReason": null,
+      "evaluationState": "evaluated",
+      "evaluationReason": null,
+      "evidenceQuality": "complete",
+      "classification": "conformance",
+      "status": "present",
+      "evidence": ["eslint-plugin-jsx-a11y is enabled."],
+      "gap": null,
+      "remediation": null
+    }
+  ]
+}
+```
+
 ## What this skill explicitly does NOT do
 
 - **Does not start the development server.** The entire audit is static.
@@ -151,6 +204,6 @@ Do not proceed to phase 2 without an explicit affirmative.
 - **Does not verify screen-reader behaviour.** Announced text, reading order, and virtual-cursor navigation can only be verified by a human with assistive technology.
 - **Does not verify focus order by interaction.** Tab-order correctness under real keyboard conditions is out of scope.
 - **Does not mutate the codebase.** This skill never accepts `--apply`. All outputs are descriptive Markdown and JSON. A separate fix step is responsible for code changes.
-- **Does not audit non-React frontends.** Vue, Svelte, Angular, and plain HTML projects are not supported. The skill stops and says so if React is absent.
+- **Does not audit non-React frontends.** Vue, Svelte, Angular, and plain HTML projects are not supported. When React is absent, the skill still writes a complete canonical not-applicable result so downstream coverage is explicit.
 - **Does not compute contrast ratios for runtime-generated colours.** It can only evaluate statically defined design tokens (CSS custom properties, Tailwind theme values, theme objects). Dynamic colour computation requires a browser.
 - **Does not produce an implementation plan without explicit confirmation.** Phase 2 requires the user to answer "yes" at the end of Step 6.
