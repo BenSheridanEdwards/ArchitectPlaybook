@@ -206,6 +206,31 @@ def audit_layer_slugs(body: str) -> set[str]:
     return slugs
 
 
+def canonical_check_title(value: str) -> str:
+    """Normalize punctuation and insignificant articles in check titles."""
+    return " ".join(token for token in re.findall(r"[a-z0-9]+", value.casefold()) if token != "the")
+
+
+def canonical_check_row(body: str, title: str) -> str | None:
+    """Return the unique canonical Markdown table row for a catalog title."""
+    expected = canonical_check_title(title)
+    rows: list[str] = []
+    for line in body.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            continue
+        canonical_title = canonical_check_title(cells[0])
+        if (
+            canonical_title == expected
+            or canonical_title.startswith(f"{expected} ")
+            or expected.startswith(f"{canonical_title} ")
+        ):
+            rows.append(line)
+    return rows[0] if len(rows) == 1 else None
+
+
 def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
     for directory in audit_directories(root):
         checks_path = directory / "checks.json"
@@ -270,6 +295,16 @@ def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
             soft_check = check.get("softCheck")
             if soft_check is not None and not isinstance(soft_check, bool):
                 findings.append(Finding("error", checks_path, f"softCheck must be a boolean for {check_id or f'check {index}'}"))
+            if soft_check is True and isinstance(check.get("title"), str):
+                row = canonical_check_row(body, check["title"])
+                if row is None or "soft check" not in row.casefold():
+                    findings.append(
+                        Finding(
+                            "error",
+                            checks_path,
+                            f"softCheck inventory flag must be documented as a soft check in the canonical SKILL row for {check_id or f'check {index}'}",
+                        )
+                    )
             allowed_statuses = check.get("allowedStatuses")
             if allowed_statuses is not None:
                 if (

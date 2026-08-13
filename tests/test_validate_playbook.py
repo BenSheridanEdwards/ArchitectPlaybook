@@ -172,6 +172,39 @@ class ValidatePlaybookTests(unittest.TestCase):
             self.assertTrue(any("catalogVersion" in finding.message for finding in findings))
             self.assertTrue(any("softCheck must be a boolean" in finding.message for finding in findings))
 
+    def test_check_metadata_requires_soft_check_wording_in_canonical_row(self) -> None:
+        soft_catalog = VALID_CHECKS_JSON.replace(
+            '      "violationSignal": "Multiple test runners are configured."',
+            '      "violationSignal": "Multiple test runners are configured.",\n      "softCheck": true',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                VALID_SKILL_WITH_LAYER
+                + "\n| Check | Expectation | Violation signal |\n"
+                + "| --- | --- | --- |\n"
+                + "| Single test runner | Exactly one runner. | Multiple runners. |\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "checks.json").write_text(soft_catalog, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("must be documented as a soft check" in finding.message for finding in findings))
+
+            skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(
+                skill_text.replace(
+                    "| Single test runner | Exactly one runner. |",
+                    "| Single test runner | Exactly one runner. Soft check. |",
+                ),
+                encoding="utf-8",
+            )
+            findings = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
     def test_check_metadata_rejects_duplicate_ids_and_unknown_layers(self) -> None:
         broken = VALID_CHECKS_JSON.replace('"test-runner"', '"missing-layer"')
         broken = broken.replace(

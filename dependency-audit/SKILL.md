@@ -91,7 +91,7 @@ Layer 0 is informational only and has no status.
 | Check | Tier | Expectation | Violation signal |
 | --- | --- | --- | --- |
 | No dependencies more than two majors behind | 3 | Each direct dependency is at most the threshold number of major versions behind its latest release (default 2; tunable via `--threshold-major-versions-behind`). | Direct dependency exceeds the threshold. Reported with current and latest. |
-| No deprecated-major usage | 3 | When a package's current major is upstream-deprecated, even a one-minor lag is reported as `partial`. | Deprecated-major usage. |
+| No deprecated-major usage | 3 | When a package's current major is upstream-deprecated, even a one-minor lag is reported as `partial`. Soft check — registry deprecation semantics are advisory and ecosystem-dependent. | Deprecated-major usage. |
 | No abandoned packages | 3 | No direct dependency has gone more than the threshold months without a publish (default 24; tunable via `--threshold-abandonment-months`). Soft check — reported as `partial`. | Direct dependencies whose latest publish is older than the threshold. |
 | No officially deprecated packages | 3 | No direct dependency carries a `deprecated` flag in the registry. | Deprecated direct dependency. Reported with the deprecation message and the recommended replacement when the registry provides one. |
 | Peer dependencies satisfied | 2 | Every declared peer dependency in the tree resolves to a satisfying version. | Unsatisfied peer dependency warnings from `npm ls --all`/`pnpm list --depth Infinity`/equivalent. |
