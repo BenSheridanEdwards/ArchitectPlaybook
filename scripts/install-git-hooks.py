@@ -31,7 +31,14 @@ def install(force: bool) -> int:
             backup = destination.with_suffix(destination.suffix + ".architect-playbook-backup")
             if backup.exists():
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                backup = destination.with_suffix(f"{destination.suffix}.architect-playbook-backup-{stamp}")
+                candidate = destination.with_suffix(f"{destination.suffix}.architect-playbook-backup-{stamp}")
+                counter = 1
+                while candidate.exists():
+                    counter += 1
+                    candidate = destination.with_suffix(
+                        f"{destination.suffix}.architect-playbook-backup-{stamp}-{counter}"
+                    )
+                backup = candidate
             if not force:
                 print(f"refusing to overwrite existing hook: {destination}")
                 print(f"rerun with --force to back it up to {backup} and install the playbook hook")
