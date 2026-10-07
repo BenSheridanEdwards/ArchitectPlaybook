@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -233,6 +234,15 @@ class LifecycleTests(AuditRunTestCase):
         self.run_command("begin", AUDIT)
         self.resolve_remaining()
         self.write("src/b.ts", "export const b = 2;\n")
+        self.assert_rejected(self.run_command("finish", AUDIT), "changed during the run")
+
+    def test_finish_notices_same_size_edits_to_untracked_files(self) -> None:
+        notes = self.write("notes.txt", "alpha\n")
+        self.run_command("begin", AUDIT)
+        self.resolve_remaining()
+        before = notes.stat()
+        notes.write_text("omega\n", encoding="utf-8")
+        os.utime(notes, ns=(before.st_atime_ns, before.st_mtime_ns))
         self.assert_rejected(self.run_command("finish", AUDIT), "changed during the run")
 
     def test_finish_notices_further_edits_to_an_already_dirty_file(self) -> None:
@@ -701,6 +711,31 @@ class ConcurrencyAndInstallTests(AuditRunTestCase):
         for thread in threads:
             thread.join(timeout=120)
         self.assertEqual(events, ["first in", "first out", "second in"])
+
+    def test_a_lock_file_serialises_commands_where_flock_is_unsupported(self) -> None:
+        if audit_run.fcntl is None:
+            self.skipTest("flock is a POSIX fallback path")
+        original = audit_run.fcntl.flock
+
+        def unsupported(*arguments: Any) -> None:
+            raise OSError(errno.ENOLCK, "No locks available")
+
+        audit_run.fcntl.flock = unsupported
+        try:
+            self.test_the_run_lock_admits_one_holder_at_a_time()
+        finally:
+            audit_run.fcntl.flock = original
+        self.assertFalse((self.root / ".architect-audits" / AUDIT / ".lock").exists())
+
+    def test_a_lock_file_left_by_an_exited_process_is_replaced(self) -> None:
+        directory = self.root / ".architect-audits" / AUDIT
+        directory.mkdir(parents=True)
+        exited = subprocess.Popen([sys.executable, "-c", "pass"])
+        exited.wait()
+        (directory / ".lock").write_text(str(exited.pid), encoding="ascii")
+        with audit_run.lock_file(directory):
+            self.assertEqual((directory / ".lock").read_text(encoding="ascii"), str(os.getpid()))
+        self.assertFalse((directory / ".lock").exists())
 
     def test_running_the_protocol_writes_no_bytecode_beside_the_calculator(self) -> None:
         with tempfile.TemporaryDirectory() as copy:

@@ -39,7 +39,7 @@ Audits publish only through `audit-protocol/scripts/audit_run.py`, a standard-li
 6. **One validator.** `finish` writes the documents, reads them back with the calculator's own strict JSON loader, and validates them with its `parse_canonical_candidate`. A published run is therefore exactly what `/repository-quality-score` accepts.
 7. **Rendered reports.** `findings.md` and `snapshot.md` are rendered from the JSON. The four files are replaced one at a time, with `findings.json` last as the completion marker. A failed write restores the previous files. If the process is killed part-way, `findings.json` and `metadata.json` disagree on run identity, and the calculator rejects the set instead of mixing runs.
 8. **Collectors.** An audit may ship `scripts/collect.py`, a deterministic, read-only collector. `begin` runs it and records its results through the same validation.
-9. **One command at a time.** Commands that change a run hold an operating-system lock on the audit's output directory, so parallel commands wait instead of silently losing updates.
+9. **One command at a time.** Commands that change a run hold an operating-system lock on the audit's output directory, or a lock file on filesystems without locks, so parallel commands wait instead of silently losing updates.
 
 Findings keep schema `2.0.0`. The protocol adds optional fields that the contract already allows: `protocolVersion`, `evidenceTier`, `judgement`, `judgementReason`, `decisionId`, `recordedBy`, `summary`, `snapshot`, `scope`, and `hypotheses`. Per-check `severity` and `method` are copied from the catalog when the catalog defines them.
 

@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import uuid
 from datetime import date, datetime, timezone
@@ -60,6 +61,7 @@ MAX_SEARCH_FILES = 50_000
 MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024
 BINARY_SNIFF_BYTES = 8000
 LINE_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
+LOCK_TIMEOUT_SECONDS = 15 * 60
 UNSEARCHED_PREFIXES = (f"{AUDITS_DIRECTORY}/", ".worktrees/", "graphify-out/")
 UNSEARCHED_DIRECTORY_NAMES = {"node_modules", ".git"}
 
@@ -252,12 +254,19 @@ def tree_fingerprint(root: Path) -> str:
         digest.update((diff or "").encode("utf-8"))
         for line in status.splitlines():
             if line.startswith("?? "):
-                try:
-                    details = (root / line[3:]).stat()
-                except OSError:
-                    continue
-                digest.update(f"\n{line[3:]}:{details.st_size}:{details.st_mtime_ns}".encode("utf-8"))
+                digest.update(f"\n{line[3:]}:{content_digest(root / line[3:])}".encode("utf-8"))
     return digest.hexdigest()
+
+
+def content_digest(path: Path) -> str:
+    """Hash an untracked file's content, so an edit that keeps its size and time is still seen."""
+    try:
+        if path.stat().st_size > MAX_SEARCH_FILE_BYTES:
+            details = path.stat()
+            return f"large:{details.st_size}:{details.st_mtime_ns}"
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "unreadable"
 
 
 def require_audit_name(audit: str) -> str:
@@ -297,16 +306,60 @@ def exclusive_lock(directory: Path) -> Iterator[None]:
         return
     descriptor = os.open(str(directory), os.O_RDONLY)
     try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-        except OSError as error:
-            print(
-                f"Warning: cannot lock {directory.name} ({error.strerror}); run protocol commands one at a time.",
-                file=sys.stderr,
-            )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except OSError:
+        # Some network filesystems do not support flock. A lock file still
+        # serialises writers there.
+        os.close(descriptor)
+        with lock_file(directory):
+            yield
+        return
+    try:
         yield
     finally:
         os.close(descriptor)
+
+
+@contextlib.contextmanager
+def lock_file(directory: Path) -> Iterator[None]:
+    """An exclusive lock file holding its owner's process ID, for filesystems without flock."""
+    path = directory / ".lock"
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            descriptor = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
+        except FileExistsError:
+            if lock_owner_has_exited(path):
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
+                continue
+            if time.monotonic() > deadline:
+                raise ProtocolError(
+                    f"another protocol command still holds {directory.name}/.lock; if none is running, delete that file"
+                )
+            time.sleep(0.2)
+    try:
+        os.write(descriptor, str(os.getpid()).encode("ascii"))
+        os.close(descriptor)
+        yield
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+
+
+def lock_owner_has_exited(path: Path) -> bool:
+    try:
+        owner = int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return False  # The owner may still be writing its process ID.
+    try:
+        os.kill(owner, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
 
 
 @contextlib.contextmanager
