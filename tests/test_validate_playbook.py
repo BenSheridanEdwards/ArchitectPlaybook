@@ -350,6 +350,46 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_markdown_links(root, findings)
             self.assertEqual(findings, [])
 
+    def test_validation_skips_git_ignored_worktree_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitignore").write_text(".claude/worktrees/\n.worktrees/\n", encoding="utf-8")
+            (root / "README.md").write_text("Clean.\n", encoding="utf-8")
+            for ignored in (".claude/worktrees/agent", ".worktrees/audit"):
+                directory = root / ignored
+                directory.mkdir(parents=True)
+                (directory / "README.md").write_text("[Missing](missing.md) \n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            validate_playbook.validate_trailing_whitespace(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_validation_skips_nested_git_checkouts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "README.md").write_text("Clean.\n", encoding="utf-8")
+            nested = root / "nested-checkout"
+            subprocess.run(["git", "init", "-q", str(nested)], check=True)
+            (nested / "README.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_validation_includes_untracked_files_that_are_not_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "draft.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+            (root / "notes.json").write_text("{} \n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            validate_playbook.validate_trailing_whitespace(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("internal link target does not exist" in message for message in messages))
+            self.assertTrue(any("trailing whitespace" in message for message in messages))
+
     def test_readme_skill_links_use_posix_paths_on_every_platform(self) -> None:
         links = validate_playbook.readme_skill_links("[Example](example-audit/SKILL.md)\n")
         self.assertEqual(links, {"example-audit/SKILL.md"})

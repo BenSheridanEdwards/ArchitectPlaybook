@@ -40,3 +40,7 @@ coverage/
 .gitnexus/
 !.claude/skills/gitnexus/
 !.claude/skills/gitnexus/**
+
+# Git worktrees created by agents and by the --worktree audit flag
+.worktrees/
+.claude/worktrees/
