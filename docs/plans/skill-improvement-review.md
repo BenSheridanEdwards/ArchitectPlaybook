@@ -104,7 +104,7 @@ These are mechanical fixes, but each one changes scores or behaviour:
   - The installers contradict each other on deletion.
   - The installers reference stubs that no longer exist.
   - `CONTRIBUTING.md` requires a README "Why each skill exists" section that does not exist.
-- **The required `trigger:` frontmatter key does nothing.** Claude Code ignores unknown keys silently, and uploading the skills to claude.ai for cloud sessions fails with "Unexpected key(s) in SKILL.md frontmatter". The `name` already equals the folder. Drop it, or move it under `metadata:`. MergeFlow reads `trigger` but falls back to `/<folder>`.
+- **The required `trigger:` frontmatter key does nothing.** Claude Code ignores unknown keys silently, and uploading the skills to claude.ai for cloud sessions fails with "Unexpected key(s) in SKILL.md frontmatter". The `name` already equals the folder. Drop it, or move it under `metadata:`. Either way, change the frontmatter rule in `CLAUDE.md`, `.agents/CONVENTIONS.md`, `CONTRIBUTING.md`, and the validator's `validate_skills` in the same pull request, because all four currently require or document a top-level `trigger`. MergeFlow reads `trigger` but falls back to `/<folder>`.
 
 ### 3. `/pre-audit-setup` makes an official score impossible
 
@@ -707,7 +707,7 @@ Each item is one pull request unless noted.
 4. Give `/accessibility-audit` a Layer 0 and a fourth layer (split Component patterns into "semantics and naming" and "keyboard, focus, and motion"), plus the standard sections.
 5. Keep `/pre-audit-setup` artefacts out of the tracked tree: `.claude/settings.local.json` and `.git/info/exclude`.
 6. Reconcile the installers' deletion behaviour, remove stub references, and resolve the playbook root with `${CLAUDE_SKILL_DIR}`.
-7. Drop `trigger:` from frontmatter, or move it to `metadata:`; MergeFlow already falls back to `/<folder>`. Remove the README "Why each skill exists" requirement from `CONTRIBUTING.md`, or write the section.
+7. Drop `trigger:` from frontmatter, or move it to `metadata:`, and update the frontmatter rule in `CLAUDE.md`, `.agents/CONVENTIONS.md`, `CONTRIBUTING.md`, the validator, and its tests to match. MergeFlow already falls back to `/<folder>`. Remove the README "Why each skill exists" requirement from `CONTRIBUTING.md`, or write the section.
 8. Make the validator scan tracked files only (`git ls-files`).
 9. Keep one copy of the GitNexus block.
 10. Move `--worktree` to `.worktrees/<audit>` to match your workspace convention, or document why sibling directories are needed.
