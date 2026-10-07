@@ -1,4 +1,8 @@
 #!/bin/sh
 set -eu
+# Git exports repository variables such as GIT_INDEX_FILE to hooks. The unit
+# tests create their own temporary repositories, and inherited variables would
+# point those repositories at this checkout's index, so clear them first.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 scripts/validate-playbook.py

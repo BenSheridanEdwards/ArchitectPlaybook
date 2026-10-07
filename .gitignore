@@ -40,3 +40,7 @@ coverage/
 .gitnexus/
 !.claude/skills/gitnexus/
 !.claude/skills/gitnexus/**
+
+# Git worktrees created inside this repository by agents and maintainers
+.worktrees/
+.claude/worktrees/
