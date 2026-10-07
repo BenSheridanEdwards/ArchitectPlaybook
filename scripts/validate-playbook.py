@@ -448,7 +448,7 @@ def validate_related_checks(root: Path, findings: list[Finding]) -> None:
     for path, data in catalogs.items():
         audit_name = path.parent.name
         for index, check in enumerate(data["checks"], start=1):
-            if not isinstance(check, dict) or check.get("relatedChecks") is None:
+            if not isinstance(check, dict) or "relatedChecks" not in check:
                 continue
             check_id = check.get("checkId")
             label = check_id if isinstance(check_id, str) else f"check {index}"

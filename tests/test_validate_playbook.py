@@ -258,11 +258,13 @@ class ValidatePlaybookTests(unittest.TestCase):
 
     def test_related_checks_must_be_a_list_in_every_catalog_schema(self) -> None:
         for schema in ("1.1.0", "1.2.0"):
-            for value in (5, True, "other-audit.real-check", {"checkId": "other-audit.real-check"}):
+            for value in (None, 5, True, "other-audit.real-check", {"checkId": "other-audit.real-check"}):
                 with self.subTest(schema=schema, value=value), tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
-                    catalog = json.loads(self.severity_catalog(relatedChecks=value))
+                    catalog = json.loads(self.severity_catalog())
                     catalog["schemaVersion"] = schema
+                    # Set the value directly: the helper drops None, and an explicit null must fail.
+                    catalog["checks"][0]["relatedChecks"] = value
                     self.write_severity_audit(
                         root,
                         "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
