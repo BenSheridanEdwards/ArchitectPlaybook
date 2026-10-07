@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import hashlib
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,20 @@ CALCULATOR = (
     / "scripts"
     / "calculate_repository_quality_score.py"
 )
+
+# Git exports repository variables such as GIT_INDEX_FILE to hooks and
+# aliases. These tests create their own temporary repositories, so an
+# inherited variable must never point them at the repository under test.
+for _variable in (
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+):
+    os.environ.pop(_variable, None)
 
 spec = importlib.util.spec_from_file_location("rqs_calculator", CALCULATOR)
 assert spec and spec.loader

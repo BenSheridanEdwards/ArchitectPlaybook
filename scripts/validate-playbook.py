@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import posixpath
 import re
 import subprocess
@@ -658,6 +659,16 @@ def git_listed_files(root: Path) -> list[Path] | None:
     their files are never scanned as if they belonged to this checkout.
     """
     try:
+        toplevel = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if toplevel.returncode != 0 or Path(os.fsdecode(toplevel.stdout.strip())).resolve() != root.resolve():
+            # Outside Git, or a copy nested inside another repository that may
+            # ignore it: walk the files instead of trusting that repository.
+            return None
         result = subprocess.run(
             ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             stdout=subprocess.PIPE,
@@ -668,7 +679,7 @@ def git_listed_files(root: Path) -> list[Path] | None:
         return None
     if result.returncode != 0:
         return None
-    entries = [entry for entry in result.stdout.decode("utf-8").split("\0") if entry]
+    entries = [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
     return [root / entry for entry in entries]
 
 

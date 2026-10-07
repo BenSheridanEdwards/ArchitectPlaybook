@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import stat
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,9 @@ def install(force: bool) -> int:
         destination = git_hooks / source.name
         if destination.exists() and destination.read_text(encoding="utf-8", errors="ignore") != source.read_text(encoding="utf-8"):
             backup = destination.with_suffix(destination.suffix + ".architect-playbook-backup")
+            if backup.exists():
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                backup = destination.with_suffix(f"{destination.suffix}.architect-playbook-backup-{stamp}")
             if not force:
                 print(f"refusing to overwrite existing hook: {destination}")
                 print(f"rerun with --force to back it up to {backup} and install the playbook hook")
