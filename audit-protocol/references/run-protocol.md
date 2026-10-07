@@ -75,7 +75,8 @@ their own branch.
    it can decide deterministically.
    - `--enrichment with-run`: records the enrichment flag `--with-run`. Name the
      flag without its dashes, or write `--enrichment=--with-run`.
-   - `--threshold key=value`: records a threshold override.
+   - `--threshold key=value`: records a threshold override. The collector
+     receives it, so an option such as `months=12` changes what it collects.
    - `--filter=<argument>`: records any other filter the user passed.
    - `--since <ref>`: records the files changed since that reference, and
      marks the run filtered. Evaluate the checks those files can affect. Then
@@ -108,7 +109,7 @@ their own branch.
 4. **Finish.** `python3 "$PROTOCOL" finish <audit-name>` refuses to publish
    while any check is pending, or if the commit or working tree changed during
    the run. It then:
-   - re-verifies every citation;
+   - re-verifies every evidence entry;
    - validates the run with the Repository Quality Score calculator's own
      contract code;
    - renders `findings.md` and `snapshot.md` from the JSON;
