@@ -17,7 +17,7 @@ import subprocess
 import sys
 import urllib.parse
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -38,6 +38,7 @@ VALID_SEVERITIES = ("critical", "high", "medium", "low")
 VALID_METHODS = ("tool", "model")
 SEVERITY_CHECK_REQUIRED_FIELDS = ("severity", "method", "rationale", "lastVerified")
 ISO_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+TABLE_SEPARATOR_PATTERN = re.compile(r":?-+:?")
 SEMANTIC_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 SCORE_SKILL_NAME = "repository-quality-score"
 AUDIT_FINDINGS_CONTRACT_HEADING = "## Repository Quality Score findings contract"
@@ -220,24 +221,45 @@ def canonical_check_title(value: str) -> str:
     return " ".join(token for token in re.findall(r"[a-z0-9]+", value.casefold()) if token != "the")
 
 
-def canonical_check_row(body: str, title: str) -> str | None:
-    """Return the unique canonical Markdown table row for a catalog title."""
-    expected = canonical_check_title(title)
-    rows: list[str] = []
+def markdown_table_rows(body: str) -> list[tuple[list[str], list[str], str]]:
+    """Return (header cells, row cells, line) for every Markdown table body row."""
+    rows: list[tuple[list[str], list[str], str]] = []
+    header: list[str] | None = None
     for line in body.splitlines():
         if not line.startswith("|"):
+            header = None
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if not cells:
-            continue
-        canonical_title = canonical_check_title(cells[0])
-        if (
-            canonical_title == expected
-            or canonical_title.startswith(f"{expected} ")
-            or expected.startswith(f"{canonical_title} ")
-        ):
-            rows.append(line)
-    return rows[0] if len(rows) == 1 else None
+        if header is None:
+            header = cells
+        elif not all(TABLE_SEPARATOR_PATTERN.fullmatch(cell) for cell in cells):
+            rows.append((header, cells, line))
+    return rows
+
+
+def canonical_check_rows(body: str, title: str) -> list[tuple[list[str], list[str], str]]:
+    """Return the table rows whose first cell names a catalog title.
+
+    An exact canonical match wins. Word-prefix matches tolerate a qualifier
+    added or dropped on one side, but count only when no row matches exactly,
+    so a title that is a word-prefix of another title still resolves.
+    """
+    expected = canonical_check_title(title)
+    exact: list[tuple[list[str], list[str], str]] = []
+    prefixed: list[tuple[list[str], list[str], str]] = []
+    for row in markdown_table_rows(body):
+        canonical_title = canonical_check_title(row[1][0])
+        if canonical_title == expected:
+            exact.append(row)
+        elif canonical_title.startswith(f"{expected} ") or expected.startswith(f"{canonical_title} "):
+            prefixed.append(row)
+    return exact or prefixed
+
+
+def canonical_check_row(body: str, title: str) -> str | None:
+    """Return the unique canonical Markdown table row for a catalog title."""
+    rows = canonical_check_rows(body, title)
+    return rows[0][2] if len(rows) == 1 else None
 
 
 def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
@@ -363,32 +385,51 @@ def validate_severity_fields(
     if isinstance(method, str) and method not in VALID_METHODS:
         findings.append(Finding("error", checks_path, f"{label} method must be tool or model"))
     last_verified = check.get("lastVerified")
-    if isinstance(last_verified, str) and not is_calendar_date(last_verified):
-        findings.append(Finding("error", checks_path, f"{label} lastVerified must be a date such as 2026-10-07"))
-    related = check.get("relatedChecks")
-    if related is not None and (
-        not isinstance(related, list) or not all(isinstance(item, str) and item for item in related)
-    ):
-        findings.append(Finding("error", checks_path, f"{label} relatedChecks must be a list of checkId strings"))
+    if isinstance(last_verified, str):
+        if not is_calendar_date(last_verified):
+            findings.append(Finding("error", checks_path, f"{label} lastVerified must be a date such as 2026-10-07"))
+        elif date.fromisoformat(last_verified) > datetime.now(timezone.utc).date():
+            # A future date would hide the check from staleness review.
+            findings.append(Finding("error", checks_path, f"{label} lastVerified cannot be later than today's UTC date"))
     title = check.get("title")
     if isinstance(title, str) and isinstance(severity, str) and isinstance(method, str):
-        row = canonical_check_row(body, title)
-        if row is None:
-            findings.append(Finding("error", checks_path, f"{label} has no unique canonical row in SKILL.md"))
+        rows = canonical_check_rows(body, title)
+        if not rows:
+            findings.append(Finding("error", checks_path, f"{label} has no SKILL.md table row whose first cell matches its title"))
+        elif len(rows) > 1:
+            findings.append(
+                Finding("error", checks_path, f"{label} title matches {len(rows)} SKILL.md table rows; exactly one must match")
+            )
         else:
-            cells = [cell.strip().strip("`*").casefold() for cell in row.strip().strip("|").split("|")]
-            if severity not in cells or method not in cells:
+            header, cells, _ = rows[0]
+            columns = [cell.strip("`*").casefold() for cell in header]
+            values = [cell.strip("`*").casefold() for cell in cells]
+            shown = True
+            for column, value in (("severity", severity), ("method", method)):
+                # A Severity or Method column must hold its value; without one,
+                # the value must still be a cell of its own.
+                if column in columns:
+                    index = columns.index(column)
+                    shown = shown and index < len(values) and values[index] == value
+                else:
+                    shown = shown and value in values
+            if not shown:
                 findings.append(
                     Finding(
                         "error",
                         checks_path,
-                        f"{label} canonical SKILL row must show severity {severity!r} and method {method!r} as cells",
+                        f"{label} canonical SKILL row must show severity {severity!r} and method {method!r} as cells, "
+                        "in the Severity and Method columns when the table has them",
                     )
                 )
 
 
 def validate_related_checks(root: Path, findings: list[Finding]) -> None:
-    """relatedChecks must name checks that exist in some audit catalog."""
+    """relatedChecks must list distinct, existing checks in other audits.
+
+    This runs for every catalog schema, so a malformed value in an unrated
+    catalog is reported as clearly as one in a rated catalog.
+    """
     catalogs: dict[Path, dict[str, object]] = {}
     known: set[str] = set()
     for directory in audit_directories(root):
@@ -405,14 +446,23 @@ def validate_related_checks(root: Path, findings: list[Finding]) -> None:
                 if isinstance(check, dict) and isinstance(check.get("checkId"), str)
             )
     for path, data in catalogs.items():
-        for check in data["checks"]:
-            if not isinstance(check, dict):
+        audit_name = path.parent.name
+        for index, check in enumerate(data["checks"], start=1):
+            if not isinstance(check, dict) or check.get("relatedChecks") is None:
                 continue
-            for related in check.get("relatedChecks") or []:
-                if isinstance(related, str) and related not in known:
-                    findings.append(
-                        Finding("error", path, f"{check.get('checkId')} relatedChecks names an unknown check: {related}")
-                    )
+            check_id = check.get("checkId")
+            label = check_id if isinstance(check_id, str) else f"check {index}"
+            related = check["relatedChecks"]
+            if not isinstance(related, list) or not all(isinstance(item, str) and item for item in related):
+                findings.append(Finding("error", path, f"{label} relatedChecks must be a list of checkId strings"))
+                continue
+            for item in dict.fromkeys(related):
+                if related.count(item) > 1:
+                    findings.append(Finding("error", path, f"{label} relatedChecks lists {item} more than once"))
+                if item.startswith(f"{audit_name}."):
+                    findings.append(Finding("error", path, f"{label} relatedChecks must name checks in other audits: {item}"))
+                elif item not in known:
+                    findings.append(Finding("error", path, f"{label} relatedChecks names an unknown check: {item}"))
 
 
 def validate_audit_findings_contract(root: Path, findings: list[Finding]) -> None:
@@ -606,7 +656,8 @@ def validate_score_policy(root: Path, findings: list[Finding]) -> None:
                 value = decimal_value(raw_value)
                 if value is None or value <= 0:
                     findings.append(Finding("error", policy_path, f"severityWeights.{name} must be a positive decimal string"))
-    elif severity_weights is not None:
+    elif "severityWeights" in policy:
+        # Presence alone is the error, as in the calculator, so null is rejected too.
         findings.append(Finding("error", policy_path, f"severityWeights requires schemaVersion {SEVERITY_SCORE_POLICY_SCHEMA_VERSION}"))
     policy_version = policy.get("policyVersion")
     if not isinstance(policy_version, str) or not SEMANTIC_VERSION_PATTERN.fullmatch(policy_version):

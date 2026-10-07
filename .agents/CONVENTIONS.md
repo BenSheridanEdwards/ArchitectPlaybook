@@ -66,9 +66,12 @@ human-readable body. The validator requires:
 - In schema `1.2.0` (Architecture Decision Record 0004), every check also
   carries `severity` (`critical`, `high`, `medium`, or `low`), `method`
   (`tool` when a script can decide it, `model` when it needs judgement),
-  a one-sentence `rationale`, and a `lastVerified` date. The check's row in
-  `SKILL.md` shows the severity and method as cells. Optional `relatedChecks`
-  must name checks that exist in some catalog.
+  a one-sentence `rationale`, and a `lastVerified` date no later than the
+  current UTC date. Exactly one `SKILL.md` table row matches the check title,
+  preferring an exact match, and it shows the severity and method as cells, in
+  the Severity and Method columns when the table has them.
+- In any schema, optional `relatedChecks` is a list of distinct identifiers of
+  existing checks in other audits.
 
 Keep `checks.json` aligned with `SKILL.md` whenever a check is added, removed,
 renamed, moved between layers, reweighted, or materially redefined. Increase

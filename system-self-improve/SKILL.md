@@ -180,12 +180,14 @@ For each blocker check, walk the logic. When a blocker triggers, stop and write 
 
 Find the originating skill's `SKILL.md` in the playbook. Locate the specific section to modify by structural search:
 
-- For "missing check" — find the relevant layer table; the new check goes at the end (additive, not insertive). Add the same full `checkId` to `checks.json` and increase its `catalogVersion`.
+- For "missing check" — find the relevant layer table; the new check goes at the end (additive, not insertive). Add the same full `checkId` to `checks.json` and increase its `catalogVersion`. In a schema `1.2.0` catalog, also give the check a `severity` rated with the rubric in Architecture Decision Record 0004, a `method` (`tool` or `model`), a one-sentence `rationale`, today's UTC date as `lastVerified`, and `relatedChecks` naming the owning check when another audit owns the concern. The new `SKILL.md` row shows the severity and method as cells.
 - For "weak check" — find the existing check row; record its current text for the reversibility log.
 - For "wrong threshold" — find the threshold in the Usage block, the layer table, the catalog metadata, and the findings execution contract. Increase `catalogVersion` when the check's meaning changes.
 - For "stale detection logic" — find the relevant detection-logic step.
 - For "cross-skill drift" — find the boundary table entries in both skills.
 - For "boundary error" — find both the source and destination skills.
+
+When an edit re-checks a schema `1.2.0` check against current tools, set its `lastVerified` to today's UTC date. A changed severity or method changes the `SKILL.md` row and `checks.json` together and increases `catalogVersion`.
 
 Build the ripple-effect map: every adjacent file that needs a coordinated change.
 
