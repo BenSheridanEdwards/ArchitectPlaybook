@@ -145,7 +145,7 @@ Audits never write these files by hand. Each audit publishes through the shared 
 - verifies cited files, lines, quotes, and search counts against the repository;
 - validates the run with the score calculator's own contract code;
 - renders the Markdown from the JSON;
-- publishes all four files together, or nothing.
+- publishes all four files with `findings.json` last as the completion marker, restoring the previous files if a write fails.
 
 See [Architecture Decision Record 0003](docs/decisions/0003-staged-audit-runs-with-verified-evidence.md).
 

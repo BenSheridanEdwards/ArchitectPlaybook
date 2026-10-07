@@ -34,7 +34,7 @@ python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin <audi
 | `begin <audit> [--since <ref>] [--enrichment <flag>] [--threshold key=value] [--restart]` | Stage a run with every catalog check pending. If the audit has `scripts/collect.py`, run it. |
 | `record <audit> <check> --status <status> --evidence <entry> ...` | Record one evaluated check. Evidence is verified when you record it, and again before publication. |
 | `not-applicable <audit> <check> --reason <text>` | Record a check that does not apply to this repository. |
-| `not-evaluated <audit> <check> --reason <text>` | Record an applicable check you could not evaluate. |
+| `not-evaluated <audit> <check> --reason <text>` | Record an applicable check you could not evaluate. Use `--remaining` instead of a check to record every still-pending check, for example the checks outside a `--since` scope. |
 | `audit-not-applicable <audit> --reason <text>` | Record that the whole audit does not apply. |
 | `snapshot <audit> --set key=value [--narrative <text>]` | Record Layer 0 facts. |
 | `hypothesis <audit> --check <check> --note <text>` | Record an unverified suspicion for the report appendix. |
@@ -56,7 +56,7 @@ To audit a repository other than the current one, pass `--repository <path>` bef
    - secret-looking text is rejected.
 4. **Validates the whole run with the score calculator's own contract code,** so anything published is exactly what `/repository-quality-score` accepts.
 5. **Renders `findings.md` and `snapshot.md` from the JSON,** so the human and machine reports cannot drift.
-6. **Publishes all four files together,** or nothing.
+6. **Publishes all four files with `findings.json` last** as the completion marker. A failed write restores the previous files, and an interrupted run leaves a set whose identities disagree, which consumers reject.
 7. **Remembers decisions.** A user's accepted risks in `.architect-audits/decisions.json` stay visible in the report but stop appearing as things to act on.
 
 ## Implementation steps

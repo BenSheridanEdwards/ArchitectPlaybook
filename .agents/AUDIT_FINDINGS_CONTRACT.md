@@ -123,7 +123,8 @@ never means not applicable.
 Audits publish findings only through `audit-protocol/scripts/audit_run.py`
 (Architecture Decision Record 0003). The script stages the run, verifies
 evidence, validates the run with the score calculator, renders the Markdown
-reports, and publishes all four files together. It adds these optional fields,
+reports, and publishes the four files with `findings.json` written last as the
+completion marker. It adds these optional fields,
 which consumers may rely on when `protocolVersion` is present:
 
 | Field | Where | Meaning |

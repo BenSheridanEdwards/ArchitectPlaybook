@@ -52,8 +52,10 @@ findings will be fixed on their own branch.
    it can decide deterministically.
    - `--enrichment <flag>`: records an enrichment flag such as `--with-run`.
    - `--threshold key=value`: records a threshold override.
-   - `--since <ref>`: limits the run to files changed since that reference, and
-     records a filter.
+   - `--since <ref>`: records the files changed since that reference, and
+     marks the run filtered. Evaluate the checks those files can affect. Then
+     record the rest in one step: `not-evaluated <audit-name> --remaining
+     --reason "outside the --since scope"`.
 
    Filtered and customised runs are always provisional for the Repository
    Quality Score.
@@ -79,7 +81,10 @@ findings will be fixed on their own branch.
    - validates the run with the Repository Quality Score calculator's own
      contract code;
    - renders `findings.md` and `snapshot.md` from the JSON;
-   - publishes all four files.
+   - publishes all four files, writing `findings.json` last as the completion
+     marker. If a write fails, the previous files are restored. If the process
+     is killed part-way, `findings.json` and `metadata.json` disagree on the
+     run identity, and consumers reject the set rather than mixing two runs.
 
    It prints an Act on summary for the chat.
 

@@ -770,8 +770,18 @@ def command_not_applicable(arguments: argparse.Namespace) -> int:
 def command_not_evaluated(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
     run = load_run(root, arguments.audit)
+    reason = require_reason(arguments.reason)
+    if arguments.remaining == bool(arguments.check):
+        raise ProtocolError("name one check, or pass --remaining to record every still-pending check")
+    if arguments.remaining:
+        pending = [check for check in run["checks"] if check["evaluationReason"] == PENDING_REASON]
+        for check in pending:
+            mark_not_evaluated(check, reason, "model")
+        save_run(root, arguments.audit, run)
+        print(f"Recorded {len(pending)} pending checks as not evaluated: {reason}")
+        return 0
     check = find_check(run, arguments.check)
-    mark_not_evaluated(check, require_reason(arguments.reason), "model")
+    mark_not_evaluated(check, reason, "model")
     save_run(root, arguments.audit, run)
     print(f"Recorded {check['checkId']} as not evaluated.")
     return 0
@@ -1068,13 +1078,15 @@ def command_finish(arguments: argparse.Namespace) -> int:
     snapshot_markdown = render_snapshot(run)
     findings_markdown = render_findings(run, findings, snapshot_markdown)
     output = root / AUDITS_DIRECTORY / audit
-    for name, content in (
-        ("snapshot.md", f"# {audit} snapshot\n\n" + snapshot_markdown),
-        ("findings.md", findings_markdown),
-        ("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False) + "\n"),
-        ("findings.json", json.dumps(findings, indent=2, ensure_ascii=False) + "\n"),
-    ):
-        write_text_atomic(output / name, content)
+    publish(
+        output,
+        (
+            ("snapshot.md", f"# {audit} snapshot\n\nRun `{findings['runIdentifier']}`.\n\n" + snapshot_markdown),
+            ("findings.md", findings_markdown),
+            ("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False) + "\n"),
+            ("findings.json", json.dumps(findings, indent=2, ensure_ascii=False) + "\n"),
+        ),
+    )
     shutil.rmtree(output / STAGING_DIRECTORY, ignore_errors=True)
 
     print_chat_summary(run, findings)
@@ -1086,6 +1098,35 @@ def command_finish(arguments: argparse.Namespace) -> int:
     for decision in due:
         print(f"Decision {decision.get('id')} for {decision.get('checkId')} is due for review ({decision['reviewAfter']}).")
     return 0
+
+
+def publish(output: Path, files: tuple[tuple[str, str], ...]) -> None:
+    """Replace the published files, writing findings.json last as the completion marker.
+
+    Each file is replaced atomically. If any write fails, every file already
+    replaced is restored to its previous content, so a failed publication
+    leaves the previous run intact. If the process is killed part-way, the
+    set can mix two runs; consumers detect that because findings.json and
+    metadata.json must carry the same run identity, and findings.json is
+    written last.
+    """
+    previous: dict[str, str | None] = {}
+    for name, _ in files:
+        path = output / name
+        previous[name] = path.read_text(encoding="utf-8") if path.is_file() else None
+    written: list[str] = []
+    try:
+        for name, content in files:
+            write_text_atomic(output / name, content)
+            written.append(name)
+    except OSError as error:
+        for name in reversed(written):
+            old = previous[name]
+            if old is None:
+                (output / name).unlink(missing_ok=True)
+            else:
+                write_text_atomic(output / name, old)
+        raise ProtocolError(f"publication failed and the previous run was restored: {error}") from error
 
 
 def print_chat_summary(run: dict[str, Any], findings: dict[str, Any]) -> None:
@@ -1206,7 +1247,12 @@ def parser() -> argparse.ArgumentParser:
 
     not_evaluated = commands.add_parser("not-evaluated", help="record an applicable check you could not evaluate")
     not_evaluated.add_argument("audit")
-    not_evaluated.add_argument("check")
+    not_evaluated.add_argument("check", nargs="?")
+    not_evaluated.add_argument(
+        "--remaining",
+        action="store_true",
+        help="record every still-pending check, for example the checks outside a --since scope",
+    )
     not_evaluated.add_argument("--reason", required=True)
     not_evaluated.set_defaults(handler=command_not_evaluated)
 

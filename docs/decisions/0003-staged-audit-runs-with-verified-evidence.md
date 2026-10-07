@@ -37,7 +37,7 @@ Audits publish only through `audit-protocol/scripts/audit_run.py`, a standard-li
 4. **Judgement as data.** Every non-present finding carries a judgement: `act-on`, `consider`, `noted`, or `dismissed`. The chat's top recommendations come only from `act-on`. Dismissals carry reasons, and the report lists them.
 5. **Decision memory.** `.architect-audits/decisions.json` records findings the user has accepted, scoped by check and path. Covered findings keep their honest status, so the score still reflects them, but their judgement becomes `noted`.
 6. **One validator.** `finish` validates the run with the calculator's own `parse_canonical_candidate`, so a published run is exactly what `/repository-quality-score` accepts.
-7. **Rendered reports.** `findings.md` and `snapshot.md` are rendered from the JSON. All four files are published together, or not at all.
+7. **Rendered reports.** `findings.md` and `snapshot.md` are rendered from the JSON. The four files are replaced one at a time, with `findings.json` last as the completion marker. A failed write restores the previous files. If the process is killed part-way, `findings.json` and `metadata.json` disagree on run identity, and the calculator rejects the set instead of mixing runs.
 8. **Collectors.** An audit may ship `scripts/collect.py`, a deterministic, read-only collector. `begin` runs it and records its results through the same validation.
 
 Findings keep schema `2.0.0`. The protocol adds optional fields that the contract already allows: `protocolVersion`, `evidenceTier`, `judgement`, `judgementReason`, `decisionId`, `recordedBy`, `summary`, `scope`, and `hypotheses`. Per-check `severity` and `method` are copied from the catalog when the catalog defines them.

@@ -260,6 +260,50 @@ class AuditRunTests(unittest.TestCase):
         self.assertTrue(run["execution"]["filtersApplied"])
         self.assertEqual(run["execution"]["filterArguments"], [f"--since={first}"])
 
+    def test_not_evaluated_remaining_records_every_pending_check(self) -> None:
+        self.run_command("begin", AUDIT)
+        self.run_command(
+            "record", AUDIT, PRESENT_CHECK, "--status", "present", "--tier", "supported",
+            "--evidence", "command: `npx madge --circular src` → no cycles",
+        )
+        code, output = self.run_command("not-evaluated", AUDIT, "--remaining", "--reason", "outside the --since scope")
+        self.assertEqual(code, 0, output)
+        checks = self.staged()["checks"]
+        self.assertFalse(any(check["evaluationReason"] == "pending" for check in checks))
+        recorded = next(check for check in checks if check["checkId"] == PRESENT_CHECK)
+        self.assertEqual(recorded["status"], "present")
+        code, output = self.run_command("not-evaluated", AUDIT, PRESENT_CHECK, "--remaining", "--reason", "x")
+        self.assertEqual(code, 1)
+        self.assertIn("--remaining", output)
+
+    def test_failed_publication_restores_the_previous_run(self) -> None:
+        self.run_command("begin", AUDIT)
+        self.run_command("audit-not-applicable", AUDIT, "--reason", "First run.")
+        code, output = self.run_command("finish", AUDIT)
+        self.assertEqual(code, 0, output)
+        output_directory = self.root / ".architect-audits" / AUDIT
+        before = {name: (output_directory / name).read_text(encoding="utf-8") for name in ("findings.json", "metadata.json", "findings.md")}
+        self.run_command("begin", AUDIT)
+        self.run_command("audit-not-applicable", AUDIT, "--reason", "Second run.")
+        original = audit_run.write_text_atomic
+        calls = {"count": 0}
+
+        def failing_write(path: Path, text: str) -> None:
+            calls["count"] += 1
+            if path.name == "findings.json" and calls["count"] < 10:
+                raise OSError("disk full")
+            original(path, text)
+
+        audit_run.write_text_atomic = failing_write
+        try:
+            code, output = self.run_command("finish", AUDIT)
+        finally:
+            audit_run.write_text_atomic = original
+        self.assertEqual(code, 1)
+        self.assertIn("previous run was restored", output)
+        after = {name: (output_directory / name).read_text(encoding="utf-8") for name in before}
+        self.assertEqual(after, before)
+
     def test_hotspots_ranks_frequently_changed_files(self) -> None:
         for number in range(3):
             (self.root / "src" / "a.ts").write_text(f"export const a = {number};\n", encoding="utf-8")
