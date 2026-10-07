@@ -18,7 +18,7 @@ Run these from the repository root. They use only Python 3's standard library.
 ```bash
 python3 scripts/validate-playbook.py              # frontmatter, sections, checks.json, README index
 python3 -m unittest discover -s tests -p 'test_*.py'   # validator unit tests
-python3 scripts/install-git-hooks.py              # once per clone: local commit/push gates
+python3 scripts/install-git-hooks.py              # once per clone, and with --force after scripts/git-hooks/ changes
 ```
 
 The validator enforces the contracts that must hold at every commit: frontmatter

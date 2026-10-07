@@ -308,7 +308,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. The short version:
 
 - **Add a new skill:** create a folder named after the slash command (full words, no abbreviations), write a `SKILL.md` following the canonical body structure, add the table row and the per-skill summary in the same commit. Audits also get the worktree Pro Tip block.
 - **Improve an existing skill:** prefer the self-improvement loop. Run the audit, fix the findings, review the fix in a worktree, then run `/system-self-improve` so the patch to the audit body is grounded in a real gap rather than speculation.
-- **Run the repository gates:** `python3 scripts/validate-playbook.py` before every pull request. For local commit and push hooks, run `python3 scripts/install-git-hooks.py` once per clone.
+- **Run the repository gates:** `python3 scripts/validate-playbook.py` before every pull request. For local commit and push hooks, run `python3 scripts/install-git-hooks.py` once per clone, and again with `--force` whenever the hook sources in `scripts/git-hooks/` change (installed hooks are copies).
 
 The architectural intent behind the playbook's conventions lives in [ARCHITECTURE.md](ARCHITECTURE.md). Foundational decisions are recorded as ADRs in [docs/decisions/](docs/decisions/).
 

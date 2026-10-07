@@ -23,6 +23,10 @@ up first). Until it is run, the hooks do not fire — filesystem presence of the
 templates under `scripts/git-hooks/` is not the same as an installed hook.
 
 - `pre-commit` and `pre-push` both run the unit tests and then the validator.
+  They first clear the repository variables Git exports to hooks, such as
+  `GIT_INDEX_FILE`, because the tests create their own temporary repositories.
+  Re-run `python3 scripts/install-git-hooks.py --force` after the hook sources
+  change; installed hooks are copies.
 - `commit-msg` runs the Conventional Commit check against the subject line.
 
 ## Continuous integration

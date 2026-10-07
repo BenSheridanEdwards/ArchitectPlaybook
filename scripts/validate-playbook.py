@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import posixpath
 import re
+import subprocess
 import sys
 import urllib.parse
 from dataclasses import dataclass
@@ -681,14 +683,50 @@ def validate_bootstrap_contract(root: Path, findings: list[Finding]) -> None:
             )
 
 
+def git_listed_files(root: Path) -> list[Path] | None:
+    """Return tracked plus untracked-but-not-ignored files, or None outside Git.
+
+    Listing through Git keeps ignored paths out of validation: agent worktrees
+    under `.claude/worktrees/` or `.worktrees/`, local audit output, and other
+    generated files. Nested worktrees appear as single directory entries, so
+    their files are never scanned as if they belonged to this checkout.
+    """
+    try:
+        toplevel = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if toplevel.returncode != 0 or Path(os.fsdecode(toplevel.stdout.strip())).resolve() != root.resolve():
+            # Outside Git, or a copy nested inside another repository that may
+            # ignore it: walk the files instead of trusting that repository.
+            return None
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    entries = [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+    return [root / entry for entry in entries]
+
+
+def repository_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
+    """Return existing repository files with the given suffixes, sorted."""
+    listed = git_listed_files(root)
+    if listed is None:
+        candidates = {path for suffix in suffixes for path in root.rglob(f"*{suffix}")}
+        listed = [path for path in candidates if ".git" not in path.relative_to(root).parts]
+    return sorted(path for path in set(listed) if path.suffix.lower() in suffixes and path.is_file())
+
+
 def iter_markdown_files(root: Path) -> list[Path]:
-    ignored = {".git"}
-    files: list[Path] = []
-    for path in root.rglob("*.md"):
-        if any(part in ignored for part in path.relative_to(root).parts):
-            continue
-        files.append(path)
-    return sorted(files)
+    return repository_files(root, (".md",))
 
 
 def validate_markdown_links(root: Path, findings: list[Finding]) -> None:
@@ -733,9 +771,7 @@ def validate_one_link(root: Path, source: Path, raw_target: str, findings: list[
 
 
 def validate_trailing_whitespace(root: Path, findings: list[Finding]) -> None:
-    for path in iter_markdown_files(root) + sorted(root.rglob("*.json")) + sorted(root.rglob("*.yml")) + sorted(root.rglob("*.yaml")) + sorted(root.rglob("*.py")):
-        if ".git" in path.relative_to(root).parts:
-            continue
+    for path in repository_files(root, (".md", ".json", ".yml", ".yaml", ".py")):
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if line.endswith((" ", "\t")):
                 findings.append(Finding("error", path, f"trailing whitespace on line {line_number}"))
