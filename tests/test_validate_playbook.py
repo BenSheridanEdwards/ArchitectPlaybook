@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,20 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "scripts" / "validate-playbook.py"
+
+# Git exports repository variables such as GIT_INDEX_FILE to hooks and
+# aliases. These tests create their own temporary repositories, so an
+# inherited variable must never point them at the repository under test.
+for _variable in (
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+):
+    os.environ.pop(_variable, None)
 
 spec = importlib.util.spec_from_file_location("validate_playbook", VALIDATOR_PATH)
 assert spec and spec.loader
@@ -349,6 +364,71 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_markdown_links(root, findings)
             self.assertEqual(findings, [])
+
+    def test_validation_skips_git_ignored_worktree_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitignore").write_text(".claude/worktrees/\n.worktrees/\n", encoding="utf-8")
+            (root / "README.md").write_text("Clean.\n", encoding="utf-8")
+            for ignored in (".claude/worktrees/agent", ".worktrees/audit"):
+                directory = root / ignored
+                directory.mkdir(parents=True)
+                (directory / "README.md").write_text("[Missing](missing.md) \n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            validate_playbook.validate_trailing_whitespace(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_validation_skips_nested_git_checkouts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "README.md").write_text("Clean.\n", encoding="utf-8")
+            nested = root / "nested-checkout"
+            subprocess.run(["git", "init", "-q", str(nested)], check=True)
+            (nested / "README.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_validation_covers_tracked_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "tracked.md").write_text("[Missing](missing.md) \n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "tracked.md"], check=True)
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            validate_playbook.validate_trailing_whitespace(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("internal link target does not exist" in message for message in messages))
+            self.assertTrue(any("trailing whitespace" in message for message in messages))
+
+    def test_validation_of_a_copy_inside_another_repository_falls_back_to_walking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            outer = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(outer)], check=True)
+            (outer / ".gitignore").write_text("playbook/\n", encoding="utf-8")
+            root = outer / "playbook"
+            root.mkdir()
+            (root / "README.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            self.assertTrue(any("internal link target does not exist" in finding.message for finding in findings))
+
+    def test_validation_includes_untracked_files_that_are_not_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "draft.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+            (root / "notes.json").write_text("{} \n", encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_markdown_links(root, findings)
+            validate_playbook.validate_trailing_whitespace(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("internal link target does not exist" in message for message in messages))
+            self.assertTrue(any("trailing whitespace" in message for message in messages))
 
     def test_readme_skill_links_use_posix_paths_on_every_platform(self) -> None:
         links = validate_playbook.readme_skill_links("[Example](example-audit/SKILL.md)\n")
