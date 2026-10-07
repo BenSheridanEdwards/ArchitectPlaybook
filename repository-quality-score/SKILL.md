@@ -63,8 +63,8 @@ The policy file is authoritative:
 
 | Check type or status | Contribution |
 | --- | ---: |
-| Standard check | Weight 1.0 |
-| Soft check | Weight 0.5 |
+| Critical, high, medium, or low check (catalog schema `1.2.0`) | Weight 8, 4, 2, or 1 |
+| Standard or soft check (catalog schema `1.1.0`) | Weight 1.0 or 0.5 |
 | `present` | 100 percent of its weight |
 | `partial` | 50 percent of its weight |
 | `missing` | 0 percent |

@@ -24,8 +24,11 @@ from pathlib import Path
 from typing import Any
 
 FINDINGS_SCHEMA_VERSION = "2.0.0"
-SUPPORTED_CATALOG_SCHEMA_VERSION = "1.1.0"
-SUPPORTED_POLICY_SCHEMA_VERSION = "1.0.0"
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = ("1.1.0", "1.2.0")
+SEVERITY_CATALOG_SCHEMA_VERSION = "1.2.0"
+SUPPORTED_POLICY_SCHEMA_VERSIONS = ("1.0.0", "1.1.0")
+SEVERITY_POLICY_SCHEMA_VERSION = "1.1.0"
+VALID_SEVERITIES = ("critical", "high", "medium", "low")
 MAX_JSON_BYTES = 10 * 1024 * 1024
 MAX_JSON_INTEGER_DIGITS = 1_000
 MAX_JSON_NESTING_DEPTH = 100
@@ -59,6 +62,7 @@ class CatalogCheck:
     title: str
     soft: bool
     allowed_statuses: frozenset[str]
+    severity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -383,7 +387,7 @@ def load_policy(
     schema_version = require_string(
         policy.get("schemaVersion"), "score policy schemaVersion"
     )
-    if schema_version != SUPPORTED_POLICY_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_POLICY_SCHEMA_VERSIONS:
         raise ScoreInputError(
             f"unsupported score policy schemaVersion: {schema_version}"
         )
@@ -408,6 +412,22 @@ def load_policy(
     for name, value in weights.items():
         if decimal_value(value, f"checkWeights.{name}") <= 0:
             raise ScoreInputError(f"checkWeights.{name} must be positive")
+
+    if schema_version == SEVERITY_POLICY_SCHEMA_VERSION:
+        severity_weights = require_object(
+            policy.get("severityWeights"), "score policy severityWeights"
+        )
+        if set(severity_weights) != set(VALID_SEVERITIES):
+            raise ScoreInputError(
+                "score policy severityWeights must define critical, high, medium, and low"
+            )
+        for name, value in severity_weights.items():
+            if decimal_value(value, f"severityWeights.{name}") <= 0:
+                raise ScoreInputError(f"severityWeights.{name} must be positive")
+    elif "severityWeights" in policy:
+        raise ScoreInputError(
+            f"severityWeights requires score policy schemaVersion {SEVERITY_POLICY_SCHEMA_VERSION}"
+        )
 
     audits = require_list(policy.get("audits"), "score policy audits")
     seen: set[str] = set()
@@ -443,7 +463,7 @@ def load_catalog(
     path = ensure_within(audit_root / "checks.json", audit_root, f"{audit_name} catalog")
     data = require_object(strict_json_load(path, fingerprints), f"{audit_name} catalog")
     schema_version = require_string(data.get("schemaVersion"), f"{audit_name}.schemaVersion")
-    if schema_version != SUPPORTED_CATALOG_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_CATALOG_SCHEMA_VERSIONS:
         raise ScoreInputError(
             f"{audit_name} uses unsupported check catalog schema {schema_version}"
         )
@@ -474,7 +494,16 @@ def load_catalog(
             or len(allowed) != len(set(allowed))
         ):
             raise ScoreInputError(f"{check_id}.allowedStatuses is invalid")
-        checks.append(CatalogCheck(check_id, layer, title, soft, frozenset(allowed)))
+        severity: str | None = None
+        if schema_version == SEVERITY_CATALOG_SCHEMA_VERSION:
+            severity = check.get("severity")
+            if severity not in VALID_SEVERITIES:
+                raise ScoreInputError(
+                    f"{check_id}.severity must be one of {', '.join(VALID_SEVERITIES)}"
+                )
+        checks.append(
+            CatalogCheck(check_id, layer, title, soft, frozenset(allowed), severity)
+        )
     if not checks:
         raise ScoreInputError(f"{audit_name} catalog contains no checks")
     return AuditCatalog(audit_name, schema_version, catalog_version, path, tuple(checks))
@@ -1113,6 +1142,10 @@ def calculate(
         name: decimal_value(value, f"checkWeights.{name}")
         for name, value in policy["checkWeights"].items()
     }
+    severity_weights = {
+        name: decimal_value(value, f"severityWeights.{name}")
+        for name, value in (policy.get("severityWeights") or {}).items()
+    }
     audit_weights = {
         audit["name"]: decimal_value(audit["weight"], f"{audit['name']}.weight")
         for audit in policy["audits"]
@@ -1171,7 +1204,10 @@ def calculate(
             if finding.evaluation_state != "evaluated" or finding.status is None:
                 not_evaluated += 1
                 continue
-            weight = check_weights["soft" if catalog_check.soft else "standard"]
+            if severity_weights and catalog_check.severity:
+                weight = severity_weights[catalog_check.severity]
+            else:
+                weight = check_weights["soft" if catalog_check.soft else "standard"]
             possible += weight
             audit_evaluated += 1
             evaluated_checks += 1
@@ -1430,6 +1466,10 @@ def calculate(
                 name: json_number(value, 6)
                 for name, value in check_weights.items()
             },
+            "severityWeights": {
+                name: json_number(value, 6)
+                for name, value in severity_weights.items()
+            },
             "auditWeights": {
                 name: json_number(value, 6)
                 for name, value in audit_weights.items()
@@ -1540,6 +1580,14 @@ def render_markdown(result: dict[str, Any]) -> str:
     check_weights = ", ".join(
         f"{name}={value}" for name, value in score_policy["checkWeights"].items()
     )
+    severity_weights = score_policy.get("severityWeights") or {}
+    weight_description = (
+        "Checks in catalogs that rate severity weigh "
+        + ", ".join(f"{name}={value}" for name, value in severity_weights.items())
+        + f"; checks in older catalogs use the standard and soft weights {check_weights}."
+        if severity_weights
+        else f"Check weights are {check_weights}."
+    )
     audit_weights = score_policy["auditWeights"]
     unique_audit_weights = set(audit_weights.values())
     audit_weight_description = (
@@ -1555,7 +1603,7 @@ def render_markdown(result: dict[str, Any]) -> str:
             "## Scoring method",
             "",
             f"Policy version `{result['policyVersion']}` assigns status points: {status_points}. "
-            f"Check weights are {check_weights}. {audit_weight_description} "
+            f"{weight_description} {audit_weight_description} "
             "Each audit is normalized before the configured audit weights are applied. "
             "Missing and unevaluated evidence reduces coverage instead of becoming a guessed pass or failure.",
             "",

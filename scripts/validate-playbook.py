@@ -27,8 +27,14 @@ REQUIRED_SECTIONS = (
 FINDINGS_FILES = ("findings.md", "findings.json", "snapshot.md", "metadata.json")
 CHECK_REQUIRED_FIELDS = ("checkId", "layer", "title", "expectation", "violationSignal")
 VALID_STATUSES = {"present", "partial", "missing", "violation"}
-SUPPORTED_CHECK_SCHEMA_VERSION = "1.1.0"
-SUPPORTED_SCORE_POLICY_SCHEMA_VERSION = "1.0.0"
+SUPPORTED_CHECK_SCHEMA_VERSIONS = ("1.1.0", "1.2.0")
+SEVERITY_CHECK_SCHEMA_VERSION = "1.2.0"
+SUPPORTED_SCORE_POLICY_SCHEMA_VERSIONS = ("1.0.0", "1.1.0")
+SEVERITY_SCORE_POLICY_SCHEMA_VERSION = "1.1.0"
+VALID_SEVERITIES = ("critical", "high", "medium", "low")
+VALID_METHODS = ("tool", "model")
+SEVERITY_CHECK_REQUIRED_FIELDS = ("severity", "method", "rationale", "lastVerified")
+ISO_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 SEMANTIC_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 SCORE_SKILL_NAME = "repository-quality-score"
 AUDIT_FINDINGS_CONTRACT_HEADING = "## Repository Quality Score findings contract"
@@ -249,12 +255,13 @@ def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
             findings.append(Finding("error", checks_path, "checks.json root must be an object"))
             continue
         audit_name = directory.name
-        if data.get("schemaVersion") != SUPPORTED_CHECK_SCHEMA_VERSION:
+        schema_version = data.get("schemaVersion")
+        if schema_version not in SUPPORTED_CHECK_SCHEMA_VERSIONS:
             findings.append(
                 Finding(
                     "error",
                     checks_path,
-                    f"schemaVersion must be {SUPPORTED_CHECK_SCHEMA_VERSION!r}",
+                    f"schemaVersion must be one of {', '.join(SUPPORTED_CHECK_SCHEMA_VERSIONS)}",
                 )
             )
         catalog_version = data.get("catalogVersion")
@@ -305,6 +312,8 @@ def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
                             f"softCheck inventory flag must be documented as a soft check in the canonical SKILL row for {check_id or f'check {index}'}",
                         )
                     )
+            if schema_version == SEVERITY_CHECK_SCHEMA_VERSION:
+                validate_severity_fields(check, check_id or f"check {index}", body, checks_path, findings)
             allowed_statuses = check.get("allowedStatuses")
             if allowed_statuses is not None:
                 if (
@@ -319,6 +328,77 @@ def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
                         findings.append(Finding("error", checks_path, f"invalid allowedStatuses for {check_id}: {', '.join(invalid)}"))
                     if len(set(allowed_statuses)) != len(allowed_statuses):
                         findings.append(Finding("error", checks_path, f"allowedStatuses contains duplicates for {check_id}"))
+
+
+def validate_severity_fields(
+    check: dict[str, object],
+    label: str,
+    body: str,
+    checks_path: Path,
+    findings: list[Finding],
+) -> None:
+    """Catalog schema 1.2.0 rates every check and keeps the SKILL row in sync."""
+    for field in SEVERITY_CHECK_REQUIRED_FIELDS:
+        value = check.get(field)
+        if not isinstance(value, str) or not value.strip():
+            findings.append(Finding("error", checks_path, f"{label} missing non-empty {field}"))
+    severity = check.get("severity")
+    method = check.get("method")
+    if isinstance(severity, str) and severity not in VALID_SEVERITIES:
+        findings.append(Finding("error", checks_path, f"{label} severity must be one of {', '.join(VALID_SEVERITIES)}"))
+    if isinstance(method, str) and method not in VALID_METHODS:
+        findings.append(Finding("error", checks_path, f"{label} method must be tool or model"))
+    last_verified = check.get("lastVerified")
+    if isinstance(last_verified, str) and not ISO_DATE_PATTERN.fullmatch(last_verified):
+        findings.append(Finding("error", checks_path, f"{label} lastVerified must be a date such as 2026-10-07"))
+    related = check.get("relatedChecks")
+    if related is not None and (
+        not isinstance(related, list) or not all(isinstance(item, str) and item for item in related)
+    ):
+        findings.append(Finding("error", checks_path, f"{label} relatedChecks must be a list of checkId strings"))
+    title = check.get("title")
+    if isinstance(title, str) and isinstance(severity, str) and isinstance(method, str):
+        row = canonical_check_row(body, title)
+        if row is None:
+            findings.append(Finding("error", checks_path, f"{label} has no unique canonical row in SKILL.md"))
+        else:
+            cells = [cell.strip().strip("`*").casefold() for cell in row.strip().strip("|").split("|")]
+            if severity not in cells or method not in cells:
+                findings.append(
+                    Finding(
+                        "error",
+                        checks_path,
+                        f"{label} canonical SKILL row must show severity {severity!r} and method {method!r} as cells",
+                    )
+                )
+
+
+def validate_related_checks(root: Path, findings: list[Finding]) -> None:
+    """relatedChecks must name checks that exist in some audit catalog."""
+    catalogs: dict[Path, dict[str, object]] = {}
+    known: set[str] = set()
+    for directory in audit_directories(root):
+        path = directory / "checks.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("checks"), list):
+            catalogs[path] = data
+            known.update(
+                check["checkId"]
+                for check in data["checks"]
+                if isinstance(check, dict) and isinstance(check.get("checkId"), str)
+            )
+    for path, data in catalogs.items():
+        for check in data["checks"]:
+            if not isinstance(check, dict):
+                continue
+            for related in check.get("relatedChecks") or []:
+                if isinstance(related, str) and related not in known:
+                    findings.append(
+                        Finding("error", path, f"{check.get('checkId')} relatedChecks names an unknown check: {related}")
+                    )
 
 
 def validate_audit_findings_contract(root: Path, findings: list[Finding]) -> None:
@@ -494,14 +574,26 @@ def validate_score_policy(root: Path, findings: list[Finding]) -> None:
     if not isinstance(policy, dict):
         findings.append(Finding("error", policy_path, "score-policy.json root must be an object"))
         return
-    if policy.get("schemaVersion") != SUPPORTED_SCORE_POLICY_SCHEMA_VERSION:
+    policy_schema = policy.get("schemaVersion")
+    if policy_schema not in SUPPORTED_SCORE_POLICY_SCHEMA_VERSIONS:
         findings.append(
             Finding(
                 "error",
                 policy_path,
-                f"schemaVersion must be {SUPPORTED_SCORE_POLICY_SCHEMA_VERSION!r}",
+                f"schemaVersion must be one of {', '.join(SUPPORTED_SCORE_POLICY_SCHEMA_VERSIONS)}",
             )
         )
+    severity_weights = policy.get("severityWeights")
+    if policy_schema == SEVERITY_SCORE_POLICY_SCHEMA_VERSION:
+        if not isinstance(severity_weights, dict) or set(severity_weights) != set(VALID_SEVERITIES):
+            findings.append(Finding("error", policy_path, "severityWeights must define exactly critical, high, medium, and low"))
+        else:
+            for name, raw_value in severity_weights.items():
+                value = decimal_value(raw_value)
+                if value is None or value <= 0:
+                    findings.append(Finding("error", policy_path, f"severityWeights.{name} must be a positive decimal string"))
+    elif severity_weights is not None:
+        findings.append(Finding("error", policy_path, f"severityWeights requires schemaVersion {SEVERITY_SCORE_POLICY_SCHEMA_VERSION}"))
     policy_version = policy.get("policyVersion")
     if not isinstance(policy_version, str) or not SEMANTIC_VERSION_PATTERN.fullmatch(policy_version):
         findings.append(Finding("error", policy_path, "policyVersion must be a semantic version"))
@@ -728,6 +820,7 @@ def main() -> int:
     findings: list[Finding] = []
     validate_skills(root, findings)
     validate_check_metadata(root, findings)
+    validate_related_checks(root, findings)
     validate_audit_findings_contract(root, findings)
     validate_score_policy(root, findings)
     validate_no_standalone_worktree(root, findings)

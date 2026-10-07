@@ -55,7 +55,7 @@ Every implemented audit ships a `checks.json` beside its `SKILL.md`. It is a mac
 inventory of the same checks the body describes — never a replacement for the
 human-readable body. The validator requires:
 
-- Supported structural `schemaVersion: "1.1.0"` and a semantic
+- Supported structural `schemaVersion` `"1.1.0"` or `"1.2.0"`, and a semantic
   `catalogVersion`.
 - `skillName` equal to the folder name and `humanCanonicalSource` of `SKILL.md`.
 - A `statusTaxonomy` defining `present`, `partial`, `missing`, `violation`.
@@ -63,6 +63,12 @@ human-readable body. The validator requires:
   `title`, `expectation`, and `violationSignal`.
 - Every `layer` matching a layer or stage heading in the body, and every
   `allowedStatuses` value drawn from the status taxonomy.
+- In schema `1.2.0` (Architecture Decision Record 0004), every check also
+  carries `severity` (`critical`, `high`, `medium`, or `low`), `method`
+  (`tool` when a script can decide it, `model` when it needs judgement),
+  a one-sentence `rationale`, and a `lastVerified` date. The check's row in
+  `SKILL.md` shows the severity and method as cells. Optional `relatedChecks`
+  must name checks that exist in some catalog.
 
 Keep `checks.json` aligned with `SKILL.md` whenever a check is added, removed,
 renamed, moved between layers, reweighted, or materially redefined. Increase

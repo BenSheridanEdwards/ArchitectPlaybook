@@ -95,31 +95,52 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         )
 
     def _write_catalog(
-        self, audit: str, checks: list[tuple[str, str, bool]]
+        self,
+        audit: str,
+        checks: list[tuple[str, str, bool]],
+        severities: list[str] | None = None,
     ) -> None:
+        entries: list[dict[str, Any]] = []
+        for index, (check_id, layer, soft) in enumerate(checks):
+            entry: dict[str, Any] = {
+                "checkId": check_id,
+                "layer": layer,
+                "title": check_id.rsplit(".", 1)[-1].replace("-", " ").title(),
+                "softCheck": soft,
+                "allowedStatuses": [
+                    "present",
+                    "partial",
+                    "missing",
+                    "violation",
+                ],
+            }
+            if severities is not None:
+                entry.update(
+                    {
+                        "severity": severities[index],
+                        "method": "model",
+                        "rationale": "Fixture rationale.",
+                        "lastVerified": "2026-10-07",
+                    }
+                )
+            entries.append(entry)
         self._write_json(
             self.skills / audit / "checks.json",
             {
-                "schemaVersion": "1.1.0",
+                "schemaVersion": "1.2.0" if severities is not None else "1.1.0",
                 "catalogVersion": "1.0.0",
                 "skillName": audit,
-                "checks": [
-                    {
-                        "checkId": check_id,
-                        "layer": layer,
-                        "title": check_id.rsplit(".", 1)[-1].replace("-", " ").title(),
-                        "softCheck": soft,
-                        "allowedStatuses": [
-                            "present",
-                            "partial",
-                            "missing",
-                            "violation",
-                        ],
-                    }
-                    for check_id, layer, soft in checks
-                ],
+                "checks": entries,
             },
         )
+
+    def _use_severity_policy(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["schemaVersion"] = "1.1.0"
+        policy["policyVersion"] = "2.0.0"
+        policy["severityWeights"] = {"critical": "8", "high": "4", "medium": "2", "low": "1"}
+        self._write_json(policy_path, policy)
 
     def _canonical_findings(
         self,
@@ -204,7 +225,7 @@ class RepositoryQualityScoreTests(unittest.TestCase):
             "runIdentifier": run_identifier,
             "skillName": audit,
             "skillVersion": "1.0.0",
-            "checkCatalogSchemaVersion": "1.1.0",
+            "checkCatalogSchemaVersion": catalog["schemaVersion"],
             "checkCatalogVersion": "1.0.0",
             "runStartedAt": "2026-07-13T10:00:00Z",
             "runFinishedAt": "2026-07-13T10:01:00Z",
@@ -867,6 +888,113 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         result = self._score_json()
         self.assertEqual(result["overallScore"], 66.67)
         self.assertEqual(result["categories"][0]["possibleWeight"], 1.5)
+
+    def test_severity_rated_catalog_uses_severity_weights(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.critical-check", "layer-one", False),
+                ("audit-one.low-check", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["present", "violation"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["categories"][0]["possibleWeight"], 9)
+        self.assertEqual(result["categories"][0]["score"], 88.89)
+        self.assertEqual(result["categories"][1]["score"], 100)
+        self.assertEqual(result["overallScore"], 94.44)
+        self.assertEqual(result["scorePolicy"]["severityWeights"]["critical"], 8)
+        report = (
+            self.repository
+            / ".architect-audits"
+            / "repository-quality-score"
+            / "score.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("critical=8", report)
+
+    def test_legacy_policy_scores_severity_catalogs_with_standard_weights(self) -> None:
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.critical-check", "layer-one", False),
+                ("audit-one.low-check", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["present", "violation"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._score_json()["categories"][0]["score"], 50)
+
+    def test_severity_policy_must_rate_all_four_severities(self) -> None:
+        self._use_severity_policy()
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        del policy["severityWeights"]["low"]
+        self._write_json(policy_path, policy)
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["present", "present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("severityWeights", completed.stdout + completed.stderr)
+
+    def test_severity_weights_require_the_severity_policy_schema(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["severityWeights"] = {"critical": "8", "high": "4", "medium": "2", "low": "1"}
+        self._write_json(policy_path, policy)
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["present", "present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("severityWeights requires", completed.stdout + completed.stderr)
+
+    def test_severity_catalog_with_an_unknown_severity_is_excluded(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.first", "layer-one", False),
+                ("audit-one.second", "layer-one", False),
+            ],
+            severities=["critical", "urgent"],
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        reasons = json.dumps(result["provisionalReasons"] if "provisionalReasons" in result else result)
+        self.assertIn("severity must be one of", reasons)
 
     def test_report_describes_the_applied_policy_values(self) -> None:
         policy_path = self.skills / "repository-quality-score" / "score-policy.json"

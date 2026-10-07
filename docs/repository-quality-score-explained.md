@@ -49,7 +49,22 @@ different commits.
 
 Each applicable, evaluated check receives a weight and a status point value.
 
-| Check type | Weight |
+Audits whose catalogs use schema `1.2.0` rate every check's severity, and the
+weight follows the severity:
+
+| Severity | Weight |
+| --- | ---: |
+| Critical | 8 |
+| High | 4 |
+| Medium | 2 |
+| Low | 1 |
+
+A critical check therefore counts eight times as much as a low one, so an
+exposed secret cannot be offset by a tidy `engines` field. Audits whose
+catalogs still use schema `1.1.0` keep the original weights until they are
+rewritten:
+
+| Check type in an older catalog | Weight |
 | --- | ---: |
 | Standard check | 1.0 |
 | Soft check | 0.5 |
@@ -69,6 +84,8 @@ earned points = check weight × status point value
 
 Examples:
 
+- A critical `partial` check earns `8 × 0.5 = 4` points.
+- A low `present` check earns `1 × 1.0 = 1` point.
 - A standard `present` check earns `1.0 × 1.0 = 1.0` point.
 - A standard `partial` check earns `1.0 × 0.5 = 0.5` points.
 - A soft `partial` check earns `0.5 × 0.5 = 0.25` points.

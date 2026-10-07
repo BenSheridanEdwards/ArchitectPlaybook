@@ -39,7 +39,8 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    ```
 
 An implemented `*-audit` also requires `checks.json` using catalog schema
-`1.1.0` and a semantic `catalogVersion`. Add the new audit to
+`1.2.0`, with a severity, method, rationale, and `lastVerified` date for every
+check, and a semantic `catalogVersion`. Add the new audit to
 `repository-quality-score/score-policy.json` only when it is meant to contribute
 to the score; changing the policy audit roster requires a `policyVersion`
 increase and an architecture decision update. A non-audit aggregation skill,
@@ -68,7 +69,7 @@ change affects applicability, evaluation, evidence quality, or allowed status.
 
 Scoring policy changes are separate from catalog changes. Points, standard or
 soft weights, audit weights or roster, score precision, rounding, and band
-boundaries require a `policyVersion` increase, Architecture Decision 0002
+boundaries require a `policyVersion` increase, Architecture Decisions 0002 and 0004
 review, and exact calculator tests. Never change the policy merely to make a
 repository's score improve.
 

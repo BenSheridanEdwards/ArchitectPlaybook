@@ -178,7 +178,8 @@ The model never estimates or adjusts the number in prose.
 
 - `present` earns 100 percent of a check's weight; `partial` earns 50 percent;
   `missing` and `violation` earn zero.
-- Standard checks weigh 1.0 and catalog checks marked `softCheck` weigh 0.5.
+- Checks weigh by severity: critical 8, high 4, medium 2, low 1. Catalogs that
+  do not rate severity yet use the original weights: standard 1.0, soft 0.5.
 - Each audit is normalized to 100, then the policy's audit categories are
   averaged equally so a large catalog cannot dominate a small one.
 - Non-applicable checks are excluded. Applicable checks that were not evaluated
