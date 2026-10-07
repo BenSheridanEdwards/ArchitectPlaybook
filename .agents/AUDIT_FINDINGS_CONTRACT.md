@@ -131,7 +131,8 @@ which consumers may rely on when `protocolVersion` is present:
 | --- | --- | --- |
 | `protocolVersion` | `findings.json`, `metadata.json` | Version of the run protocol that published the run. |
 | `summary` | `findings.json` | Status, judgement, not-applicable, and not-evaluated counts. |
-| `scope` | `findings.json` | The `--since` reference and changed files, when the run is diff-scoped. |
+| `snapshot` | `findings.json` | The Layer 0 facts as an object. Informational; never graded. |
+| `scope` | `findings.json` | The `--since` reference and its changed files. Always written; `since` is `null` and the list empty when the run is not diff-scoped. |
 | `hypotheses` | `findings.json` | Unverified suspicions. Never statuses, never scored. |
 | `treeFingerprint` | `metadata.json` | Hash of the commit and working-tree status at the start of the run. |
 | `severity`, `method` | each check | Copied from the catalog when it defines them. |
@@ -139,12 +140,13 @@ which consumers may rely on when `protocolVersion` is present:
 | `judgement` | each non-present check | `act-on`, `consider`, `noted`, or `dismissed`. |
 | `judgementReason` | each `noted` or `dismissed` check | Why the finding is not acted on. |
 | `decisionId` | each check covered by a decision | The entry in `.architect-audits/decisions.json`. |
-| `recordedBy` | each check | `model` or `collector`. |
+| `recordedBy` | each check | `model` or `collector`. Pending checks have none, and a run with a pending check is never published. |
 
-Every evaluated check carries at least one verifiable evidence entry: a
-`path:line` citation, a file path, a `command:` entry, or a `search:` entry.
-Citations, files, and searches are re-verified against the repository before
-publication.
+Every evaluated check carries at least one evidence entry the script verified
+against the repository: a `path:line` citation, a file, a `search:` entry, or a
+`files:` count. `command:` and `note:` entries may accompany them but never
+stand alone, except in results from a deterministic collector. Citations,
+files, searches, and file counts are re-verified before publication.
 
 ## Write safety
 

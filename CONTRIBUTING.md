@@ -23,12 +23,13 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - The opinionated baseline organised in **four layers plus a Layer 0 diagnostic snapshot**. Layer 0 is informational only and has no status; layers 1–4 grade against the four-status taxonomy (`present | partial | missing | violation`).
    - "What this skill does" — a numbered walk through the skill's behaviour.
    - "Implementation steps" — the concrete steps Claude follows when invoked.
-   - "Repository Quality Score findings contract" plus a canonical schema
-     `2.0.0` findings example. Every `checks.json` entry appears exactly once
-     with full `checkId`, applicability, evaluation state, evidence quality,
-     classification, status, and evidence. `metadata.json` repeats the shared
-     run identity.
-   - "Findings file shape" with a JSON example.
+   - "Publishing results" — begin the run with
+     `python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin <audit-name>`
+     and link [the run protocol](audit-protocol/references/run-protocol.md).
+     The protocol script publishes the schema `2.0.0` findings, so an audit
+     never writes the findings files by hand (Architecture Decision Record
+     0003). The validator checks for the audit's own `begin` command and the
+     link.
    - "Idempotency rules", "Failure modes and remediation", "What this skill explicitly does NOT do".
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
 4. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.

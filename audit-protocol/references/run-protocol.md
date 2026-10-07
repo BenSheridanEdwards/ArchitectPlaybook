@@ -17,26 +17,49 @@ before the command name.
 
 ## Running in a worktree (`--worktree`)
 
-Audits are read-only and write only to `.architect-audits/<audit-name>/`. They
-can therefore run in parallel in one checkout. Use `--worktree` when the
-findings will be fixed on their own branch.
+Audits read the repository and write only under `.architect-audits/<audit-name>/`.
+The playbook still runs one agent per checkout, so give each parallel audit its
+own worktree with `--worktree`. Use it too when the findings will be fixed on
+their own branch.
 
-1. Create the worktree, or reuse it if `.worktrees/<audit-name>` is already a
-   worktree of this repository:
-
-   ```bash
-   git worktree add -B audit/<audit-name> .worktrees/<audit-name> HEAD
-   ```
-
-2. Keep the worktree out of the main checkout's status, so it never makes that
-   tree dirty:
+1. Keep worktrees out of the main checkout's status first. Creating one must
+   never make that tree dirty while another audit is running there:
 
    ```bash
    exclude="$(git rev-parse --git-common-dir)/info/exclude"
    grep -qxF '.worktrees/' "$exclude" 2>/dev/null || echo '.worktrees/' >> "$exclude"
    ```
 
-3. Pass `--repository .worktrees/<audit-name>` before every protocol command,
+2. Reuse `.worktrees/<audit-name>` if it is already a worktree of this
+   repository. Otherwise create it. Reuse the `audit/<audit-name>` branch when it
+   exists, and never reset it, because it may hold fixes committed since the
+   last run:
+
+   ```bash
+   if git show-ref --verify --quiet refs/heads/audit/<audit-name>; then
+     git worktree add .worktrees/<audit-name> audit/<audit-name>
+   else
+     git worktree add -b audit/<audit-name> .worktrees/<audit-name> HEAD
+   fi
+   ```
+
+   An existing branch is audited as it stands. If the user wants the current
+   `HEAD` audited instead, ask before moving the branch.
+
+3. A new worktree has no knowledge graph, because `graphify-out/` is ignored.
+   Copy it when the worktree is at the commit the graph was built from:
+
+   ```bash
+   if [ -f graphify-out/graph.json ] && git check-ignore -q graphify-out \
+     && [ "$(git rev-parse HEAD)" = "$(git -C .worktrees/<audit-name> rev-parse HEAD)" ]; then
+     cp -R graphify-out .worktrees/<audit-name>/
+   fi
+   ```
+
+   Otherwise run `/pre-audit-setup` in the worktree, or accept that the run is
+   provisional because no graph was available.
+
+4. Pass `--repository .worktrees/<audit-name>` before every protocol command,
    and read files from the worktree.
 
 ## The run, step by step
@@ -50,8 +73,10 @@ findings will be fixed on their own branch.
 
    If the audit ships `scripts/collect.py`, begin runs it and records the checks
    it can decide deterministically.
-   - `--enrichment <flag>`: records an enrichment flag such as `--with-run`.
+   - `--enrichment with-run`: records the enrichment flag `--with-run`. Name the
+     flag without its dashes, or write `--enrichment=--with-run`.
    - `--threshold key=value`: records a threshold override.
+   - `--filter=<argument>`: records any other filter the user passed.
    - `--since <ref>`: records the files changed since that reference, and
      marks the run filtered. Evaluate the checks those files can affect. Then
      record the rest in one step: `not-evaluated <audit-name> --remaining
@@ -72,8 +97,14 @@ findings will be fixed on their own branch.
      It never lowers the score.
 
    Use `audit-not-applicable <audit-name> --reason "<why>"` only after detection
-   proves the audited technology is absent. `status <audit-name>` lists the
-   checks still pending.
+   proves the audited technology is absent. A later per-check record replaces
+   that whole-audit decision. `status <audit-name>` lists the checks still
+   pending.
+
+   Run protocol commands for one audit one at a time. The script locks the run
+   while a command changes it, so parallel commands wait instead of losing
+   updates. Still, a correction only means something after the record it
+   corrects.
 4. **Finish.** `python3 "$PROTOCOL" finish <audit-name>` refuses to publish
    while any check is pending, or if the commit or working tree changed during
    the run. It then:
@@ -108,25 +139,53 @@ other evidence, add `--degraded "<reason>"` to the record command.
 
 ## Evidence
 
-Every evaluated check needs at least one verifiable evidence entry. The script
-checks citations, file references, and searches against the repository when
-you record them, and again when you finish. Use these forms:
+Every evaluated check needs at least one entry the script can verify against
+the repository: a citation, a file, a search, or a file count. Commands and
+notes support a result but never stand alone. The script checks every entry
+when you record it, and again when you finish. Use these forms:
 
 | Form | Example | What is verified |
 | --- | --- | --- |
 | Citation | ``src/api/client.ts:42 — `fetch(url)` with no timeout`` | The file exists; the lines exist; every backtick-quoted fragment appears in those lines. |
 | Citation range | ``src/api/client.ts:40-48 — retries are inline`` | The same, for the range. |
-| File | ``tsconfig.json — `"strict": true` `` | The file exists; quoted fragments appear in it. |
-| Search | ``search: `dangerouslySetInnerHTML` in src → 0 matches`` | The script re-runs the search and the count of matching lines must agree. Prefix the pattern with `re:` for a regular expression. |
-| Command | ``command: `npx tsc --noEmit` → 7 errors in 3 files`` | Recorded as reported tool output. |
+| File | ``tsconfig.json — `"strict": true` `` | The file exists; quoted fragments appear in it. Folders are not files. |
+| Search | ``search: `dangerouslySetInnerHTML` in src → 0 matches`` | The script re-runs the search, and the count of matching lines must agree. Prefix the pattern with `re:` for a regular expression. |
+| File count | ``files: `.github/workflows/*.yml` → 0 files`` | The script counts the files in the scope. Use it to show that something is absent or present. |
+| Command | ``command: `npx tsc --noEmit` → 7 errors in 3 files`` | Nothing. It is recorded as reported tool output, and `findings.md` labels it "Reported". |
+| Note | ``note: the team plans to drop the legacy client`` | Nothing. A free-text observation, labelled "Note". |
 
-Free-text observations may accompany these but never stand alone.
+How entries are read:
 
-- Quote only what carries the signal.
-- Never paste secrets; write `<REDACTED>`. The script rejects entries that look
-  like keys or tokens.
+- **Every entry that does not start with `note:`, `command:`, `search:`, or
+  `files:` is a citation or a file.** Its path must exist. An observation that
+  starts with a word such as `Next.js` must start with `note:`.
+- **Separators.** Put ` — `, ` – `, ` -- `, ` - `, `: `, or a space between the
+  path or line number and the note. A column after the line number, as in
+  `src/a.ts:12:5`, is ignored.
+- **Paths with spaces** go in backticks: `` `docs/My Notes.md`:3 — note ``.
+- **Lines** end at a newline only, as in `grep -n`, and a trailing carriage
+  return is ignored.
+- **What is searched.** Searches and file counts cover tracked and untracked
+  files that Git does not ignore. They skip `.architect-audits/`,
+  `.worktrees/`, `graphify-out/`, `node_modules/`, symbolic links, binary files,
+  and files over 8 MB. That is what ripgrep and `git grep` see.
+- **Scopes.** `.` is the whole repository. A scope that names an existing file or
+  folder is taken literally, so Next.js folders such as `app/[slug]` work.
+  Otherwise the scope is a glob with Git's rules: `*` and `?` stay inside one
+  folder, `**/` spans folders, a trailing `/**` matches everything inside, and
+  `[...]` is a character class. So `src/*.ts` excludes `src/lib/a.ts`, and
+  `src/**/*.ts` includes `src/a.ts`.
+- **Regular expressions** use Python syntax. Write `\s` and `\d`, not POSIX
+  classes such as `[[:space:]]`.
+- **Secrets.** Never paste secrets. The script rejects entries that look like
+  keys or tokens. Replace the secret with `<REDACTED>`, inside quotes too:
+  ``src/payments.ts:4 — `stripeKey = "<REDACTED>"` `` verifies against the real
+  line, because `<REDACTED>` matches any text. Keep some text around it.
 
-Choose an evidence tier with `--tier`:
+Quote only what carries the signal.
+
+Choose an evidence tier with `--tier`. It is required for `partial`, `missing`,
+and `violation`, and defaults to `direct` for `present`:
 
 - `direct`: you read the cited code, or ran the command, and it shows the
   status.
@@ -141,6 +200,26 @@ python3 "$PROTOCOL" hypothesis <audit-name> --check <check-id> --note "<what you
 ```
 
 Hypotheses appear in an appendix and never affect a status or the score.
+
+## Collectors
+
+An audit may ship `scripts/collect.py`, a deterministic, read-only collector
+that decides the checks code can decide. `begin` runs it once:
+
+```bash
+python3 -B collect.py --repository <root> [--enrichment=<flag> ...] [--threshold=<key>=<value> ...]
+```
+
+It receives every enrichment flag and threshold the run records, and prints one
+JSON object: `checks`, keyed by check identifier, with the same fields as
+`record` (`status`, `evidence`, `evidenceTier`, `gap`, `remediation`,
+`judgement`, `judgementReason`, `degradedReason`), or `applicability:
+not-applicable` or `evaluationState: not-evaluated` with a `reason`; and
+`snapshot`, an object of Layer 0 facts. Each result goes through the same
+verification as a model's record. A rejected result stays pending, with a
+warning, for the model to evaluate. Collector results are recorded as
+`recordedBy: collector`, and because they are deterministic, their `command:`
+entries may stand alone.
 
 ## Judgement
 
@@ -173,9 +252,11 @@ it:
 python3 "$PROTOCOL" decide <check-id> --decision accepted-risk --reason "<why>" --owner "<who>" [--scope "src/legacy/**"] [--review-after 2027-01-31]
 ```
 
-Decisions live in `.architect-audits/decisions.json`. When a later run records
-a non-present result for that check, and every cited path falls inside the
-decision's scope, the script marks the finding `noted` and links the decision.
+Decisions live in `.architect-audits/decisions.json`. Each `--scope` follows
+the same rules as a search scope, so `src/legacy` covers everything in that
+folder. When a later run records a non-present result for that check, and every
+cited file falls inside the decision's scope, the script marks the finding
+`noted` and links the decision.
 To act on it anyway, pass `--judgement act-on` with `--reason` explaining why
 the decision no longer holds. Decisions past their `--review-after` date are
 flagged when the run finishes.

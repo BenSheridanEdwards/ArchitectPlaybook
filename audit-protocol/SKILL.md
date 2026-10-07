@@ -31,8 +31,8 @@ python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin <audi
 
 | Command | Purpose |
 | --- | --- |
-| `begin <audit> [--since <ref>] [--enrichment <flag>] [--threshold key=value] [--restart]` | Stage a run with every catalog check pending. If the audit has `scripts/collect.py`, run it. |
-| `record <audit> <check> --status <status> --evidence <entry> ...` | Record one evaluated check. Evidence is verified when you record it, and again before publication. |
+| `begin <audit> [--since <ref>] [--enrichment <name>] [--threshold key=value] [--restart]` | Stage a run with every catalog check pending. If the audit has `scripts/collect.py`, run it. Name enrichment flags without dashes, as in `--enrichment with-run`. |
+| `record <audit> <check> --status <status> --tier <tier> --evidence <entry> ...` | Record one evaluated check. Evidence is verified when you record it, and again before publication. `--tier` is required unless the status is `present`. |
 | `not-applicable <audit> <check> --reason <text>` | Record a check that does not apply to this repository. |
 | `not-evaluated <audit> <check> --reason <text>` | Record an applicable check you could not evaluate. Use `--remaining` instead of a check to record every still-pending check, for example the checks outside a `--since` scope. |
 | `audit-not-applicable <audit> --reason <text>` | Record that the whole audit does not apply. |
@@ -40,7 +40,7 @@ python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin <audi
 | `hypothesis <audit> --check <check> --note <text>` | Record an unverified suspicion for the report appendix. |
 | `status <audit>` | List the checks that still need a result. |
 | `finish <audit>` | Verify, render, and publish the run, then print the chat summary. |
-| `decide <check> --decision <kind> --reason <text> --owner <name>` | Record a decision so later audits stop asking the user to act on a finding. |
+| `decide <check> --decision <kind> --reason <text> --owner <name> [--scope <path or glob>]` | Record a decision so later audits stop asking the user to act on a finding. |
 | `hotspots [--months 6] [--top 25]` | List the most frequently changed files, to prioritise reading. |
 
 To audit a repository other than the current one, pass `--repository <path>` before the command. The `--worktree` flow uses this.
@@ -52,12 +52,14 @@ To audit a repository other than the current one, pass `--repository <path>` bef
 3. **Verifies evidence mechanically:**
    - cited files and lines must exist;
    - quoted text must appear at the cited lines;
-   - search counts are re-run;
+   - search counts and file counts are re-run over the files Git does not ignore;
+   - every result rests on at least one entry the script checked, so commands and notes never stand alone;
    - secret-looking text is rejected.
-4. **Validates the whole run with the score calculator's own contract code,** so anything published is exactly what `/repository-quality-score` accepts.
-5. **Renders `findings.md` and `snapshot.md` from the JSON,** so the human and machine reports cannot drift.
-6. **Publishes all four files with `findings.json` last** as the completion marker. A failed write restores the previous files, and an interrupted run leaves a set whose identities disagree, which consumers reject.
-7. **Remembers decisions.** A user's accepted risks in `.architect-audits/decisions.json` stay visible in the report but stop appearing as things to act on.
+4. **Validates the whole run with the score calculator's own contract code,** reading the published bytes back the way the calculator does, so anything published is exactly what `/repository-quality-score` accepts.
+5. **Serialises commands.** Commands that change a run hold a lock on it, so parallel commands wait instead of losing updates.
+6. **Renders `findings.md` and `snapshot.md` from the JSON,** so the human and machine reports cannot drift.
+7. **Publishes all four files with `findings.json` last** as the completion marker. A failed write restores the previous files, and an interrupted run leaves a set whose identities disagree, which consumers reject.
+8. **Remembers decisions.** A user's accepted risks in `.architect-audits/decisions.json` stay visible in the report but stop appearing as things to act on.
 
 ## Implementation steps
 

@@ -4,9 +4,12 @@
 Audits never write their findings files by hand. They begin a staged run, record
 one decision for every catalog check, and finish the run. Finishing validates
 the whole run with the Repository Quality Score calculator's own contract code,
-re-verifies every cited file, line, and quoted fragment, renders the Markdown
-reports from the JSON, and publishes all four files together. A run that fails
-validation publishes nothing.
+re-verifies every cited file, line, quoted fragment, and search count, renders
+the Markdown reports from the JSON, and publishes all four files together. A
+run that fails validation publishes nothing.
+
+Commands that change a run hold a lock on the audit's output directory, so
+parallel commands for one audit wait for each other instead of losing updates.
 
 Standard library only. Python 3.9 or later.
 """
@@ -14,20 +17,28 @@ Standard library only. Python 3.9 or later.
 from __future__ import annotations
 
 import argparse
-import fnmatch
+import contextlib
 import hashlib
 import importlib.util
 import json
+import math
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
+
+try:
+    import fcntl
+except ImportError:  # Windows: exclusive_lock falls back to msvcrt.
+    fcntl = None  # type: ignore[assignment]
 
 PROTOCOL_VERSION = "1.0.0"
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
@@ -38,34 +49,55 @@ AUDITS_DIRECTORY = ".architect-audits"
 STAGING_DIRECTORY = ".staging"
 DECISIONS_FILE = "decisions.json"
 PENDING_REASON = "pending"
+REDACTED = "<REDACTED>"
 STATUSES = ("present", "partial", "missing", "violation")
 GRADED_STATUSES = ("partial", "missing", "violation")
 TIERS = ("direct", "supported", "inferred")
 JUDGEMENTS = ("act-on", "consider", "noted", "dismissed")
 DECISION_KINDS = ("accepted-risk", "false-positive", "out-of-scope")
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-MAX_SEARCH_FILES = 20_000
-MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024
-SKIPPED_SEARCH_DIRECTORIES = {".git", "node_modules", AUDITS_DIRECTORY, "graphify-out", ".worktrees"}
+MAX_SEARCH_FILES = 50_000
+MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024
+BINARY_SNIFF_BYTES = 8000
+LINE_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
+UNSEARCHED_PREFIXES = (f"{AUDITS_DIRECTORY}/", ".worktrees/", "graphify-out/")
+UNSEARCHED_DIRECTORY_NAMES = {"node_modules", ".git"}
 
-CITATION_PATTERN = re.compile(
-    r"^(?P<path>[^\s:`][^\s:]*):(?P<start>[0-9]+)(?:-(?P<end>[0-9]+))?(?:\s+(?:—|--)\s+(?P<note>.*))?$"
+EVIDENCE_PREFIXES = ("note:", "command:", "search:", "files:")
+VERIFIED_KINDS = {"citation", "file", "search", "files"}
+REFERENCE_PATTERN = re.compile(
+    r"^(?:`(?P<quoted>[^`]+)`|(?P<bare>[^\s:`]+))"
+    r"(?::(?P<start>[0-9]+)(?:-(?P<end>[0-9]+))?(?::[0-9]+)?)?"
+    r"(?:(?:\s+(?:—|–|--|-)\s+|:\s+|\s+)(?P<note>\S.*))?$"
 )
-FILE_PATTERN = re.compile(r"^(?P<path>[^\s:`][^\s:]*)(?:\s+(?:—|--)\s+(?P<note>.*))?$")
-COMMAND_PATTERN = re.compile(r"^command:\s+`(?P<command>[^`]+)`\s+(?:→|->)\s+(?P<result>.+)$")
+COMMAND_PATTERN = re.compile(r"^command:\s+`(?P<command>[^`]+)`\s+(?:→|->)\s+(?P<result>\S.*)$")
 SEARCH_PATTERN = re.compile(
-    r"^search:\s+`(?P<pattern>[^`]+)`\s+in\s+(?P<scope>\S+)\s+(?:→|->)\s+(?P<count>[0-9]+)\s+match(?:es|ing lines?)?\b.*$"
+    r"^search:\s+`(?P<pattern>[^`]+)`\s+in\s+(?:`(?P<quoted>[^`]+)`|(?P<scope>\S+))\s+(?:→|->)\s+"
+    r"(?P<count>[0-9]+)\s+(?:match(?:es)?|matching\s+lines?)\b.*$"
 )
+FILES_PATTERN = re.compile(r"^files:\s+`(?P<scope>[^`]+)`\s+(?:→|->)\s+(?P<count>[0-9]+)\s+files?\b.*$")
 QUOTE_PATTERN = re.compile(r"`([^`]+)`")
 SECRET_PATTERNS = (
-    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{30,}"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}"),
+    re.compile(r"\bwhsec_[A-Za-z0-9]{24,}"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
     re.compile(r"\bsk-(?:live|proj|ant)?[A-Za-z0-9_-]{20,}"),
     re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(
+        r"(?i)(?:secret|token|passw(?:or)?d|api_?key|private_?key|access_?key)[A-Za-z0-9_]*[\"']?\s*[:=]\s*"
+        r"[\"'](?=[^\"'\s]*[0-9])(?=[^\"'\s]*[A-Za-z])[A-Za-z0-9+/_.=-]{20,}[\"']"
+    ),
 )
+HOSTED_REMOTE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+SCP_REMOTE_PATTERN = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[^:/\\\s]{2,}):(?P<path>[^\\\s]+)$")
+NAME_PART_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class ProtocolError(Exception):
@@ -75,8 +107,8 @@ class ProtocolError(Exception):
 def load_calculator() -> Any:
     if not CALCULATOR_PATH.is_file():
         raise ProtocolError(
-            "the Repository Quality Score calculator is missing; install the complete playbook "
-            f"(expected {CALCULATOR_PATH.relative_to(SKILLS_ROOT)})"
+            "the Repository Quality Score calculator is missing; reinstall the audit with the playbook "
+            f"installer, which copies {CALCULATOR_PATH.relative_to(SKILLS_ROOT).as_posix()}"
         )
     spec = importlib.util.spec_from_file_location("architect_playbook_calculator", CALCULATOR_PATH)
     if spec is None or spec.loader is None:
@@ -87,6 +119,9 @@ def load_calculator() -> Any:
     return module
 
 
+# Loading the calculator must not write __pycache__ beside it: in a project that
+# commits its playbook install, that would make the working tree dirty.
+sys.dont_write_bytecode = True
 CALCULATOR = load_calculator()
 
 
@@ -97,8 +132,24 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def current_umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+FILE_MODE = 0o666 & ~current_umask()
+
+
+def dump_json(value: Any) -> str:
+    try:
+        return json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    except ValueError as error:
+        raise ProtocolError("a recorded value is not a finite number; JSON cannot represent NaN or Infinity") from error
+
+
 def write_json_atomic(path: Path, value: Any) -> None:
-    write_text_atomic(path, json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    write_text_atomic(path, dump_json(value))
 
 
 def write_text_atomic(path: Path, text: str) -> None:
@@ -107,6 +158,7 @@ def write_text_atomic(path: Path, text: str) -> None:
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             stream.write(text)
+        os.chmod(temporary, FILE_MODE)
         os.replace(temporary, path)
     except BaseException:
         if os.path.exists(temporary):
@@ -114,9 +166,37 @@ def write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
+class NonFiniteNumber(ValueError):
+    pass
+
+
+def reject_constant(value: str) -> None:
+    raise NonFiniteNumber(value)
+
+
+def ensure_finite(value: Any, label: str) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ProtocolError(f"{label} is not a finite number; JSON cannot represent NaN or Infinity")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            ensure_finite(item, f"{label}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            ensure_finite(item, f"{label}[{index}]")
+    return value
+
+
+def parse_json_text(text: str, label: str) -> Any:
+    try:
+        value = json.loads(text, parse_constant=reject_constant)
+    except NonFiniteNumber as error:
+        raise ProtocolError(f"{label} contains {error}, which is not valid JSON; use a finite number") from error
+    return ensure_finite(value, label)
+
+
 def read_json(path: Path, label: str) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return parse_json_text(path.read_text(encoding="utf-8"), label)
     except FileNotFoundError as error:
         raise ProtocolError(f"{label} not found: {path}") from error
     except json.JSONDecodeError as error:
@@ -135,32 +215,59 @@ def repository_root(argument: str | None) -> Path:
 
 
 def repository_name(root: Path) -> str:
-    remote = git(root, "remote", "get-url", "origin") or ""
-    match = re.search(r"[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$", remote)
-    if match and "://" not in match.group(1):
-        return f"{match.group(1)}/{match.group(2)}"
-    name = re.sub(r"[^A-Za-z0-9_.-]", "-", root.name) or "repository"
-    return name if name not in {".", ".."} else "repository"
+    """Name the target `owner/name` from a hosted remote, or by its folder name.
+
+    Local remotes are ignored, so no local path or credential reaches the
+    findings.
+    """
+    remote = (git(root, "remote", "get-url", "origin") or "").strip()
+    path: str | None = None
+    if HOSTED_REMOTE_PATTERN.match(remote):
+        parsed = urllib.parse.urlsplit(remote)
+        if parsed.scheme.lower() != "file" and parsed.hostname:
+            path = parsed.path
+    else:
+        scp = SCP_REMOTE_PATTERN.match(remote)
+        if scp:
+            path = scp.group("path")
+    if path is not None:
+        parts = [part for part in path.split("/") if part and part != "_git"]
+        if parts and parts[-1].endswith(".git"):
+            parts[-1] = parts[-1][: -len(".git")]
+        parts = [part for part in parts if part]
+        tail = parts[-2:]
+        if tail and all(NAME_PART_PATTERN.match(part) and part not in {".", ".."} for part in tail):
+            return "/".join(tail)
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", root.name).strip(".-") or "repository"
 
 
 def tree_fingerprint(root: Path) -> str:
-    status = git(
-        root,
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-        "--",
-        ".",
-        f":(exclude){AUDITS_DIRECTORY}/**",
-    )
+    exclude = f":(exclude){AUDITS_DIRECTORY}/**"
+    status = git(root, "status", "--porcelain", "--untracked-files=all", "--", ".", exclude)
     head = git(root, "rev-parse", "HEAD") or "no-head"
-    return hashlib.sha256(f"{head}\n{status or ''}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{head}\n{status or ''}".encode("utf-8"))
+    if status:
+        # A dirty tree can change without changing its status lines, so hash the content too.
+        diff = git(root, "diff", "HEAD", "--no-ext-diff", "--no-color", "--binary", "--", ".", exclude)
+        digest.update((diff or "").encode("utf-8"))
+        for line in status.splitlines():
+            if line.startswith("?? "):
+                try:
+                    details = (root / line[3:]).stat()
+                except OSError:
+                    continue
+                digest.update(f"\n{line[3:]}:{details.st_size}:{details.st_mtime_ns}".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def require_audit_name(audit: str) -> str:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", audit):
+        raise ProtocolError(f"invalid audit name: {audit!r}")
+    return audit
 
 
 def audit_directory(audit: str) -> Path:
-    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", audit):
-        raise ProtocolError(f"invalid audit name: {audit!r}")
-    directory = SKILLS_ROOT / audit
+    directory = SKILLS_ROOT / require_audit_name(audit)
     if not (directory / "checks.json").is_file():
         raise ProtocolError(
             f"no catalog for {audit}: expected {audit}/checks.json beside this protocol skill"
@@ -168,8 +275,57 @@ def audit_directory(audit: str) -> Path:
     return directory
 
 
+def output_directory(root: Path, audit: str) -> Path:
+    return root / AUDITS_DIRECTORY / require_audit_name(audit)
+
+
 def staging_path(root: Path, audit: str) -> Path:
-    return root / AUDITS_DIRECTORY / audit / STAGING_DIRECTORY / "run.json"
+    return output_directory(root, audit) / STAGING_DIRECTORY / "run.json"
+
+
+@contextlib.contextmanager
+def exclusive_lock(directory: Path) -> Iterator[None]:
+    """Hold an exclusive lock on a directory until the block ends.
+
+    The operating system releases the lock if the process dies, so a killed
+    command never leaves a stale lock behind.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:
+        with windows_lock(directory):
+            yield
+        return
+    descriptor = os.open(str(directory), os.O_RDONLY)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        except OSError as error:
+            print(
+                f"Warning: cannot lock {directory.name} ({error.strerror}); run protocol commands one at a time.",
+                file=sys.stderr,
+            )
+        yield
+    finally:
+        os.close(descriptor)
+
+
+@contextlib.contextmanager
+def windows_lock(directory: Path) -> Iterator[None]:
+    import msvcrt
+
+    with open(directory / ".lock", "a+b") as handle:
+        handle.seek(0)
+        while True:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                break
+            except OSError:
+                continue  # LK_LOCK gives up after about ten seconds; keep waiting.
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def load_run(root: Path, audit: str) -> dict[str, Any]:
@@ -184,6 +340,19 @@ def load_run(root: Path, audit: str) -> dict[str, Any]:
 
 def save_run(root: Path, audit: str, run: dict[str, Any]) -> None:
     write_json_atomic(staging_path(root, audit), run)
+
+
+@contextlib.contextmanager
+def staged_run(root: Path, audit: str) -> Iterator[dict[str, Any]]:
+    """Load the staged run under the audit's lock, and save it if the block succeeds."""
+    with exclusive_lock(output_directory(root, audit)):
+        run = load_run(root, audit)
+        yield run
+        save_run(root, audit, run)
+
+
+def is_pending(check: dict[str, Any]) -> bool:
+    return check.get("recordedBy") is None
 
 
 def find_check(run: dict[str, Any], check_id: str) -> dict[str, Any]:
@@ -213,8 +382,25 @@ def safe_relative_path(root: Path, raw: str) -> Path:
     return candidate
 
 
+def split_lines(text: str) -> list[str]:
+    """Split on newlines only, as grep and ripgrep do, ignoring a trailing carriage return."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 def read_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return split_lines(path.read_bytes().decode("utf-8", errors="replace"))
+
+
+def quote_appears(quote: str, haystack: str) -> bool:
+    if REDACTED not in quote:
+        return quote in haystack
+    parts = quote.split(REDACTED)
+    if not "".join(parts).strip():
+        raise ProtocolError(f"a quote needs some text around {REDACTED} so it can be verified")
+    return re.search(".+?".join(re.escape(part) for part in parts), haystack) is not None
 
 
 def verify_quotes(note: str | None, text: str, where: str) -> None:
@@ -222,164 +408,341 @@ def verify_quotes(note: str | None, text: str, where: str) -> None:
         return
     haystack = normalize(text)
     for quote in QUOTE_PATTERN.findall(note):
-        if normalize(quote) not in haystack:
+        if not quote_appears(normalize(quote), haystack):
             raise ProtocolError(f"quoted text `{quote}` does not appear in {where}")
 
 
-def search_files(root: Path, scope: str) -> list[Path]:
-    if any(character in scope for character in "*?["):
-        matches = [
-            path
-            for path in iter_text_files(root)
-            if fnmatch.fnmatch(path.relative_to(root).as_posix(), scope)
-        ]
-        return matches
-    target = safe_relative_path(root, scope.rstrip("/") or ".")
-    if target.is_file():
-        return [target]
-    if target.is_dir():
-        return list(iter_text_files(target))
-    raise ProtocolError(f"search scope does not exist: {scope!r}")
+# --------------------------------------------------------------------------- scopes and searches
+
+_FILE_LISTS: dict[Path, list[str]] = {}
+_LINE_CACHE: dict[Path, list[str] | None] = {}
+_line_cache_bytes = 0
 
 
-def iter_text_files(directory: Path) -> list[Path]:
-    files: list[Path] = []
-    for current, directories, names in os.walk(directory):
-        directories[:] = [name for name in directories if name not in SKIPPED_SEARCH_DIRECTORIES]
-        for name in names:
-            path = Path(current) / name
-            try:
-                if path.stat().st_size > MAX_SEARCH_FILE_BYTES:
-                    continue
-            except OSError:
-                continue
-            files.append(path)
-            if len(files) > MAX_SEARCH_FILES:
-                raise ProtocolError(
-                    f"search scope is too large to verify (more than {MAX_SEARCH_FILES} files); narrow the scope"
-                )
+def clear_caches() -> None:
+    global _line_cache_bytes
+    _FILE_LISTS.clear()
+    _LINE_CACHE.clear()
+    _line_cache_bytes = 0
+
+
+def repository_files(root: Path) -> list[str]:
+    """Tracked and untracked files that Git does not ignore, as repository-relative paths.
+
+    Generated directories (`.architect-audits/`, `.worktrees/`, `graphify-out/`,
+    and any `node_modules/`) and symbolic links are left out, so searches see
+    what ripgrep and `git grep` see.
+    """
+    cached = _FILE_LISTS.get(root)
+    if cached is not None:
+        return cached
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            check=False,
+            capture_output=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ProtocolError(f"cannot list repository files with Git ({type(error).__name__})") from error
+    if completed.returncode != 0:
+        raise ProtocolError("cannot list repository files with Git")
+    files: list[str] = []
+    seen: set[str] = set()
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        relative = os.fsdecode(raw)
+        if relative in seen:
+            continue
+        seen.add(relative)
+        if relative.startswith(UNSEARCHED_PREFIXES) or UNSEARCHED_DIRECTORY_NAMES.intersection(relative.split("/")):
+            continue
+        path = root / relative
+        if path.is_symlink() or not path.is_file():
+            continue
+        files.append(relative)
+    _FILE_LISTS[root] = files
     return files
 
 
-def count_matching_lines(files: list[Path], pattern: str) -> int:
-    if pattern.startswith("re:"):
-        try:
-            expression = re.compile(pattern[3:])
-        except re.error as error:
-            raise ProtocolError(f"invalid search regular expression {pattern[3:]!r}: {error}") from error
-        matcher = expression.search
-    else:
-        literal = pattern
-
-        def matcher(line: str) -> bool:
-            return literal in line
-
-    total = 0
-    for path in files:
-        try:
-            with path.open("r", encoding="utf-8", errors="strict") as stream:
-                for line in stream:
-                    if matcher(line):
-                        total += 1
-        except (UnicodeDecodeError, OSError):
+def glob_expression(pattern: str) -> re.Pattern[str]:
+    """Translate a glob with Git `:(glob)` semantics into a regular expression."""
+    parts: list[str] = []
+    index = 0
+    length = len(pattern)
+    while index < length:
+        if pattern.startswith("**", index):
+            at_boundary = index == 0 or pattern[index - 1] == "/"
+            end = index + 2
+            if at_boundary and end == length:
+                parts.append(".*")
+                index = end
+                continue
+            if at_boundary and pattern.startswith("/", end):
+                parts.append("(?:.*/)?")
+                index = end + 1
+                continue
+            while index < length and pattern[index] == "*":
+                index += 1
+            parts.append("[^/]*")
             continue
+        character = pattern[index]
+        if character == "*":
+            parts.append("[^/]*")
+        elif character == "?":
+            parts.append("[^/]")
+        elif character == "[":
+            close = character_class_end(pattern, index)
+            if close is None:
+                parts.append(re.escape(character))
+            else:
+                body = pattern[index + 1 : close]
+                negate = body[:1] in {"!", "^"}
+                if negate:
+                    body = body[1:]
+                body = body.replace("\\", "\\\\").replace("[", "\\[")
+                if body.startswith("]"):
+                    body = "\\" + body
+                parts.append(f"(?!/)[{'^' if negate else ''}{body}]")
+                index = close + 1
+                continue
+        else:
+            parts.append(re.escape(character))
+        index += 1
+    return re.compile("".join(parts), re.DOTALL)
+
+
+def character_class_end(pattern: str, start: int) -> int | None:
+    index = start + 1
+    if index < len(pattern) and pattern[index] in "!^":
+        index += 1
+    if index < len(pattern) and pattern[index] == "]":
+        index += 1
+    while index < len(pattern) and pattern[index] != "]":
+        index += 1
+    return index if index < len(pattern) else None
+
+
+class Scope:
+    """A repository-relative search or decision scope.
+
+    `.` matches everything. A scope that names an existing path, or has no
+    wildcard, matches that file or everything under that folder. Otherwise it
+    is a glob: `*` and `?` stay inside one folder, `**/` spans folders, a
+    trailing `/**` matches everything inside, and `[...]` is a character class.
+    """
+
+    def __init__(self, root: Path, raw: str) -> None:
+        cleaned = raw.strip()
+        while cleaned.startswith("./"):
+            cleaned = cleaned[2:]
+        cleaned = cleaned.rstrip("/")
+        self.raw = raw
+        self.everything = cleaned in {"", "."}
+        self.literal: str | None = None
+        self.expression: re.Pattern[str] | None = None
+        if self.everything:
+            return
+        safe_relative_path(root, cleaned)
+        if (root / cleaned).exists() or not any(character in cleaned for character in "*?["):
+            self.literal = posixpath.normpath(cleaned)
+        else:
+            self.expression = glob_expression(cleaned)
+
+    def matches(self, path: str) -> bool:
+        if self.everything:
+            return True
+        if self.literal is not None:
+            return path == self.literal or path.startswith(self.literal + "/")
+        assert self.expression is not None
+        return self.expression.fullmatch(path) is not None
+
+    def files(self, root: Path) -> list[str]:
+        files = [path for path in repository_files(root) if self.matches(path)]
+        if len(files) > MAX_SEARCH_FILES:
+            raise ProtocolError(
+                f"scope {self.raw!r} has more than {MAX_SEARCH_FILES} files to verify; narrow the scope"
+            )
+        return files
+
+
+def search_files(root: Path, raw_scope: str) -> list[str]:
+    scope = Scope(root, raw_scope)
+    files = scope.files(root)
+    if not files and scope.literal is not None:
+        if not (root / scope.literal).exists():
+            raise ProtocolError(f"search scope does not exist: {raw_scope!r}")
+        raise ProtocolError(
+            f"search scope {raw_scope!r} has no searchable files; searches skip files Git ignores, "
+            "symbolic links, and generated folders"
+        )
+    return files
+
+
+def searchable_lines(path: Path) -> list[str] | None:
+    """The file's lines, or None for binary and oversized files, which searches skip."""
+    global _line_cache_bytes
+    if path in _LINE_CACHE:
+        return _LINE_CACHE[path]
+    try:
+        if path.stat().st_size > MAX_SEARCH_FILE_BYTES:
+            return None
+        data = path.read_bytes()
+    except OSError:
+        return None
+    lines = None if b"\0" in data[:BINARY_SNIFF_BYTES] else split_lines(data.decode("utf-8", errors="replace"))
+    cost = len(data) if lines is not None else 0
+    if _line_cache_bytes + cost <= LINE_CACHE_BUDGET_BYTES:
+        _LINE_CACHE[path] = lines
+        _line_cache_bytes += cost
+    return lines
+
+
+def line_matcher(pattern: str) -> Callable[[str], Any]:
+    if not pattern.startswith("re:"):
+        return lambda line: pattern in line
+    source = pattern[3:]
+    if "[:" in source and ":]" in source:
+        raise ProtocolError(
+            "search regular expressions use Python syntax; replace POSIX classes such as [[:space:]] with \\s"
+        )
+    try:
+        return re.compile(source).search
+    except re.error as error:
+        raise ProtocolError(f"invalid search regular expression {source!r}: {error}") from error
+
+
+def count_matching_lines(root: Path, files: list[str], pattern: str) -> int:
+    matcher = line_matcher(pattern)
+    total = 0
+    for relative in files:
+        lines = searchable_lines(root / relative)
+        if lines is not None:
+            total += sum(1 for line in lines if matcher(line))
     return total
+
+
+# --------------------------------------------------------------------------- evidence
+
+
+EVIDENCE_FORMS = (
+    "`path:line — note` (a citation), `path — note` (a file), search: `<pattern>` in <scope> → <count> matches, "
+    "files: `<glob>` → <count> files, command: `<command>` → <result>, or note: <text>"
+)
 
 
 def verify_evidence(root: Path, entry: str) -> str:
     """Verify one evidence entry and return its kind.
 
-    Kinds: citation, file, command, search, observation. Citations, files, and
-    searches are re-checked against the repository; commands are recorded as
-    reported tool output; observations are free text.
+    Kinds: citation, file, search, files, command, note. Citations, files,
+    searches, and file counts are re-checked against the repository. Commands
+    are recorded as reported tool output, and notes are free text.
     """
     if not isinstance(entry, str) or not entry.strip():
         raise ProtocolError("evidence entries must be non-empty strings")
-    if contains_secret(entry):
-        raise ProtocolError("evidence looks like it contains a secret; redact it as <REDACTED>")
     text = entry.strip()
-    command = COMMAND_PATTERN.match(text)
-    if command:
+    if "\n" in text or "\r" in text:
+        raise ProtocolError("evidence entries are single lines; split them into several --evidence entries")
+    if contains_secret(text):
+        raise ProtocolError(f"evidence looks like it contains a secret; replace the secret with {REDACTED}")
+    if text.startswith("note:"):
+        if not text[len("note:") :].strip():
+            raise ProtocolError("a note needs text after `note:`")
+        return "note"
+    if text.startswith("command:"):
+        if not COMMAND_PATTERN.match(text):
+            raise ProtocolError("malformed command evidence; use command: `<command>` → <result>")
         return "command"
-    search = SEARCH_PATTERN.match(text)
-    if search:
-        files = search_files(root, search.group("scope"))
-        actual = count_matching_lines(files, search.group("pattern"))
+    if text.startswith("search:"):
+        search = SEARCH_PATTERN.match(text)
+        if not search:
+            raise ProtocolError("malformed search evidence; use search: `<pattern>` in <scope> → <count> matches")
+        scope = search.group("quoted") or search.group("scope")
+        actual = count_matching_lines(root, search_files(root, scope), search.group("pattern"))
         claimed = int(search.group("count"))
         if actual != claimed:
             raise ProtocolError(
                 f"search evidence claims {claimed} matching lines for `{search.group('pattern')}` "
-                f"in {search.group('scope')}, but the repository has {actual}"
+                f"in {scope}, but the repository has {actual}"
             )
         return "search"
-    if text.startswith(("search:", "command:")):
-        raise ProtocolError(
-            "malformed evidence; use `command: `<command>` → <result>` or "
-            "`search: `<pattern>` in <scope> → <count> matches`"
-        )
-    citation = CITATION_PATTERN.match(text)
-    if citation:
-        path = safe_relative_path(root, citation.group("path"))
-        if not path.is_file():
-            raise ProtocolError(f"cited file does not exist: {citation.group('path')}")
-        lines = read_lines(path)
-        start = int(citation.group("start"))
-        end = int(citation.group("end") or start)
-        if start < 1 or end < start or end > len(lines):
+    if text.startswith("files:"):
+        listing = FILES_PATTERN.match(text)
+        if not listing:
+            raise ProtocolError("malformed files evidence; use files: `<glob>` → <count> files")
+        actual = len(Scope(root, listing.group("scope")).files(root))
+        claimed = int(listing.group("count"))
+        if actual != claimed:
             raise ProtocolError(
-                f"cited lines {start}-{end} are outside {citation.group('path')} ({len(lines)} lines)"
+                f"files evidence claims {claimed} files in {listing.group('scope')}, but the repository has {actual}"
             )
-        verify_quotes(
-            citation.group("note"),
-            "\n".join(lines[start - 1 : end]),
-            f"{citation.group('path')}:{start}-{end}",
+        return "files"
+    reference = REFERENCE_PATTERN.match(text)
+    if not reference:
+        raise ProtocolError(f"unrecognised evidence {text[:80]!r}; use {EVIDENCE_FORMS}")
+    raw_path = reference.group("quoted") or reference.group("bare")
+    path = safe_relative_path(root, raw_path)
+    if path.is_dir():
+        raise ProtocolError(
+            f"{raw_path!r} is a folder; cite a file, or make a claim about the folder with `search:` or `files:`"
         )
-        return "citation"
-    file_entry = FILE_PATTERN.match(text)
-    if file_entry and looks_like_path(root, file_entry.group("path")):
-        path = safe_relative_path(root, file_entry.group("path"))
-        if path.is_file():
-            verify_quotes(file_entry.group("note"), path.read_text(encoding="utf-8", errors="replace"), file_entry.group("path"))
-            return "file"
-        if path.is_dir():
-            return "file"
-        if file_entry.group("note") is not None:
-            raise ProtocolError(f"cited file does not exist: {file_entry.group('path')}")
-    return "observation"
+    if not path.is_file():
+        raise ProtocolError(
+            f"cited file does not exist: {raw_path}. If this entry is an observation rather than a file, "
+            "start it with `note:`"
+        )
+    lines = read_lines(path)
+    note = reference.group("note")
+    if reference.group("start") is None:
+        verify_quotes(note, "\n".join(lines), raw_path)
+        return "file"
+    start = int(reference.group("start"))
+    end = int(reference.group("end") or start)
+    if start < 1 or end < start or end > len(lines):
+        raise ProtocolError(f"cited lines {start}-{end} are outside {raw_path} ({len(lines)} lines)")
+    verify_quotes(note, "\n".join(lines[start - 1 : end]), f"{raw_path}:{start}-{end}")
+    return "citation"
 
 
-def looks_like_path(root: Path, raw: str) -> bool:
-    """A bare token is a path if it has a separator or extension, or names an existing file."""
-    if "/" in raw or "." in raw:
-        return True
-    try:
-        return safe_relative_path(root, raw).exists()
-    except ProtocolError:
-        return False
-
-
-def decision_applies(decision: dict[str, Any], check_id: str, cited_paths: list[str]) -> bool:
-    if decision.get("checkId") != check_id:
-        return False
-    scope = decision.get("scope") or ["**"]
-    if scope == ["**"]:
-        return True
-    if not cited_paths:
-        return False
-    return all(any(fnmatch.fnmatch(path, pattern) for pattern in scope) for path in cited_paths)
+def render_evidence(entry: str) -> str:
+    """Label an entry for findings.md, so readers can see what the script verified."""
+    if entry.startswith("note:"):
+        return f"Note: {entry[len('note:') :].strip()}"
+    if entry.startswith("command:"):
+        return f"Reported: {entry[len('command:') :].strip()}"
+    return f"Evidence: {entry}"
 
 
 def cited_paths(evidence: list[str]) -> list[str]:
     paths = []
     for entry in evidence:
-        citation = CITATION_PATTERN.match(entry.strip())
-        if citation:
-            paths.append(citation.group("path"))
+        text = entry.strip()
+        if text.startswith(EVIDENCE_PREFIXES):
             continue
-        file_entry = FILE_PATTERN.match(entry.strip())
-        if file_entry and ("/" in file_entry.group("path") or "." in file_entry.group("path")):
-            paths.append(file_entry.group("path"))
+        reference = REFERENCE_PATTERN.match(text)
+        if reference:
+            paths.append(posixpath.normpath(reference.group("quoted") or reference.group("bare")))
     return paths
+
+
+# --------------------------------------------------------------------------- decisions
+
+
+def validate_decision(root: Path, item: Any, label: str) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ProtocolError(f"{label} must be an object")
+    for field in ("id", "checkId", "decision", "reason"):
+        if not isinstance(item.get(field), str) or not item[field].strip():
+            raise ProtocolError(f"{label} needs a non-empty {field}")
+    if item["decision"] not in DECISION_KINDS:
+        raise ProtocolError(f"{label}.decision must be one of {', '.join(DECISION_KINDS)}")
+    scope = item.get("scope", ["**"])
+    if not isinstance(scope, list) or not scope or any(not isinstance(pattern, str) for pattern in scope):
+        raise ProtocolError(f"{label}.scope must be a non-empty list of repository-relative globs")
+    for pattern in scope:
+        Scope(root, pattern)
+    return item
 
 
 def load_decisions(root: Path) -> list[dict[str, Any]]:
@@ -389,7 +752,21 @@ def load_decisions(root: Path) -> list[dict[str, Any]]:
     data = read_json(path, "decisions file")
     if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
         raise ProtocolError(f"{AUDITS_DIRECTORY}/{DECISIONS_FILE} must be an object with a decisions array")
-    return [item for item in data["decisions"] if isinstance(item, dict)]
+    return [
+        validate_decision(root, item, f"{AUDITS_DIRECTORY}/{DECISIONS_FILE} decisions[{index}]")
+        for index, item in enumerate(data["decisions"])
+    ]
+
+
+def decision_applies(root: Path, decision: dict[str, Any], check_id: str, paths: list[str]) -> bool:
+    if decision.get("checkId") != check_id:
+        return False
+    scopes = [Scope(root, pattern) for pattern in decision.get("scope") or ["**"]]
+    if any(scope.everything or scope.raw.strip() == "**" for scope in scopes):
+        return True
+    if not paths:
+        return False
+    return all(any(scope.matches(path) for scope in scopes) for path in paths)
 
 
 # --------------------------------------------------------------------------- commands
@@ -399,6 +776,11 @@ def command_begin(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
     audit = arguments.audit
     directory = audit_directory(audit)
+    with exclusive_lock(output_directory(root, audit)):
+        return begin_run(root, audit, directory, arguments)
+
+
+def begin_run(root: Path, audit: str, directory: Path, arguments: argparse.Namespace) -> int:
     catalog_data = read_json(directory / "checks.json", f"{audit}/checks.json")
     catalog = CALCULATOR.load_catalog(SKILLS_ROOT, audit, {})
     path = staging_path(root, audit)
@@ -419,17 +801,23 @@ def command_begin(arguments: argparse.Namespace) -> int:
         if not separator or not key.strip():
             raise ProtocolError(f"thresholds use key=value: {item!r}")
         thresholds[key.strip()] = value.strip()
+    enrichment = [flag if flag.startswith("-") else f"--{flag}" for flag in arguments.enrichment or []]
     filters = list(arguments.filter or [])
     changed_files: list[str] = []
     if arguments.since:
         if not git(root, "rev-parse", "--verify", f"{arguments.since}^{{commit}}"):
             raise ProtocolError(f"--since reference does not resolve to a commit: {arguments.since}")
-        diff = git(root, "diff", "--name-only", f"{arguments.since}...HEAD") or ""
+        diff = git(root, "diff", "--name-only", f"{arguments.since}...HEAD")
+        if diff is None:
+            raise ProtocolError(
+                f"cannot list the files changed since {arguments.since}: Git found no merge base with HEAD. "
+                "In a shallow clone, fetch more history first; otherwise pass a reference that shares history with HEAD."
+            )
         changed_files = [line for line in diff.splitlines() if line.strip()]
         filters.append(f"--since={arguments.since}")
 
     catalog_checks = {check["checkId"]: check for check in catalog_data.get("checks", [])}
-    decisions = [decision for decision in load_decisions(root) if str(decision.get("checkId", "")).startswith(f"{audit}.")]
+    decisions = [decision for decision in load_decisions(root) if decision["checkId"].startswith(f"{audit}.")]
     run: dict[str, Any] = {
         "protocolVersion": PROTOCOL_VERSION,
         "runIdentifier": uuid.uuid4().hex,
@@ -448,7 +836,7 @@ def command_begin(arguments: argparse.Namespace) -> int:
             "filterArguments": filters,
             "thresholdOverrides": thresholds,
             "policyOverrides": {},
-            "enrichmentArguments": list(arguments.enrichment or []),
+            "enrichmentArguments": enrichment,
             "graphAvailable": (root / "graphify-out" / "graph.json").is_file(),
         },
         "treeFingerprint": tree_fingerprint(root),
@@ -491,17 +879,23 @@ def command_begin(arguments: argparse.Namespace) -> int:
     collector = directory / "scripts" / "collect.py"
     collected = 0
     if collector.is_file():
-        collected = apply_collector(root, audit, run, collector, arguments.enrichment or [])
+        collected = apply_collector(root, run, collector, enrichment, thresholds)
         save_run(root, audit, run)
 
-    pending = [check["checkId"] for check in run["checks"] if check["evaluationReason"] == PENDING_REASON]
+    pending = [check["checkId"] for check in run["checks"] if is_pending(check)]
     print(f"Began {audit} run {run['runIdentifier']} at {commit[:12]} ({'clean' if clean else 'dirty'} working tree).")
     if not clean:
         print("Note: the working tree has uncommitted changes, so this run cannot feed an official score.")
-    if changed_files:
-        print(f"Diff scope: {len(changed_files)} files changed since {arguments.since}.")
+    if arguments.since:
+        if changed_files:
+            print(f"Diff scope: {len(changed_files)} files changed since {arguments.since}.")
+        else:
+            print(
+                f"No files changed since {arguments.since}, so every check is outside the diff scope. Record them with "
+                f'`not-evaluated {audit} --remaining --reason "outside the --since scope"`.'
+            )
     if decisions:
-        print(f"Recorded decisions that may apply: {', '.join(str(item.get('id')) for item in decisions)}")
+        print(f"Recorded decisions that may apply: {', '.join(item['id'] for item in decisions)}")
     if collector.is_file():
         print(f"Collector resolved {collected} checks.")
     print(f"Pending checks ({len(pending)}): {', '.join(pending)}")
@@ -510,14 +904,14 @@ def command_begin(arguments: argparse.Namespace) -> int:
 
 def apply_collector(
     root: Path,
-    audit: str,
     run: dict[str, Any],
     collector: Path,
     enrichment: list[str],
+    thresholds: dict[str, str],
 ) -> int:
-    command = [sys.executable, str(collector), "--repository", str(root)]
-    for flag in enrichment:
-        command.extend(["--enrichment", flag])
+    command = [sys.executable, "-B", str(collector), "--repository", str(root)]
+    command += [f"--enrichment={flag}" for flag in enrichment]
+    command += [f"--threshold={key}={value}" for key, value in thresholds.items()]
     try:
         completed = subprocess.run(
             command,
@@ -537,21 +931,30 @@ def apply_collector(
             print(completed.stderr.strip()[:2000])
         return 0
     try:
-        output = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        print("Warning: collector output was not JSON; its checks stay pending.")
+        output = parse_json_text(completed.stdout, "collector output")
+    except (json.JSONDecodeError, ProtocolError) as error:
+        print(f"Warning: collector output was not valid JSON ({error}); its checks stay pending.")
+        return 0
+    if not isinstance(output, dict):
+        print("Warning: collector output was not a JSON object; its checks stay pending.")
         return 0
     resolved = 0
-    for check_id, result in (output.get("checks") or {}).items():
+    checks = output.get("checks")
+    for check_id, result in (checks.items() if isinstance(checks, dict) else []):
         try:
             check = find_check(run, check_id)
+            if not isinstance(result, dict):
+                raise ProtocolError("a collector result must be an object")
             apply_result(root, run, check, result, recorded_by="collector")
             resolved += 1
         except ProtocolError as error:
             print(f"Warning: collector result for {check_id} rejected: {error}")
     snapshot = output.get("snapshot")
     if isinstance(snapshot, dict):
-        run["snapshot"].update(snapshot)
+        if contains_secret(json.dumps(snapshot)):
+            print("Warning: collector snapshot looks like it contains a secret; it was not recorded.")
+        else:
+            run["snapshot"].update(snapshot)
     return resolved
 
 
@@ -574,7 +977,7 @@ def apply_result(
         check,
         status=result.get("status"),
         evidence=list(result.get("evidence") or []),
-        tier=result.get("evidenceTier", "direct"),
+        tier=result.get("evidenceTier") or "direct",
         gap=result.get("gap"),
         remediation=result.get("remediation"),
         judgement=result.get("judgement"),
@@ -591,6 +994,13 @@ def require_reason(value: Any) -> str:
     if value.strip() == PENDING_REASON:
         raise ProtocolError(f"{PENDING_REASON!r} is reserved for unrecorded checks")
     return value.strip()
+
+
+def clear_audit_applicability(run: dict[str, Any]) -> None:
+    """A per-check record replaces an earlier whole-audit not-applicable decision."""
+    if run.get("auditApplicability"):
+        run["auditApplicability"] = None
+        print("Note: cleared the earlier audit-not-applicable record; every other check keeps its recorded result.")
 
 
 def mark_not_applicable(check: dict[str, Any], reason: str, recorded_by: str) -> None:
@@ -662,11 +1072,19 @@ def record_evaluation(
     if not evidence:
         raise ProtocolError("every evaluated check needs at least one evidence entry")
     kinds = [verify_evidence(root, entry) for entry in evidence]
-    if not any(kind != "observation" for kind in kinds):
+    # The collector is deterministic code that read the repository itself, so its
+    # reported results stand alone. A model's result must rest on something the
+    # script can check.
+    if recorded_by != "collector" and not VERIFIED_KINDS.intersection(kinds):
         raise ProtocolError(
-            "evidence must include at least one verifiable entry: `path:line — note`, a file path, "
-            "`command: `<command>` → <result>`, or `search: `<pattern>` in <scope> → <count> matches`"
+            "evidence needs at least one entry the script can verify against the repository: a citation "
+            "`path:line — note`, a file `path — note`, search: ..., or files: .... Commands and notes support a "
+            "result but never stand alone."
         )
+    if tier is None:
+        if status != "present":
+            raise ProtocolError(f"a {status} result needs --tier: direct, supported, or inferred")
+        tier = "direct"
     if tier not in TIERS:
         raise ProtocolError(f"evidence tier must be one of {', '.join(TIERS)}")
     if status == "violation" and tier == "inferred":
@@ -682,13 +1100,15 @@ def record_evaluation(
     classification = classification or "observed"
     if classification == "misconfigured" and status not in {"partial", "violation"}:
         raise ProtocolError("the misconfigured classification requires partial or violation")
+    degraded_reason = None if degraded is None else require_reason(degraded)
 
     decision_id = None
     if status in GRADED_STATUSES:
+        paths = cited_paths(evidence)
         applicable_decisions = [
             decision
             for decision in run.get("decisions", [])
-            if decision_applies(decision, check["checkId"], cited_paths(evidence))
+            if decision_applies(root, decision, check["checkId"], paths)
         ]
         if judgement is None:
             judgement = "noted" if applicable_decisions else "act-on"
@@ -709,16 +1129,16 @@ def record_evaluation(
         judgement = None
         judgement_reason = None
 
-    for value in (gap, remediation, judgement_reason):
+    for value in (gap, remediation, judgement_reason, degraded_reason):
         if isinstance(value, str) and contains_secret(value):
-            raise ProtocolError("text looks like it contains a secret; redact it as <REDACTED>")
+            raise ProtocolError(f"text looks like it contains a secret; replace the secret with {REDACTED}")
     check.update(
         {
             "applicability": "applicable",
             "applicabilityReason": None,
             "evaluationState": "evaluated",
-            "evaluationReason": degraded.strip() if isinstance(degraded, str) and degraded.strip() else None,
-            "evidenceQuality": "degraded" if isinstance(degraded, str) and degraded.strip() else "complete",
+            "evaluationReason": degraded_reason,
+            "evidenceQuality": "degraded" if degraded_reason else "complete",
             "classification": classification,
             "status": status,
             "evidence": [entry.strip() for entry in evidence],
@@ -735,104 +1155,103 @@ def record_evaluation(
 
 def command_record(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
-    check = find_check(run, arguments.check)
-    record_evaluation(
-        root,
-        run,
-        check,
-        status=arguments.status,
-        evidence=arguments.evidence or [],
-        tier=arguments.tier,
-        gap=arguments.gap,
-        remediation=arguments.remediation,
-        judgement=arguments.judgement,
-        judgement_reason=arguments.reason,
-        classification=arguments.classification,
-        degraded=arguments.degraded,
-        recorded_by="model",
-    )
-    save_run(root, arguments.audit, run)
+    with staged_run(root, arguments.audit) as run:
+        check = find_check(run, arguments.check)
+        record_evaluation(
+            root,
+            run,
+            check,
+            status=arguments.status,
+            evidence=arguments.evidence or [],
+            tier=arguments.tier,
+            gap=arguments.gap,
+            remediation=arguments.remediation,
+            judgement=arguments.judgement,
+            judgement_reason=arguments.reason,
+            classification=arguments.classification,
+            degraded=arguments.degraded,
+            recorded_by="model",
+        )
+        clear_audit_applicability(run)
     print(f"Recorded {check['checkId']}: {check['status']} ({check['evidenceTier']} evidence, judgement {check['judgement'] or 'n/a'}).")
     return 0
 
 
 def command_not_applicable(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
-    check = find_check(run, arguments.check)
-    mark_not_applicable(check, require_reason(arguments.reason), "model")
-    save_run(root, arguments.audit, run)
+    with staged_run(root, arguments.audit) as run:
+        check = find_check(run, arguments.check)
+        mark_not_applicable(check, require_reason(arguments.reason), "model")
+        clear_audit_applicability(run)
     print(f"Recorded {check['checkId']} as not applicable.")
     return 0
 
 
 def command_not_evaluated(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
     reason = require_reason(arguments.reason)
     if arguments.remaining == bool(arguments.check):
         raise ProtocolError("name one check, or pass --remaining to record every still-pending check")
-    if arguments.remaining:
-        pending = [check for check in run["checks"] if check["evaluationReason"] == PENDING_REASON]
-        for check in pending:
+    with staged_run(root, arguments.audit) as run:
+        if arguments.remaining:
+            pending = [check for check in run["checks"] if is_pending(check)]
+            for check in pending:
+                mark_not_evaluated(check, reason, "model")
+            message = f"Recorded {len(pending)} pending checks as not evaluated: {reason}"
+        else:
+            check = find_check(run, arguments.check)
             mark_not_evaluated(check, reason, "model")
-        save_run(root, arguments.audit, run)
-        print(f"Recorded {len(pending)} pending checks as not evaluated: {reason}")
-        return 0
-    check = find_check(run, arguments.check)
-    mark_not_evaluated(check, reason, "model")
-    save_run(root, arguments.audit, run)
-    print(f"Recorded {check['checkId']} as not evaluated.")
+            message = f"Recorded {check['checkId']} as not evaluated."
+        clear_audit_applicability(run)
+    print(message)
     return 0
 
 
 def command_audit_not_applicable(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
     reason = require_reason(arguments.reason)
-    for check in run["checks"]:
-        mark_not_applicable(check, reason, "model")
-    run["auditApplicability"] = {"status": "not-applicable", "reason": reason}
-    save_run(root, arguments.audit, run)
+    with staged_run(root, arguments.audit) as run:
+        for check in run["checks"]:
+            mark_not_applicable(check, reason, "model")
+        run["auditApplicability"] = {"status": "not-applicable", "reason": reason}
     print(f"Recorded the whole {arguments.audit} as not applicable: {reason}")
     return 0
 
 
 def command_snapshot(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
+    updates: dict[str, Any] = {}
     if arguments.json:
         value = read_json(Path(arguments.json), "snapshot file")
         if not isinstance(value, dict):
             raise ProtocolError("the snapshot file must contain a JSON object")
-        run["snapshot"].update(value)
+        updates.update(value)
     for item in arguments.set or []:
         key, separator, raw = item.partition("=")
         if not separator or not key.strip():
             raise ProtocolError(f"snapshot entries use key=value: {item!r}")
         try:
-            value = json.loads(raw)
+            updates[key.strip()] = parse_json_text(raw, f"snapshot value {key.strip()}")
         except json.JSONDecodeError:
-            value = raw
-        run["snapshot"][key.strip()] = value
+            updates[key.strip()] = raw
     if arguments.narrative:
-        run["snapshot"]["narrative"] = arguments.narrative
-    if contains_secret(json.dumps(run["snapshot"])):
-        raise ProtocolError("the snapshot looks like it contains a secret; redact it as <REDACTED>")
-    save_run(root, arguments.audit, run)
-    print(f"Snapshot now has {len(run['snapshot'])} entries.")
+        updates["narrative"] = arguments.narrative
+    if contains_secret(json.dumps(updates)):
+        raise ProtocolError(f"the snapshot looks like it contains a secret; replace the secret with {REDACTED}")
+    with staged_run(root, arguments.audit) as run:
+        run["snapshot"].update(updates)
+        count = len(run["snapshot"])
+    print(f"Snapshot now has {count} entries.")
     return 0
 
 
 def command_hypothesis(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
-    run = load_run(root, arguments.audit)
-    find_check(run, arguments.check)
     if contains_secret(arguments.note):
-        raise ProtocolError("the note looks like it contains a secret; redact it as <REDACTED>")
-    run["hypotheses"].append({"checkId": arguments.check, "note": arguments.note.strip()})
-    save_run(root, arguments.audit, run)
+        raise ProtocolError(f"the note looks like it contains a secret; replace the secret with {REDACTED}")
+    with staged_run(root, arguments.audit) as run:
+        find_check(run, arguments.check)
+        run["hypotheses"].append({"checkId": arguments.check, "note": arguments.note.strip()})
     print("Recorded an unverified hypothesis; it appears in the report appendix, never in the score.")
     return 0
 
@@ -840,7 +1259,7 @@ def command_hypothesis(arguments: argparse.Namespace) -> int:
 def command_status(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
     run = load_run(root, arguments.audit)
-    pending = [check for check in run["checks"] if check["evaluationReason"] == PENDING_REASON]
+    pending = [check for check in run["checks"] if is_pending(check)]
     print(f"{arguments.audit} run {run['runIdentifier']}: {len(run['checks']) - len(pending)} of {len(run['checks'])} checks recorded.")
     for check in pending:
         severity = check.get("severity") or "unrated"
@@ -957,7 +1376,7 @@ def render_findings(run: dict[str, Any], findings: dict[str, Any], snapshot_mark
             if check.get("judgementReason"):
                 lines.append(f"   - Judgement: {check['judgementReason']}")
             for entry in check["evidence"][:5]:
-                lines.append(f"   - Evidence: {entry}")
+                lines.append(f"   - {render_evidence(entry)}")
             if len(check["evidence"]) > 5:
                 lines.append(f"   - Evidence: {len(check['evidence']) - 5} more entries in findings.json")
     lines += ["", "## All checks", "", "| Layer | Check | Severity | Status | Judgement |", "| --- | --- | --- | --- | --- |"]
@@ -975,7 +1394,7 @@ def render_findings(run: dict[str, Any], findings: dict[str, Any], snapshot_mark
     if present:
         lines += ["", "## Present", ""]
         for check in present:
-            lines.append(f"- **{check['title']}**: {check['evidence'][0]}")
+            lines.append(f"- **{check['title']}**: {render_evidence(check['evidence'][0])}")
     not_evaluated = [check for check in run["checks"] if check["applicability"] == "applicable" and check["status"] is None]
     if not_evaluated:
         lines += ["", "## Not evaluated", ""]
@@ -1042,9 +1461,14 @@ def render_snapshot(run: dict[str, Any]) -> str:
 def command_finish(arguments: argparse.Namespace) -> int:
     root = repository_root(arguments.repository)
     audit = arguments.audit
+    with exclusive_lock(output_directory(root, audit)):
+        return finish_run(root, audit)
+
+
+def finish_run(root: Path, audit: str) -> int:
     run = load_run(root, audit)
     errors: list[str] = []
-    pending = [check["checkId"] for check in run["checks"] if check["evaluationReason"] == PENDING_REASON]
+    pending = [check["checkId"] for check in run["checks"] if is_pending(check)]
     if pending:
         errors.append(
             f"{len(pending)} checks have no recorded result: {', '.join(pending)}. Record each one as evaluated, "
@@ -1068,23 +1492,36 @@ def command_finish(arguments: argparse.Namespace) -> int:
         return 1
 
     findings, metadata = build_documents(run)
+    findings_text = dump_json(findings)
+    metadata_text = dump_json(metadata)
+    # Validate the exact bytes that will be published, read back the way the
+    # score calculator reads them.
+    staging = staging_path(root, audit).parent
+    write_text_atomic(staging / "findings.json", findings_text)
+    write_text_atomic(staging / "metadata.json", metadata_text)
     catalog = CALCULATOR.load_catalog(SKILLS_ROOT, audit, {})
     try:
-        CALCULATOR.parse_canonical_candidate(findings, metadata, catalog, staging_path(root, audit), "staging")
+        CALCULATOR.parse_canonical_candidate(
+            CALCULATOR.strict_json_load(staging / "findings.json", {}),
+            CALCULATOR.strict_json_load(staging / "metadata.json", {}),
+            catalog,
+            staging / "findings.json",
+            "staging",
+        )
     except CALCULATOR.ScoreInputError as error:
         print(f"Run not published: the findings contract rejected the run: {error}")
         return 1
 
     snapshot_markdown = render_snapshot(run)
     findings_markdown = render_findings(run, findings, snapshot_markdown)
-    output = root / AUDITS_DIRECTORY / audit
+    output = output_directory(root, audit)
     publish(
         output,
         (
             ("snapshot.md", f"# {audit} snapshot\n\nRun `{findings['runIdentifier']}`.\n\n" + snapshot_markdown),
             ("findings.md", findings_markdown),
-            ("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False) + "\n"),
-            ("findings.json", json.dumps(findings, indent=2, ensure_ascii=False) + "\n"),
+            ("metadata.json", metadata_text),
+            ("findings.json", findings_text),
         ),
     )
     shutil.rmtree(output / STAGING_DIRECTORY, ignore_errors=True)
@@ -1162,28 +1599,41 @@ def command_decide(arguments: argparse.Namespace) -> int:
         raise ProtocolError(f"decision must be one of {', '.join(DECISION_KINDS)}")
     reason = require_reason(arguments.reason)
     owner = require_reason(arguments.owner)
+    if contains_secret(reason) or contains_secret(owner):
+        raise ProtocolError(f"text looks like it contains a secret; replace the secret with {REDACTED}")
     if arguments.review_after:
         try:
             date.fromisoformat(arguments.review_after)
         except ValueError as error:
             raise ProtocolError("--review-after must be a date such as 2027-01-31") from error
-    path = root / AUDITS_DIRECTORY / DECISIONS_FILE
-    data = read_json(path, "decisions file") if path.is_file() else {"schemaVersion": "1.0.0", "decisions": []}
-    decisions = data.setdefault("decisions", [])
-    identifier = f"decision-{len(decisions) + 1:03d}"
-    decisions.append(
-        {
-            "id": identifier,
-            "checkId": arguments.check,
-            "decision": arguments.decision,
-            "reason": reason,
-            "owner": owner,
-            "scope": arguments.scope or ["**"],
-            "recordedAt": utc_now(),
-            "reviewAfter": arguments.review_after,
-        }
-    )
-    write_json_atomic(path, data)
+    scope = arguments.scope or ["**"]
+    for pattern in scope:
+        Scope(root, pattern)
+    with exclusive_lock(root / AUDITS_DIRECTORY):
+        path = root / AUDITS_DIRECTORY / DECISIONS_FILE
+        data: dict[str, Any] = {"schemaVersion": "1.0.0", "decisions": []}
+        if path.is_file():
+            load_decisions(root)
+            data = read_json(path, "decisions file")
+        used = set()
+        for item in data["decisions"]:
+            match = re.fullmatch(r"decision-([0-9]+)", str(item.get("id", "")))
+            if match:
+                used.add(int(match.group(1)))
+        identifier = f"decision-{max(used, default=0) + 1:03d}"
+        data["decisions"].append(
+            {
+                "id": identifier,
+                "checkId": arguments.check,
+                "decision": arguments.decision,
+                "reason": reason,
+                "owner": owner,
+                "scope": scope,
+                "recordedAt": utc_now(),
+                "reviewAfter": arguments.review_after,
+            }
+        )
+        write_json_atomic(path, data)
     print(f"Recorded {identifier}: {arguments.decision} for {arguments.check}. Audits will keep reporting the status honestly but will not ask you to act on it again.")
     return 0
 
@@ -1220,8 +1670,12 @@ def parser() -> argparse.ArgumentParser:
     begin.add_argument("audit")
     begin.add_argument("--restart", action="store_true", help="discard an existing staged run")
     begin.add_argument("--since", help="limit the run to changes since this Git reference")
-    begin.add_argument("--filter", action="append", help="record another filter argument")
-    begin.add_argument("--enrichment", action="append", help="record an enrichment flag such as --with-run")
+    begin.add_argument("--filter", action="append", help="record another filter argument; use --filter=<value>")
+    begin.add_argument(
+        "--enrichment",
+        action="append",
+        help="record an enrichment flag such as with-run (or --enrichment=--with-run)",
+    )
     begin.add_argument("--threshold", action="append", help="record a threshold override as key=value")
     begin.set_defaults(handler=command_begin)
 
@@ -1230,7 +1684,11 @@ def parser() -> argparse.ArgumentParser:
     record.add_argument("check")
     record.add_argument("--status", required=True, choices=STATUSES)
     record.add_argument("--evidence", action="append", help="repeatable; see references/run-protocol.md for the forms")
-    record.add_argument("--tier", default="direct", choices=TIERS)
+    record.add_argument(
+        "--tier",
+        choices=TIERS,
+        help="how strongly the evidence shows the status; required for partial, missing, and violation",
+    )
     record.add_argument("--gap")
     record.add_argument("--remediation")
     record.add_argument("--judgement", choices=JUDGEMENTS)
@@ -1287,7 +1745,7 @@ def parser() -> argparse.ArgumentParser:
     decide.add_argument("--decision", required=True, choices=DECISION_KINDS)
     decide.add_argument("--reason", required=True)
     decide.add_argument("--owner", required=True)
-    decide.add_argument("--scope", action="append", help="repository-relative glob; repeatable; default is the whole repository")
+    decide.add_argument("--scope", action="append", help="repository-relative path or glob; repeatable; default is the whole repository")
     decide.add_argument("--review-after", help="date after which audits flag the decision for review")
     decide.set_defaults(handler=command_decide)
 
@@ -1301,6 +1759,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
+    clear_caches()
     try:
         return int(arguments.handler(arguments))
     except ProtocolError as error:

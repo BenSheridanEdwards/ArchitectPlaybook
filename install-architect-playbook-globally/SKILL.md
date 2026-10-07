@@ -16,7 +16,7 @@ This skill is the machine-wide counterpart to `/install-architect-playbook-local
 /install-architect-playbook-globally                 # install or update every skill into ~/.claude/skills/
 /install-architect-playbook-globally --dry-run       # print the plan without copying anything
 /install-architect-playbook-globally --force         # overwrite destinations even if they appear newer
-/install-architect-playbook-globally --include=name  # install only one named skill (repeatable)
+/install-architect-playbook-globally --include=name  # install only the named skill and what it needs (repeatable)
 /install-architect-playbook-globally --exclude=name  # skip a named skill (repeatable)
 ```
 
@@ -66,10 +66,10 @@ Same as the local installer. Exclude:
 
 After applying `--include` and `--exclude`, resolve dependency closure:
 
-- If any `*-audit` folder is selected, add `audit-protocol` and `repository-quality-score`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates with the score calculator.
+- If any `*-audit` folder is selected, add `audit-protocol`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates each run with the score calculator. Also copy that one file, `repository-quality-score/scripts/calculate_repository_quality_score.py`. If `repository-quality-score` itself is not selected, copy only that file, without the scorer's `SKILL.md`, so the scorer is not offered with missing catalogs. Selecting an audit never adds other audits.
 - If `repository-quality-score` is selected, read its `score-policy.json` and add every folder named in `audits[].name`.
 
-Show the expanded set during `--dry-run`. If the user explicitly excludes a required folder, fail before copying with a clear conflict message. Never install an audit without its protocol, or an incomplete scorer.
+Show the expanded set during `--dry-run`. If the user excludes `audit-protocol` while an audit is selected, or a policy audit while `repository-quality-score` is selected, fail before copying with a clear conflict message. Excluding `repository-quality-score` is allowed: audits still get the calculator file. Never install an audit without its protocol and calculator file, or an incomplete scorer.
 
 ### Step 4 — Confirmation gate for overwrites
 
@@ -110,7 +110,7 @@ Open a new Claude Code chat (any project) to pick up the new slash commands.
 - Refuses to write outside `$HOME/.claude/skills/`.
 - Refuses to delete any directory in the destination — only `cp -R` over the top of it.
 - `--dry-run` is honored.
-- Selecting any audit always installs `audit-protocol` and `repository-quality-score`. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
+- Selecting any audit always installs `audit-protocol` and the score calculator file. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
 
 ## Recommended commit message
 

@@ -27,24 +27,25 @@ Audits publish only through `audit-protocol/scripts/audit_run.py`, a standard-li
 
 1. **Staged runs.** `begin` records the run identity, the exact commit, working-tree cleanliness, a tree fingerprint, and the execution options. It stages every catalog check as pending.
 2. **One decision per check.** Each check is recorded as evaluated, not applicable, or not evaluated with a reason. `finish` refuses to publish while any check is pending.
-3. **Verified evidence.** Every evaluated check needs at least one verifiable evidence entry:
+3. **Verified evidence.** Every evaluated check needs at least one entry the script verifies against the repository:
    - a citation;
    - a file;
-   - a command;
-   - a search.
+   - a search;
+   - a file count.
 
-   Cited files and lines must exist, and text quoted in backticks must appear at the cited lines. Search counts are re-run. Secret-looking evidence is rejected. A `violation` needs `direct` or `supported` evidence. Unverified suspicions become hypotheses in an appendix, never statuses.
+   Cited files and lines must exist, and text quoted in backticks must appear at the cited lines. Search and file counts are re-run over the files Git does not ignore, with Git's glob rules. Commands and free-text notes may support a result but never stand alone, except from a deterministic collector. Anything else is rejected rather than treated as an observation. Secret-looking evidence is rejected; `<REDACTED>` inside a quote matches any text. A `violation` needs `direct` or `supported` evidence, and every non-present result must state its tier. Unverified suspicions become hypotheses in an appendix, never statuses.
 4. **Judgement as data.** Every non-present finding carries a judgement: `act-on`, `consider`, `noted`, or `dismissed`. The chat's top recommendations come only from `act-on`. Dismissals carry reasons, and the report lists them.
 5. **Decision memory.** `.architect-audits/decisions.json` records findings the user has accepted, scoped by check and path. Covered findings keep their honest status, so the score still reflects them, but their judgement becomes `noted`.
-6. **One validator.** `finish` validates the run with the calculator's own `parse_canonical_candidate`, so a published run is exactly what `/repository-quality-score` accepts.
+6. **One validator.** `finish` writes the documents, reads them back with the calculator's own strict JSON loader, and validates them with its `parse_canonical_candidate`. A published run is therefore exactly what `/repository-quality-score` accepts.
 7. **Rendered reports.** `findings.md` and `snapshot.md` are rendered from the JSON. The four files are replaced one at a time, with `findings.json` last as the completion marker. A failed write restores the previous files. If the process is killed part-way, `findings.json` and `metadata.json` disagree on run identity, and the calculator rejects the set instead of mixing runs.
 8. **Collectors.** An audit may ship `scripts/collect.py`, a deterministic, read-only collector. `begin` runs it and records its results through the same validation.
+9. **One command at a time.** Commands that change a run hold an operating-system lock on the audit's output directory, so parallel commands wait instead of silently losing updates.
 
-Findings keep schema `2.0.0`. The protocol adds optional fields that the contract already allows: `protocolVersion`, `evidenceTier`, `judgement`, `judgementReason`, `decisionId`, `recordedBy`, `summary`, `scope`, and `hypotheses`. Per-check `severity` and `method` are copied from the catalog when the catalog defines them.
+Findings keep schema `2.0.0`. The protocol adds optional fields that the contract already allows: `protocolVersion`, `evidenceTier`, `judgement`, `judgementReason`, `decisionId`, `recordedBy`, `summary`, `snapshot`, `scope`, and `hypotheses`. Per-check `severity` and `method` are copied from the catalog when the catalog defines them.
 
 ## Consequences
 
-- Every audit depends on two sibling skill folders: `audit-protocol` for the script, and `repository-quality-score` for the calculator module. Installers must copy both whenever they install an audit.
+- Every audit depends on the sibling `audit-protocol` skill folder and on one file from `repository-quality-score`: its calculator module. Installers copy both whenever they install an audit. They copy the calculator file alone when the scorer itself is not selected, so installing one audit never pulls in the other thirteen.
 - Audit skill bodies shrink. Run identity, the findings contract, report shapes, and the chat format are defined once instead of fourteen times.
 - A run that changes the repository mid-way, cites something that does not exist, or skips a check cannot be published. The model must fix the evidence or record the honest state.
 - Not-evaluated checks reduce coverage instead of earning credit. Scores fall where they were previously inflated.

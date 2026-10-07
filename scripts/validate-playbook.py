@@ -592,6 +592,7 @@ AUDIT_PROTOCOL_BUNDLE_FILES = (
     "references/run-protocol.md",
 )
 AUDIT_PROTOCOL_SCRIPT_REFERENCE = "audit-protocol/scripts/audit_run.py"
+AUDIT_PROTOCOL_GUIDE_REFERENCE = "audit-protocol/references/run-protocol.md"
 
 
 def validate_audit_protocol(root: Path, findings: list[Finding]) -> None:
@@ -609,13 +610,21 @@ def validate_audit_protocol(root: Path, findings: list[Finding]) -> None:
         _, _, body = parse_frontmatter(skill_path.read_text(encoding="utf-8"))
         if is_stub(body):
             continue
-        if AUDIT_PROTOCOL_SCRIPT_REFERENCE not in body:
+        begin_command = re.compile(
+            re.escape(AUDIT_PROTOCOL_SCRIPT_REFERENCE) + r'"?\s+begin\s+' + re.escape(directory.name) + r"(?![A-Za-z0-9-])"
+        )
+        if not begin_command.search(body):
             findings.append(
                 Finding(
                     "error",
                     skill_path,
-                    f"audit must publish through the shared protocol script ({AUDIT_PROTOCOL_SCRIPT_REFERENCE})",
+                    "audit must begin its run through the shared protocol script: "
+                    f'python3 "${{CLAUDE_SKILL_DIR}}/../{AUDIT_PROTOCOL_SCRIPT_REFERENCE}" begin {directory.name}',
                 )
+            )
+        if AUDIT_PROTOCOL_GUIDE_REFERENCE not in body:
+            findings.append(
+                Finding("error", skill_path, f"audit must link the run protocol ({AUDIT_PROTOCOL_GUIDE_REFERENCE})")
             )
 
 
