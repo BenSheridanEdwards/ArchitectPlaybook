@@ -2,7 +2,7 @@
 
 **Reviewed:** 6 October 2026, against `main` at `fd18e4d`.
 
-**Scope:** all twenty skills in this repository, plus the repository-local `pull-request-quality-contract`.
+**Scope:** all twenty-one skills in this repository, plus the repository-local `pull-request-quality-contract`.
 
 **Compared with:**
 
@@ -12,7 +12,7 @@
 
 **Status:** this is the plan of record. It is executed through reviewed pull requests, starting with #23.
 
-**Method:** every `SKILL.md`, contract, decision record, the validator, and the calculator were read in full. All `.architect-audits/` outputs under `~/Projects` were inspected. Claims about the three external collections were checked against their source files.
+**Method:** every `SKILL.md`, contract, decision record, the validator, and the calculator were read in full. All `.architect-audits/` outputs in the owner's local projects were inspected. Claims about the three external collections were checked against their source files.
 
 ## Summary
 
@@ -25,11 +25,11 @@
 
 ### What is not working
 
-1. **The audits do not produce the contract.** No schema 2.0.0 `findings.json` exists anywhere under `~/Projects`. The real runs that do exist collapse the catalog (seven of thirty-three checks emitted), invent identifiers and statuses, or write a different document shape. The calculator has never scored real output.
+1. **The audits do not produce the contract.** No schema 2.0.0 `findings.json` exists in any of the owner's projects. That contract landed on 13 August 2026, and no audit has run since. The earlier runs show the underlying problem: long prose specifications drift. They collapsed the catalog (seven of thirty-three checks emitted), used ad hoc identifiers, and wrote different document shapes. The calculator has never scored real output.
 2. **The model is doing a linter's job.** At least half of the 390 checks are mechanical facts that a compiler, linter, or script decides better. Those checks crowd out the judgement checks only a model can do. Each audit's `SKILL.md` is 2,600 to 5,200 words (roughly 5,000 to 9,500 tokens); pstack averages about 600 words per skill.
 3. **Skill text contradicts the contract.**
-   - Seven audits tell the model to grade unevaluated checks `partial`, which earns 50 percent.
-   - `/pre-audit-setup` leaves the tree dirty, so no score can be official.
+   - Eight audits tell the model to grade checks it could not evaluate as `partial`, which earns 50 percent.
+   - `/pre-audit-setup` leaves the tree dirty, so no score can be official until its generated files are committed or ignored.
 4. **Several baselines are stale or wrong.**
    - Stale: the React Compiler era, Biome 2 and Oxlint, pnpm 11 defaults, the OWASP Top 10:2025, and `@axe-core/react`.
    - Wrong: god components measured by fan-in, mandatory barrel files, Server Component `fetch` flagged as a violation, and stricter pre-commit setups penalised.
@@ -38,40 +38,35 @@
 
 ### The ten changes that matter most
 
-1. **Generate a skeleton for the model to fill.** Each run starts from a generated skeleton, and the audit cannot finish until a `validate-findings` script passes. Enforce it with a skill-scoped `Stop` hook using `once: true`.
-2. **Add fixture-based evaluations per audit.** Use the method you already run in `~/Projects/no-tautology-eval`. Every `SKILL.md` change and every `/system-self-improve` patch must show red, then green, on a fixture.
+1. **Generate a skeleton for the model to fill.** Each run starts from a staged skeleton. Nothing is published until the protocol's own validation passes, including verified citations.
+2. **Add fixture-based evaluations.** Start with three audits, and add fixtures as each audit is rewritten. Use the method the owner already runs for the `no-tautology` skill: planted fixtures, programmatic grading, and blind review. A `/system-self-improve` patch must show red, then green, on a fixture.
 3. **Split checks into `tool` and `model`.** Tool checks are computed by a collector script. Model checks get the attention, with quoted `path:line` evidence.
 4. **Do the Phase 0 correctness fixes.** These are the contract contradictions, the dirty-tree bug, stale flags, the accessibility structure, and the unrecognised `trigger:` key. Most are one-line changes.
 5. **Verify findings and sort them by judgement.**
    - Give every finding an evidence tier or confidence.
    - Re-read every cited line.
    - Run an independent refutation pass for high-severity findings.
-   - Sort into Act on, Consider, Noted, and Dismissed. The chat's Top 5 becomes Act on, and Dismissed becomes a visible trust mechanism.
+   - Sort into Act on, Consider, Noted, and Dismissed. The chat's Top 5 becomes Act on, and Dismissed becomes a visible trust mechanism. This changes the Top 5 wording in `CLAUDE.md` and the README.
 6. **Remember decisions.** Add `.architect-audits/decisions.json`, honoured by every audit and reported separately by the score. When a user rejects a finding for a lasting reason, offer to record it.
 7. **Add severity, and give each concern one owner.** Add `severity` to the catalogs, give every cross-cutting concern a single owning check, and adopt score policy 2.0.0.
-8. **Rebuild `/architecture-audit`.**
-   - Scope the work by Git churn.
-   - Use the deletion test and the agent-era design red flags.
-   - End with a design session instead of a static plan.
-
-   Then refresh React, security, testing, and dependency, in that order of risk.
+8. **Rewrite every audit around the protocol,** starting with the highest-risk ones: security, testing, and architecture. The architecture rewrite:
+   - scopes the work by Git churn;
+   - uses the deletion test and the agent-era design red flags;
+   - ends with a design session instead of a static plan.
 9. **Add a context intake, a pull-request-scoped `--since` mode, and better plans.** Plans should be agent briefs, ordered by the enforcement ladder: architecture, then types, then lint, then tests, then documentation.
-10. **Package the playbook as a Claude Code plugin.**
-    - Generate shared protocol text from one template.
-    - Cut each `SKILL.md` to about 150 lines plus references.
-    - Mark user-run skills `disable-model-invocation: true`.
+10. **Package the playbook as a Claude Code plugin,** and mark user-run skills `disable-model-invocation: true`. As each audit is rewritten, cut its `SKILL.md` to about 150 to 250 lines. Keep the check tables there, and move detection detail into reference files.
 
 Before you restructure the README or reorder checks, coordinate with MergeFlow. Its X-Ray feature scrapes both (see cross-cutting problem 12).
 
 ## What real runs show
 
-- **No canonical runs exist.** Fifty-two `findings.json` files exist under `~/Projects`; none uses schema 2.0.0, and no `score.json` exists. The 1,862-line calculator has only ever scored test fixtures. The repository's 58 unit tests pass.
+- **No canonical runs exist.** Fifty-two `findings.json` files exist in the owner's projects. They are worktree copies of eight distinct files, holding six audit runs. None uses schema 2.0.0, and no `score.json` exists. The 1,862-line calculator has only ever scored test fixtures. The repository's 58 unit tests pass.
 - **MergeFlow, May 2026:**
-  - The testing audit emitted seven checks against a catalog of thirty-three, with invented identifiers such as `testing.coverage-thresholds`.
-  - The quality-gates audit used `misconfigured` as a status. It also graded whole-repository type checking in pre-commit as misconfigured because the baseline expects staged-file type checking.
+  - The testing audit emitted seven checks against a catalog of thirty-three, with ad hoc identifiers such as `testing.coverage-thresholds`. Catalog identifiers did not exist until 29 June.
+  - The quality-gates audit used `misconfigured` as a status, which that version of the skill defined. It also graded whole-repository type checking in pre-commit as misconfigured because the baseline expects staged-file type checking.
   - The architecture audit wrote a different document entirely: `resolvedInThisPr`, `remainingFindings`, `nextPr`.
 - **This repository's own architecture dogfood** invented four checks. It graded "graph missing" as `partial`, though the skill says that case must be "not evaluated".
-- **These runs predate schema 2.0.0.** But 2.0.0 made the specification longer and stricter without adding anything that forces the model to conform. Longer prose is not a mechanism.
+- **These runs predate schema 2.0.0, and in part the check identifiers,** so they did not break a contract that existed at the time. They show that prose specifications drift. Schema 2.0.0 made the specification longer and stricter without adding anything that forces the model to conform. Longer prose is not a mechanism.
 
 ## Cross-cutting problems, in order of impact
 
@@ -79,23 +74,33 @@ Before you restructure the README or reorder checks, coordinate with MergeFlow. 
 
 **Evidence:**
 
-- There is no schema 2.0.0 `findings.json` anywhere under `~/Projects`: none of the 52 findings files found, and no `score.json`. The 1,862-line calculator has never scored a real canonical audit.
-- On MergeFlow in May 2026, the testing audit emitted seven checks against a 33-check catalog, with invented identifiers. The quality-gates audit used `misconfigured` as a status. The architecture audit wrote a different document shape (`resolvedInThisPr`, `nextPr`).
+- There is no schema 2.0.0 `findings.json` in any of the owner's projects. None of the 52 findings files (eight distinct files) uses it, and no `score.json` exists. The 1,862-line calculator has never scored a real canonical audit.
+- On MergeFlow in May 2026, the testing audit emitted seven checks against a 33-check catalog, with ad hoc identifiers; catalog identifiers came later. The quality-gates audit used `misconfigured` as a status, as its skill then allowed. The architecture audit wrote a different document shape (`resolvedInThisPr`, `nextPr`).
 - This repository's own architecture dogfood graded "graph missing" as `partial`, though the skill mandates "not evaluated" for that case.
-- Those runs predate 2.0.0. But 2.0.0 made the specification longer and stricter without adding any mechanism that makes the model conform.
+- Those runs predate 2.0.0. They show drift, not violations of a contract that existed at the time, and 2.0.0 added no mechanism that makes the model conform.
 
 **Fix:** have the model fill in the output rather than author it.
 
-1. A shared `begin-run` script writes the skeleton: run identity, commit, cleanliness measured by the same code the calculator uses, and every catalog check pre-filled as applicable and not evaluated.
+1. `audit_run.py begin` writes the skeleton: run identity, commit, cleanliness measured by the same code the calculator uses, and every catalog check pending.
 2. The model changes only the checks it actually evaluated.
-3. A shared `validate-findings` script, built on the calculator's existing `_canonical_check` validation, must pass before the audit may report completion.
-4. A skill-scoped `Stop` hook (skills can now declare `hooks:` in frontmatter) can enforce step 3.
+3. `audit_run.py finish` validates the whole run with the calculator's own `parse_canonical_candidate` before anything is published.
+4. Later, a skill-scoped `Stop` hook could add a structural guard by blocking a stop only while a staged run exists. Do not use `once: true` for this: it removes the hook after its first success, possibly before any findings exist. #25 implements steps 1 to 3 as `audit_run.py begin`, `record`, and `finish`.
 
 ### 2. The skills contradict the contract they cite
 
 These are mechanical fixes, but each one changes scores or behaviour:
 
-- **Unevaluated checks get half credit.** Seven audits say a check that could not be evaluated should "degrade to `partial`": dependency tiers, bundle stats, `--with-run` failures, Lighthouse, link checks, shallow clones. `partial` earns 50 percent. The contract says applicable but not evaluated, with null status. Add a validator rule that rejects the phrase.
+- **Unevaluated checks get half credit.** Eight audits grade checks they could not evaluate as `partial`:
+  - `/agentic-audit` (shallow clones);
+  - `/bundle-build-audit` (bundle stats);
+  - `/dependency-audit` (input tiers and network failures);
+  - `/documentation-audit` (link checks);
+  - `/linting-audit`, `/testing-audit`, and `/typescript-audit` (`--with-run` failures);
+  - `/performance-audit` (Lighthouse results).
+
+  The wording varies: "degrade to `partial`", "record `partial`", "report `partial`". A phrase rule in the validator cannot catch every variant, so each audit's rewrite removes the wording. #25's protocol already overrides it. `partial` earns 50 percent; the contract says applicable but not evaluated, with null status.
+
+  Consequence: default runs of the dependency, bundle-build, documentation, and performance audits then leave those checks not evaluated. An official score therefore needs their enrichment inputs (network access, a bundle stats file, Lighthouse results), or deterministic collectors that gather them.
 - **Removed flags still applied.** Eleven audits still apply `--include` and `--exclude`, which `ARCHITECTURE.md` says were removed.
 - **Stale examples and structure:**
   - `/architecture-audit` shows a pre-2.0.0 `metadata.json` example.
@@ -104,11 +109,28 @@ These are mechanical fixes, but each one changes scores or behaviour:
   - The installers contradict each other on deletion.
   - The installers reference stubs that no longer exist.
   - `CONTRIBUTING.md` requires a README "Why each skill exists" section that does not exist.
-- **The required `trigger:` frontmatter key does nothing.** Claude Code ignores unknown keys silently, and uploading the skills to claude.ai for cloud sessions fails with "Unexpected key(s) in SKILL.md frontmatter". The `name` already equals the folder. Drop it, or move it under `metadata:`. Either way, change the frontmatter rule in `CLAUDE.md`, `.agents/CONVENTIONS.md`, `CONTRIBUTING.md`, and the validator's `validate_skills` in the same pull request, because all four currently require or document a top-level `trigger`. MergeFlow reads `trigger` but falls back to `/<folder>`.
+- **The required `trigger:` frontmatter key does nothing.** Claude Code ignores keys it does not recognise, and `name` already equals the folder. `trigger` only adds a field the validator must police, so drop it.
+  - Uploading skills to claude.ai also rejects unknown keys. That applies equally to the Claude Code fields this plan adds, such as `disable-model-invocation` and `argument-hint`. The playbook targets Claude Code and plugins, so that trade-off is accepted.
+  - Dropping it changes every place that requires or documents it, in one pull request:
+    - `CLAUDE.md`, `AGENTS.md`, `.agents/CONVENTIONS.md` and `CONTRIBUTING.md`;
+    - the README's frontmatter rule;
+    - the validator's `validate_skills`, and its tests;
+    - the bootstrap installer copy, which must match the installer byte for byte;
+    - the repository-local `pull-request-quality-contract` skill.
+  - MergeFlow reads `trigger` but falls back to `/<folder>`.
 
-### 3. `/pre-audit-setup` makes an official score impossible
+### 3. `/pre-audit-setup` blocks an official score until its output is committed or ignored
 
-It leaves `graphify-out/` untracked and `.claude/settings.json` modified. The calculator then reports `source-worktree-dirty-at-audit-time` for every run. Use `.claude/settings.local.json` and `.git/info/exclude` instead (details in the per-skill section).
+It leaves `graphify-out/` untracked and `.claude/settings.json` modified. Until the user commits both, the calculator reports `source-worktree-dirty-at-audit-time` for every run. The skill does tell users to commit the hook, but committing a generated graph is not a reasonable ask of a team.
+
+The obvious fixes do not work on their own:
+- A hook in `.claude/settings.local.json` is still an untracked file, unless the repository ignores it.
+- Excluding `graphify-out/` through `.git/info/exclude` leaves the graph missing from every `--worktree` checkout, so runs there report `graph-unavailable`.
+
+The robust fix:
+- Drop the settings hook; audits read the graph report directly.
+- Treat generated tooling output such as `graphify-out/` like `.architect-audits/`: excluded from source cleanliness, because it is not source.
+- Have `--worktree` runs build or copy the graph into the worktree.
 
 ### 4. The model is doing a linter's job
 
@@ -133,20 +155,20 @@ Asking a model to grep for these is slower and less accurate than the tool, and 
 
 - **Tool checks** are computed by a per-audit collector script (`tsc --showConfig`, `eslint --print-config`, `eslint --format json` for named rules, `knip`, `dependency-cruiser`, `npm audit --json`, `git log`). The script writes their status.
 - **Model checks** get the remaining budget, and require `path:line` evidence with the quoted line.
-- **When the tool is absent,** the finding is "enable the tool", one check, rather than sixteen guessed checks.
+- **When the tool is absent,** the finding is "enable the tool", one check, rather than a dozen guessed checks.
 
 ### 5. The score does not measure what matters
 
 - **No severity:** every standard check weighs the same, so `engines field declared` counts as much as `no high or critical vulnerabilities`.
 - **Soft weights invert priorities.** In `/testing-audit`, "Queries via `screen`" (a lint rule) and "No assertions against hard-coded utility classes" weigh 1.0. "Tests describe user behaviour", which the audit calls its first-class principle, and "Mocking at module boundaries" weigh 0.5.
-- **Concerns are counted repeatedly:** one decision about state or data fetching costs up to four checks across four audits. React hooks, testing, and accessibility lint plugins each count in two audits.
+- **Concerns are counted repeatedly:** one decision about state or data fetching costs up to four checks across three audits (`/architecture-audit`, `/react-audit` twice, and `/performance-audit`). The React hooks and accessibility lint plugins each count in two audits.
 - **Fix:** policy 2.0.0 with `severity` (for example critical 8, high 4, medium 2, low 1), plus one `ownerCheckId` per cross-cutting concern. Other audits cross-reference it without scoring it.
 
 ### 6. Findings are unverified and cannot be dismissed
 
 - There is no confidence or evidence tier and no verification pass.
 - There is no way to record "we decided this deliberately", so every re-run re-flags the same trade-offs until people stop reading.
-- MergeFlow already models `approvedPatterns` and `architectureNotes` for this playbook, but the skills themselves have no equivalent.
+- MergeFlow models `approvedPatterns` and `architectureNotes` in its own configuration. It does not pass them to playbook audits, and the skills themselves have no equivalent.
 
 **Fix:**
 
@@ -193,7 +215,7 @@ A Next.js application's highest-risk code (Server Actions and route handlers) is
 - **Dynamic context:** `${CLAUDE_SKILL_DIR}` to find `checks.json` and scripts, and `` !`git rev-parse HEAD` `` style injection.
 - **Isolation:** `context: fork` to run an audit in its own subagent context.
 - **Distribution:** plugin plus marketplace instead of copy installers.
-- **Worktree location:** `--worktree` creates `../wt-<audit>` beside the repository, which conflicts with your `~/Projects/README.md` rule that worktrees live in `.worktrees/`.
+- **Worktree location:** `--worktree` creates `../wt-<audit>` beside the repository. That conflicts with the owner's workspace rule that worktrees live in `.worktrees/` inside each repository. A `.worktrees/` directory must also be ignored or excluded, or it makes the main checkout dirty. #25 moves the flag to `.worktrees/<audit-name>`, and adds the directory to `.git/info/exclude`.
 - **Worktrees are not needed for parallelism.** Read-only audits do not conflict and can run in parallel without them; a worktree is only needed where a fix will land.
 
 ### 12. MergeFlow depends on undocumented internals of this repository
@@ -213,6 +235,7 @@ The skill text it injects at the same time demands schema 2.0.0 with `checkId`. 
 - Have MergeFlow read `playbook.json` and `checks.json` instead of prose.
 - Agree one findings contract.
 - Treat README restructuring and check reordering as breaking changes until then.
+- MergeFlow is a private repository. Its scrape has already drifted: it reads 28 table rows for `/linting-audit` against 27 catalog checks.
 
 ### 13. This repository fails its own agentic audit
 
@@ -235,9 +258,9 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 
 ### `/pre-audit-setup`
 
-**Verdict:** right idea; its side effects block the playbook's own score.
+**Verdict:** right idea; its side effects block an official score until its generated files are committed or ignored.
 
-- **Fix (high):** it creates untracked `graphify-out/` and modifies `.claude/settings.json`. The score calculator treats any change outside `.architect-audits/` as a dirty tree (`repository-quality-score/scripts/calculate_repository_quality_score.py:322`). After setup, no audit can feed an official score unless the user commits a generated graph and a settings change. Put the hook in `.claude/settings.local.json` and add `graphify-out/` to `.git/info/exclude`; neither touches tracked files.
+- **Fix (high):** it creates untracked `graphify-out/` and modifies `.claude/settings.json`. The score calculator treats any change outside `.architect-audits/` as a dirty tree (`repository-quality-score/scripts/calculate_repository_quality_score.py:322`). After setup, no audit can feed an official score unless the user commits a generated graph and a settings change. Moving the hook to `.claude/settings.local.json` and excluding `graphify-out/` through `.git/info/exclude` is not enough: the local settings file is untracked unless ignored, and the excluded graph is missing from every `--worktree` checkout. Instead, drop the settings hook, exclude generated tooling output from the cleanliness rule, and build or copy the graph into worktrees (cross-cutting problem 3).
 - **Fix:** graphify now installs with `pip` plus `graphify claude install`. Confirm that `~/.claude/skills/graphify/SKILL.md` (Step 1) is still where it lands.
 - **Add:** make this the one place that detects the stack. Write `.architect-audits/project-profile.json` once (package manager, framework and router, React and TypeScript versions, monorepo layout, deployment target, test runner, linter). Today each audit re-detects the stack with its own list; the Remix detection alone appears in nine files.
 - **Add:** a short context intake, described in the cross-cutting section.
@@ -259,7 +282,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 
 - **Wrong:** "No god component" uses fan-in (`architecture-audit/SKILL.md:81`). A `Button` rendered by 100 parents is a healthy primitive. God components are high fan-out, large, and multi-responsibility.
 - **Wrong:** "No god module" uses fan-in above 30. `utils`, `types`, and an `api-client` are expected to be widely imported; the example remediation tells teams to split `api-client`. The risk signal is high fan-in combined with high churn or high fan-out (a hub), or a stable module depending on an unstable one.
-- **Wrong:** "Feature folders have a single entry point" requires barrel files (`:69`, `:102`). Barrels are widely discouraged for bundle size, tooling speed, and cycle risk, which conflicts with the bundle and performance audits' goals.
+- **Wrong:** "Feature folders have a single entry point" requires barrel files (`:69`; the related consistency check at `:102` applies only where barrels are already the convention). Barrels are widely discouraged for bundle size, tooling speed, and cycle risk, which conflicts with the bundle and performance audits' goals.
 - **Wrong:** "Data fetching layer separated" (`:91`) flags `fetch` outside a hooks layer. That is idiomatic in Server Components, route loaders, and Server Actions.
 - **Wrong:** a 400-line file budget graded as a violation rewards shallow modules. Ousterhout's deep-module argument says interface size matters more than file length.
 - **Fix:** the `metadata.json` example (`:311-325`) is the pre-2.0.0 shape. Step 6 still applies the removed `--include` and `--exclude` flags.
@@ -279,7 +302,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 **Verdict:** a React Testing Library style guide rather than an audit of whether the tests would catch bugs.
 
 - **Fix (high):** a TypeScript backend gets "not applicable" because React is required (`testing-audit/SKILL.md:176`, `:203`). Grade any TypeScript project, and make the Testing Library layers conditional.
-- **Fix:** about sixteen of the thirty-three checks are rules in `eslint-plugin-testing-library` and `eslint-plugin-jest-dom`:
+- **Fix:** about a dozen of the thirty-three checks are rules in `eslint-plugin-testing-library` and `eslint-plugin-jest-dom`:
   - `prefer-screen-queries`
   - `render-result-naming-convention`
   - `no-container` and `no-node-access`
@@ -294,7 +317,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 
   Grade "plugin enabled with these rules", and count violations by running the linter.
 - **Fix:** "Components have at least minimal coverage" demands a test file per component, which contradicts the audit's own behaviour-first philosophy: one integration test can cover a page of components.
-- **Add:** "would these tests fail if the product broke?" Your own `no-tautology` skill (iterated with evals in `~/Projects/no-tautology-eval`) is exactly this judgement. Make it the core Layer 4 method, ranked by risk: hotspot and high-centrality modules first.
+- **Add:** "would these tests fail if the product broke?" Your own `no-tautology` skill (iterated by the owner with blind evaluations) is exactly this judgement. Make it the core Layer 4 method, ranked by risk: hotspot and high-centrality modules first.
 - **Add:** optional `--with-mutation` running Stryker on the five riskiest files, where a mutation score is far stronger evidence than coverage.
 - **Borrow:** gstack's `/test-audit` shape: a mechanical pre-filter before the model reads anything (no assertion, source grep, near-duplicate), a discovery budget, and a "retirement card" per low-value test. Also pstack's five shapes that "still pass when every imported function returns `undefined`".
 - **Add:** recognise Vitest browser mode, Playwright component tests, Storybook interaction tests, and Mock Service Worker as first-class.
@@ -326,7 +349,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 **Verdict:** written for React 18. React 19 and the compiler change or retire roughly a quarter of its checks.
 
 - **Add (high):** detect React Compiler adoption. `eslint-plugin-react-hooks` `recommended` now ships the compiler rules: `set-state-in-effect`, `set-state-in-render`, `purity`, `refs`, `immutability`, `static-components`, `globals`, `preserve-manual-memoization`, `incompatible-library`, and `error-boundaries`. Several Layer 1 checks become "rule enabled and clean". Under the compiler, "memoization for correctness" and most manual memoization advice change meaning.
-- **Fix:** `forwardRef` is unnecessary in React 19 (ref as a prop). "Named exports for components" must exempt framework-required default exports: Next.js pages and layouts, and `React.lazy` targets.
+- **Fix:** the `forwardRef` check already accepts React 19's `ref` prop. For React 19 projects, recommend `ref` as a prop, and treat new `forwardRef` wrappers as legacy. "Named exports for components" must exempt framework-required default exports: Next.js pages and layouts, and `React.lazy` targets.
 - **Fix:** Remix is now React Router 7; detect `@react-router/*`. Treat Create React App as a deprecated-toolchain finding, not a framework variant.
 - **Add:**
   - `useEffectEvent` as the fix for justified `exhaustive-deps` suppressions.
@@ -365,7 +388,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
   - middleware-only authorization (the CVE-2025-29927 class);
   - `server-only` imports for secrets;
   - user-controlled URLs reaching server `fetch`.
-- **Add:** a large-language-model feature layer when an AI software development kit is detected: prompt injection into tool calls, model output rendered as HTML, and secrets in prompts.
+- **Add:** a large-language-model feature layer when an artificial intelligence software development kit is detected: prompt injection into tool calls, model output rendered as HTML, and secrets in prompts.
 - **Add:** gstack's `/cso` bar for a supported finding: "a concrete attacker-controlled entrypoint, a path across an intended security boundary, demonstrated impact, and a challenge of relevant protective controls". Missing hardening, such as an absent header, needs a concrete failure scenario before it becomes a violation; otherwise report it as a hardening recommendation. gstack tried blanket exclusion lists (version 2) and removed them (version 3), so do not add one. Keep disproved candidates as coverage evidence.
 - **Fix:** retire `target="_blank"` without `rel="noopener"` (`:136`); browsers have implied `noopener` since 2021. In `--with-scan`, `--no-eslintrc` and `--rulesdir` no longer exist in ESLint 9. Add `gitleaks` over history: secrets removed from the tree are still in Git.
 
@@ -376,9 +399,9 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 - **Fix (high):** "Tier-dependent checks running below their required tier record `partial`" (`dependency-audit/SKILL.md:185`, also `:177`). A default run therefore gives 50 percent credit to "No high or critical vulnerabilities" without looking. The contract says these are applicable but not evaluated.
 - **Fix:** "No duplicate packages" fires on almost every real lockfile. Restrict it to singletons (`react`, `react-dom`, `@types/react`, styling runtimes, `graphql`) and large duplicates. Exact-pinning `react` and `next` in `package.json` adds little over a lockfile and delays security patches.
 - **Add:**
-  - Install-script policy: pnpm `allowBuilds` or `onlyBuiltDependencies`, or npm `ignore-scripts`.
+  - Extend the existing install-script check to recognise pnpm `allowBuilds` or `onlyBuiltDependencies`, and npm `ignore-scripts`.
   - Release cooldown: pnpm 11 defaults `minimumReleaseAge` to one day; Renovate has `minimumReleaseAge`.
-  - Provenance with `npm audit signatures`.
+  - Consider bringing provenance (`npm audit signatures`) into scope; the audit currently excludes it.
   - `knip` for unused dependencies, files, and exports, instead of a graph or regex sweep.
 
 ### `/bundle-build-audit`
@@ -408,7 +431,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 
 **Verdict:** accurate for 2024; the ecosystem moved.
 
-- **Fix:** "Exactly one linter installed" penalises ESLint plus Oxlint and Biome-formatting-plus-ESLint, both common and deliberate. Biome 2 changed its configuration (domains, type-aware rules, plugins), so "Biome 1.x" detection is stale. Prefer `eslint-plugin-import-x` with the TypeScript resolver; `import/no-cycle` is notoriously slow.
+- **Fix:** "Exactly one linter installed" penalises Biome plus ESLint, a common deliberate split. The audit does not recognise Oxlint at all, so an ESLint plus Oxlint setup is graded as ESLint only. Biome 2 changed its configuration (domains, type-aware rules, plugins), so "Biome 1.x" detection is stale. Prefer `eslint-plugin-import-x` with the TypeScript resolver; `import/no-cycle` is notoriously slow.
 - **Change:** read `eslint --print-config` for a few representative files instead of inferring the rule set from `extends` arrays in prose.
 
 ### `/quality-gates-audit`
@@ -441,7 +464,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 **Verdict:** audits 2024-era agent setup; misses most of what matters in 2026.
 
 - **Add (high):**
-  - Verification loop: does the instruction file tell an agent exactly how to prove its work (type check, test, lint, run the app)? This is the single highest-leverage item in agent setup.
+  - Verification loop: does the instruction file tell an agent exactly how to prove its work (type check, test, lint, run the application)? This is the single highest-leverage item in agent setup.
   - Skills (`.claude/skills`, `.agents/skills`): valid frontmatter, distinct descriptions, under 500 lines, no unknown keys.
   - Subagents, plugins, and output styles.
   - Hooks as deterministic guardrails.
@@ -449,7 +472,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
   - Rules that should be hooks or lint rules instead of prose.
   - Contradictions and duplication between instruction files.
   - Deny rules for reading `.env` files.
-- **Wrong:** "Tone or response-style guidance present" (when an AI dependency exists) confuses the coding agent's instructions with the product's prompts. "Primary instruction file is substantive" (at least 25 lines) penalises concise files; brevity is a virtue here.
+- **Wrong:** "Tone or response-style guidance present" (when an artificial intelligence dependency exists) confuses the coding agent's instructions with the product's prompts. "Primary instruction file is substantive" (at least 25 lines) penalises concise files; brevity is a virtue here.
 - **Borrow:**
   - pstack's `/correct` rule-to-enforcer table: every instruction-file rule names what enforces it, or is a judgement call.
   - Matt Pocock's no-op and sediment tests ("What would happen if you just deleted that paragraph?").
@@ -458,7 +481,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
 
 ### `/repository-quality-score`
 
-**Verdict:** excellent engineering on top of inputs that have never existed: there are zero schema 2.0.0 findings anywhere under `~/Projects`.
+**Verdict:** excellent engineering on top of inputs that have never existed: there are zero schema 2.0.0 findings in any of the owner's projects.
 
 - **Keep:** deterministic calculator, fingerprinting, official versus provisional versus unavailable, and score separated from coverage.
 - **Fix:** the score treats `engines field declared` and `no high or critical vulnerabilities` as equal. Add `severity` to `checks.json` and weight by it in policy 2.0.0. Give each cross-cutting concern one owning check, so other audits cross-reference it instead of scoring it again.
@@ -494,7 +517,7 @@ Each entry gives a verdict, then what to keep, fix, and add. File references are
   3. apply the edit;
   4. re-run and show the catch, plus the existing fixtures still passing.
 
-  You already run exactly this method in `~/Projects/no-tautology-eval`.
+  The owner already runs this method for the `no-tautology` skill.
 - **Fix:** "never delete a check" (`:113`, `:198`) makes catalogs ratchet towards bloat. Allow retirement through a `deprecated` flag, emitted as not applicable, with a catalog version bump and a decision record.
 - **Add:** `--staleness` mode, which lists checks whose `lastVerified` date is older than six months, or which name tools, packages, or versions that have since changed.
 - **Borrow:**
@@ -599,7 +622,7 @@ Only ideas that fix a problem identified above are listed. Each collection also 
    - Tests assert structure and tokens, not English sentences.
    - A catalog test caps total description bytes.
 
-   Your fourteen audits share about 617 lines of protocol, so this is the cheapest drift fix available. `/system-self-improve` would then patch templates, never generated files.
+   Your fourteen audits share several hundred lines of near-identical protocol text (roughly 500 to 700, depending on how it is counted), so this is the cheapest drift fix available. `/system-self-improve` would then patch templates, never generated files.
 5. **Sections loaded on demand, with a hard pointer:** "**STOP.** Before <trigger>, Read <path> and execute it in full. Do not work from memory". An evaluation checks that the agent actually read the section before the step. Use it for layer detail, `--learn` text, and phase 2 plans.
 6. **Seeded-defect evaluations.**
    - Fixture repositories with a ground-truth file of planted issues.
@@ -665,77 +688,85 @@ This is what every audit should converge on. Pilot it with one audit before roll
 
 ```text
 <audit>/
-  SKILL.md              about 150 lines: when to use, flags, steps, the judgement rubric
-                        for model checks, stop rules, chat format
-  checks.json           catalog: checkId, layer, title, severity, method (tool | model),
-                        ownerCheckId, rationale, lastVerified, deprecated
+  SKILL.md              about 150 to 250 lines: when to use, flags, the check tables
+                        (the canonical source; MergeFlow also reads them), the
+                        judgement rubric for model checks, and stop rules
+  checks.json           catalog schema 1.2.0: checkId, layer, title, severity,
+                        method (tool | model), rationale, lastVerified, relatedChecks
   references/
-    baseline.md         the human-readable tables and rationale, read when writing
-                        findings.md and in --learn mode
-  scripts/collect.py    deterministic facts and tool-check statuses -> facts.json
+    detection.md        detection notes and rationale for each check, read when
+                        evaluating and in --learn mode
+  scripts/collect.py    deterministic, read-only collector for the method: tool checks
   evals/                fixtures with planted issues and expected check statuses
 ```
 
-**Run sequence:**
+**Run sequence** (the protocol in #25):
 
-1. `begin-run` writes the skeleton: run identity, exact commit, cleanliness measured by the calculator's own function, and every catalog check pre-filled as not evaluated.
-2. `collect.py` resolves the `method: tool` checks.
-3. The model evaluates the `method: model` checks. It uses `path:line` evidence and an evidence tier, honours `decisions.json`, and uses the context intake.
+1. `audit_run.py begin` stages the skeleton:
+   - run identity;
+   - exact commit;
+   - cleanliness measured by the calculator's own function;
+   - every catalog check pending.
+
+   It runs the audit's collector, if the audit has one.
+2. The collector resolves the `method: tool` checks.
+3. The model evaluates the `method: model` checks with `record`. It cites `path:line` evidence with an evidence tier, honours `decisions.json`, and uses the context intake.
 4. Verification:
-   - re-read every cited line;
+   - the protocol re-verifies every citation, quote, and search;
    - for critical and high findings, a fresh sub-agent tries to refute the failure scenario;
-   - sort into Act on, Consider, Noted, and Dismissed.
-5. `validate-findings` must pass. A skill-scoped `Stop` hook with `once: true` makes this structural rather than advisory.
+   - each finding is sorted into Act on, Consider, Noted, or Dismissed.
+5. `audit_run.py finish` publishes only a run that passes the calculator's own contract validation.
 6. Chat output:
    - up to five Act on items, ranked by severity, then hotspot weight, then effort;
    - the Dismissed count;
    - coverage;
    - the report path.
-7. Offer phase 2:
+7. Phase 2:
    - for most audits, a plan of agent-executable briefs ordered by the enforcement ladder;
    - for `/architecture-audit`, a design session on one chosen candidate.
 
 ## Proposed sequence
 
-Each item is one pull request unless noted.
+Each item is one pull request unless noted. Items already in flight name their pull request.
 
-### Phase 0: correctness fixes, no design change
+### Phase 0: correctness fixes
 
-1. Record unevaluated checks as `applicable` and `not-evaluated`, never `partial`, in all seven affected audits. Add a validator rule that rejects "degrade to `partial`".
-2. Remove the stale `--include`, `--exclude`, and `--stage` references from eleven audits.
-3. Replace `/architecture-audit`'s pre-2.0.0 `metadata.json` example.
-4. Give `/accessibility-audit` a Layer 0 and a fourth layer (split Component patterns into "semantics and naming" and "keyboard, focus, and motion"), plus the standard sections.
-5. Keep `/pre-audit-setup` artefacts out of the tracked tree: `.claude/settings.local.json` and `.git/info/exclude`.
-6. Reconcile the installers' deletion behaviour, remove stub references, and resolve the playbook root with `${CLAUDE_SKILL_DIR}`.
-7. Drop `trigger:` from frontmatter, or move it to `metadata:`, and update the frontmatter rule in `CLAUDE.md`, `.agents/CONVENTIONS.md`, `CONTRIBUTING.md`, the validator, and its tests to match. MergeFlow already falls back to `/<folder>`. Remove the README "Why each skill exists" requirement from `CONTRIBUTING.md`, or write the section.
-8. Make the validator scan tracked files only (`git ls-files`).
-9. Keep one copy of the GitNexus block.
-10. Move `--worktree` to `.worktrees/<audit>` to match your workspace convention, or document why sibling directories are needed.
+1. Make the gates real: validate only Git-listed files, and stop hooks and tests from inheriting Git's per-hook state (#23).
+2. Record unevaluated checks as `applicable` and `not-evaluated`, never `partial`, in all eight affected audits. #25's protocol overrides the old wording now; each audit's rewrite in Phase 4 removes it.
+3. Remove the stale `--include`, `--exclude`, and `--stage` references from eleven audits. This happens in the Phase 4 rewrites.
+4. Replace `/architecture-audit`'s pre-2.0.0 `metadata.json` example, and give `/accessibility-audit` a Layer 0 and four layers. This happens in their rewrites.
+5. Stop `/pre-audit-setup` from dirtying the tree:
+   - drop the settings hook;
+   - exclude generated tooling output such as `graphify-out/` from the cleanliness rule;
+   - build or copy the graph into `--worktree` checkouts.
+6. Reconcile the installers' deletion behaviour, remove stub references, and resolve the playbook root with `${CLAUDE_SKILL_DIR}`. Plugin packaging in Phase 3 may supersede the installers.
+7. Drop `trigger:` everywhere it is required or documented (see cross-cutting problem 2). Remove the README "Why each skill exists" requirement from `CONTRIBUTING.md`.
+8. Trim the duplicated GitNexus block with GitNexus's supported mechanism, with the owner's approval. `gitnexus analyze` regenerates whichever file lacks it, and `AGENTS.md` requires approval to touch managed blocks.
+9. Move `--worktree` to `.worktrees/<audit-name>` (#25).
 
 ### Phase 1: make audits reliable
 
-1. Shared `begin-run` and `validate-findings` scripts, reusing the calculator's validation code, plus the `Stop` hook.
-2. Shared protocol text (run identity, chat format, plan offer, `--learn`) generated into every `SKILL.md` from one template. The validator checks that generated output matches. This keeps skills self-contained under copy installs and removes the 617 hand-synced lines.
+1. The shared audit protocol: `audit_run.py begin`, `record`, and `finish`, reusing the calculator's validation code (#25).
+2. Shared protocol text defined once in the protocol reference. Each audit carries only a short pointer section (#25), and the Phase 4 rewrites delete the duplicated prose.
 3. Evaluations:
-   - Start with three audits: testing, security, architecture.
+   - Start with three audits: security, testing, and architecture.
    - Each gets three to five fixture repositories with planted issues and expected statuses.
-   - Use the method you already run in `no-tautology-eval`: planted commits, programmatic grading, and blind judgement review.
-   - Make it a release gate for any `SKILL.md` change.
-4. Run the full pipeline end to end on one real TypeScript and React repository (StyleProof or MergeFlow), and get the first official score. Fix what breaks before adding anything else.
+   - Use planted commits, programmatic grading, and blind judgement review.
+   - Run them before merging any `SKILL.md` change. Model-run evaluations cost money and vary from run to run, so they are a maintainer's release check, not a deterministic continuous integration gate.
+4. Run the full pipeline end to end on one real TypeScript and React repository, and get the first official score. Fix what breaks before adding anything else.
 
 ### Phase 2: signal quality
 
-1. Catalog schema 1.2.0 with `severity`, `method`, `ownerCheckId`, `rationale`, `lastVerified`, and `deprecated`.
-2. Score policy 2.0.0 with severity weights and one owner per cross-cutting concern, recorded in Architecture Decision Record 0003.
-3. Collectors for the most mechanical audits first: quality gates, linting, TypeScript, dependency, testing.
-4. Evidence tiers, the verification pass, judgement buckets, and the Dismissed section.
-5. `decisions.json` for accepted risks, honoured by every audit and reported separately by the score. Coordinate with MergeFlow's `approvedPatterns`.
-6. A pruning pass. Retire or merge checks that tools own, that misfire, or that duplicate another audit.
+1. Catalog schema 1.2.0 with `severity`, `method`, `rationale`, `lastVerified`, and `relatedChecks`. Score policy 2.0.0 with severity weights, recorded in Architecture Decision Record 0004 (#26).
+2. Collectors for the most mechanical audits first: quality gates, linting, TypeScript, dependency, testing.
+3. Evidence tiers, judgement buckets, and the Dismissed section (#25). The independent refutation pass for high-severity findings comes with the Phase 4 rewrites.
+4. `decisions.json` for accepted risks, honoured by every audit and reported separately by the score (#25 adds the file and its handling). Consider aligning it with MergeFlow's `approvedPatterns`.
+5. A pruning pass. Retire or merge checks that tools own, that misfire, or that duplicate another audit. Give every cross-cutting concern one owning check, and reference it from the others through `relatedChecks`.
 
 ### Phase 3: workflow
 
 1. Context intake in `/pre-audit-setup`, writing `project-profile.json` (observed) and `context.md` (asked, in grilling rounds).
-2. Diff-scoped mode: `--since=<ref>`, "no new violations".
+2. Diff-scoped mode: `--since=<ref>` (#25 records the scope), and "no new violations".
 3. Plans as agent briefs ordered by the enforcement ladder, optionally published as tickets.
 4. `/ben-architect-review`:
    - adversarial pass;
@@ -745,20 +776,25 @@ Each item is one pull request unless noted.
    - references split out to get under 500 lines.
 5. `/system-self-improve`: red-to-green fixtures, check retirement, `--staleness`.
 6. Plugin and marketplace packaging; `disable-model-invocation`, `argument-hint`, `allowed-tools`.
-7. `playbook.json` manifest, then migrate MergeFlow's X-Ray off README and table scraping.
+7. `playbook.json` manifest, then migrate MergeFlow's X-Ray off README and table scraping. Until then, keep the README "Audit types" bullet format and the `SKILL.md` table headers stable.
 
-### Phase 4: content refresh
+### Phase 4: rewrite each audit
 
-One pull request per audit, in this order of risk reduction:
+One pull request per audit, in this order of risk reduction. Each rewrite:
+- adopts the protocol;
+- migrates its catalog to schema 1.2.0;
+- removes the `partial` and stale-flag wording;
+- keeps the check tables in `SKILL.md`;
+- cuts the body to about 150 to 250 lines.
 
 1. Security (server-side code, large-language-model features).
 2. Testing (any TypeScript, effectiveness).
-3. React (compiler era).
-4. Dependency (supply chain).
-5. Quality gates (run them, branch protection, Actions hardening).
-6. Architecture (red flags, churn, deletion test).
+3. Architecture (red flags, churn, deletion test).
+4. React (compiler era).
+5. Dependency (supply chain).
+6. Quality gates (run them, branch protection, Actions hardening).
 7. Agentic (2026 surface).
-8. Accessibility (WCAG 2.2 gaps, browser mode).
+8. Accessibility (Web Content Accessibility Guidelines 2.2 gaps, browser mode).
 9. Performance (measured mode).
 10. Linting.
 11. Bundle and build.
@@ -798,9 +834,7 @@ One pull request per audit, in this order of risk reduction:
 - OWASP Top 10:2025: https://owasp.org/Top10/2025/
 - pnpm 11 defaults, including a one-day `minimumReleaseAge`: https://www.cryptika.com/pnpm-11-turns-on-minimum-release-age-by-default-to-reduce-npm-supply-chain-risk/
 
-**Local evidence:**
+**Local evidence (not public):**
 
-- `~/Projects/MergeFlow/.architect-audits/`
-- `~/Projects/MergeFlow/apps/server/src/architectPlaybookCatalogue.ts`
-- `~/Projects/MergeFlow/apps/server/src/xRayRunner.ts`
-- `~/Projects/no-tautology-eval/`
+- The MergeFlow repository's `.architect-audits/` outputs, and its X-Ray loader: `apps/server/src/architectPlaybookCatalogue.ts` and `apps/server/src/xRayRunner.ts`.
+- The owner's `no-tautology` evaluation workspace.
