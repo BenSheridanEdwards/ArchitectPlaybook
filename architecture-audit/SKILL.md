@@ -10,6 +10,18 @@ Audit a TypeScript codebase against an opinionated architectural baseline organi
 
 The default mental model is TypeScript and React. Most checks apply to any TypeScript codebase; the state and data flow layer leans React-specific because that is where the most consequential architectural pain in modern frontend work actually lives.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin architecture-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## Hard requirement: the Graphify knowledge graph
 
 This is the one audit that requires `graphify-out/graph.json`. Half the checks (god-node detection, community comparison, circular-dependency detection, fan-in and fan-out analysis) are unimplementable without it. If the graph is missing, the skill writes the canonical output files with every applicable catalog check marked `not-evaluated`, a null status, and reason `knowledge-graph-not-detected`, then prints this message:

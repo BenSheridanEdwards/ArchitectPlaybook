@@ -118,6 +118,33 @@ detection to prove the target technology is absent:
 It still emits all catalog checks as non-applicable. A missing audit directory
 never means not applicable.
 
+## Publishing through the audit protocol
+
+Audits publish findings only through `audit-protocol/scripts/audit_run.py`
+(Architecture Decision Record 0003). The script stages the run, verifies
+evidence, validates the run with the score calculator, renders the Markdown
+reports, and publishes all four files together. It adds these optional fields,
+which consumers may rely on when `protocolVersion` is present:
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `protocolVersion` | `findings.json`, `metadata.json` | Version of the run protocol that published the run. |
+| `summary` | `findings.json` | Status, judgement, not-applicable, and not-evaluated counts. |
+| `scope` | `findings.json` | The `--since` reference and changed files, when the run is diff-scoped. |
+| `hypotheses` | `findings.json` | Unverified suspicions. Never statuses, never scored. |
+| `treeFingerprint` | `metadata.json` | Hash of the commit and working-tree status at the start of the run. |
+| `severity`, `method` | each check | Copied from the catalog when it defines them. |
+| `evidenceTier` | each evaluated check | `direct`, `supported`, or `inferred`. A `violation` is never `inferred`. |
+| `judgement` | each non-present check | `act-on`, `consider`, `noted`, or `dismissed`. |
+| `judgementReason` | each `noted` or `dismissed` check | Why the finding is not acted on. |
+| `decisionId` | each check covered by a decision | The entry in `.architect-audits/decisions.json`. |
+| `recordedBy` | each check | `model` or `collector`. |
+
+Every evaluated check carries at least one verifiable evidence entry: a
+`path:line` citation, a file path, a `command:` entry, or a `search:` entry.
+Citations, files, and searches are re-verified against the repository before
+publication.
+
 ## Write safety
 
 - Assign the run identifier before rendering outputs.

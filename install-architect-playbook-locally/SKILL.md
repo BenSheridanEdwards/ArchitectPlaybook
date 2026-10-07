@@ -60,7 +60,12 @@ For each direct sub-folder of `$PLAYBOOK_ROOT` that contains a `SKILL.md`, build
 - `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
-Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure. `repository-quality-score` is not standalone: when it is selected, read `repository-quality-score/score-policy.json` and automatically add every folder named in `audits[].name` to the install plan. Show these additions in `--dry-run` output. If `--exclude` names any required audit while `repository-quality-score` is selected, fail before copying and explain the conflict; never install a scorer whose catalogs are missing.
+Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure:
+
+- When any `*-audit` folder is selected, add `audit-protocol` and `repository-quality-score`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates with the score calculator.
+- When `repository-quality-score` is selected, read `repository-quality-score/score-policy.json` and add every folder named in `audits[].name`.
+
+Show these additions in `--dry-run` output. If `--exclude` names a required folder, fail before copying and explain the conflict. Never install an audit without its protocol, or a scorer whose catalogs are missing.
 
 ### Step 4 — Detect stubs
 
@@ -106,7 +111,7 @@ Open a new Claude Code chat in this directory to pick up the new slash commands.
 - Re-running with no flags is safe. Files only change if the source is newer (or `--force` is set).
 - This skill never deletes a destination skill that is not in the source — manual cleanup only.
 - This skill never touches `~/.claude/skills/`. For machine-wide install, use `/install-architect-playbook-globally`.
-- Selecting `repository-quality-score` always installs its policy audit catalogs as one dependency-closed set.
+- Selecting any audit always installs `audit-protocol` and `repository-quality-score`. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
 
 ## Safety
 

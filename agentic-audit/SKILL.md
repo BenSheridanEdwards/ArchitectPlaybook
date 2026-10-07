@@ -10,6 +10,18 @@ Audit a project's **agentic instruction files** and **Claude Code settings** aga
 
 The default mental model is a TypeScript and React application with a `CLAUDE.md` at the repository root and a `.claude/` directory, but the audit recognises the wider ecosystem of agentic instruction files (`AGENTS.md`, `.cursor/rules/*.mdc`, `.cursorrules`, `.github/copilot-instructions.md`, `.windsurfrules`, `.aider.conf.yml` and `CONVENTIONS.md`) and grades whatever is present.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin agentic-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## How this differs from neighbouring audits
 
 | Concern | Owner |

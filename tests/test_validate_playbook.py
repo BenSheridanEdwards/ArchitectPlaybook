@@ -350,6 +350,35 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_markdown_links(root, findings)
             self.assertEqual(findings, [])
 
+    def test_audits_must_publish_through_the_shared_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("audit protocol bundle missing: scripts/audit_run.py" in message for message in messages))
+            self.assertTrue(any("must publish through the shared protocol script" in message for message in messages))
+
+    def test_audit_protocol_rule_passes_with_bundle_and_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = root / "audit-protocol"
+            (protocol / "scripts").mkdir(parents=True)
+            (protocol / "references").mkdir()
+            for relative in ("SKILL.md", "scripts/audit_run.py", "references/run-protocol.md"):
+                (protocol / relative).write_text("placeholder\n", encoding="utf-8")
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                VALID_SKILL + "\nPublish with `audit-protocol/scripts/audit_run.py`.\n", encoding="utf-8"
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
+            self.assertEqual(findings, [])
+
     def test_readme_skill_links_use_posix_paths_on_every_platform(self) -> None:
         links = validate_playbook.readme_skill_links("[Example](example-audit/SKILL.md)\n")
         self.assertEqual(links, {"example-audit/SKILL.md"})

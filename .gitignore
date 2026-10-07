@@ -23,6 +23,8 @@ graphify-out/
 !.architect-audits/testing-audit/**
 !.architect-audits/architecture-audit/
 !.architect-audits/architecture-audit/**
+# Staged audit runs are local working state, never committed
+.architect-audits/**/.staging/
 
 # Node and package-manager output (in case a future skill produces any)
 node_modules/

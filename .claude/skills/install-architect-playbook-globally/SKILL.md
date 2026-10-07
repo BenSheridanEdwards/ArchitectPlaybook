@@ -64,7 +64,12 @@ Same as the local installer. Exclude:
 - `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
-After applying `--include` and `--exclude`, resolve dependency closure. If `repository-quality-score` is selected, read its `score-policy.json` and automatically add every folder named in `audits[].name` to the plan. Show the expanded set during `--dry-run`. If the user explicitly excludes a required audit, fail before copying with a clear conflict message; never install an incomplete scorer.
+After applying `--include` and `--exclude`, resolve dependency closure:
+
+- If any `*-audit` folder is selected, add `audit-protocol` and `repository-quality-score`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates with the score calculator.
+- If `repository-quality-score` is selected, read its `score-policy.json` and add every folder named in `audits[].name`.
+
+Show the expanded set during `--dry-run`. If the user explicitly excludes a required folder, fail before copying with a clear conflict message. Never install an audit without its protocol, or an incomplete scorer.
 
 ### Step 4 — Confirmation gate for overwrites
 
@@ -105,7 +110,7 @@ Open a new Claude Code chat (any project) to pick up the new slash commands.
 - Refuses to write outside `$HOME/.claude/skills/`.
 - Refuses to delete any directory in the destination — only `cp -R` over the top of it.
 - `--dry-run` is honored.
-- Selecting `repository-quality-score` always installs its policy audit catalogs as one dependency-closed set.
+- Selecting any audit always installs `audit-protocol` and `repository-quality-score`. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
 
 ## Recommended commit message
 

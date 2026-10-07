@@ -10,6 +10,18 @@ Compare the current project against an opinionated baseline of quality gates org
 
 The default mental model is a TypeScript and React frontend project, but the audit must not hard-stop when a repository is a Markdown skill repository like ArchitectPlaybook. If `package.json` is absent, switch to documentation-or-skill-repository mode and audit executable repository contracts instead: skill validation, Markdown link integrity, bootstrap install truth, local Git hooks, Conventional Commit enforcement, and continuous integration validation.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin quality-gates-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## Usage
 
 ```
