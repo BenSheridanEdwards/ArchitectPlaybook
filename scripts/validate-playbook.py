@@ -15,6 +15,7 @@ import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -330,6 +331,17 @@ def validate_check_metadata(root: Path, findings: list[Finding]) -> None:
                         findings.append(Finding("error", checks_path, f"allowedStatuses contains duplicates for {check_id}"))
 
 
+def is_calendar_date(value: str) -> bool:
+    """True for a real calendar date written as YYYY-MM-DD."""
+    if not ISO_DATE_PATTERN.fullmatch(value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_severity_fields(
     check: dict[str, object],
     label: str,
@@ -349,7 +361,7 @@ def validate_severity_fields(
     if isinstance(method, str) and method not in VALID_METHODS:
         findings.append(Finding("error", checks_path, f"{label} method must be tool or model"))
     last_verified = check.get("lastVerified")
-    if isinstance(last_verified, str) and not ISO_DATE_PATTERN.fullmatch(last_verified):
+    if isinstance(last_verified, str) and not is_calendar_date(last_verified):
         findings.append(Finding("error", checks_path, f"{label} lastVerified must be a date such as 2026-10-07"))
     related = check.get("relatedChecks")
     if related is not None and (

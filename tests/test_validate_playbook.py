@@ -204,6 +204,18 @@ class ValidatePlaybookTests(unittest.TestCase):
             self.assertTrue(any("missing non-empty rationale" in message for message in messages))
             self.assertTrue(any("lastVerified must be a date" in message for message in messages))
 
+    def test_severity_catalog_rejects_impossible_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                self.severity_catalog(lastVerified="2026-99-99"),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("lastVerified must be a date" in finding.message for finding in findings))
+
     def test_severity_catalog_requires_the_skill_row_to_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
