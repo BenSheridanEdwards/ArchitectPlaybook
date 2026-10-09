@@ -74,7 +74,10 @@ For each selected skill, compare the source folder with the destination folder b
 
 ```bash
 hash() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
-digest() { (cd "$1" && find . -type f ! -name '.DS_Store' ! -path '*/__pycache__/*' -print0 | sort -z | xargs -0 hash) | hash; }
+digest() {
+  (cd "$1" && find . -type f ! -name '.DS_Store' ! -path '*/__pycache__/*' -print0 | sort -z |
+    while IFS= read -r -d '' file; do printf '%s ' "$file"; hash < "$file"; done) | hash
+}
 ```
 
 - No destination folder: `installed`.
