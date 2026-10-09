@@ -1,373 +1,182 @@
 ---
 name: security-audit
-description: Audit a TypeScript and React frontend against an opinionated security baseline spanning authentication/sessions, input handling and XSS prevention, transport/headers/cookies, and secrets/data protection/third-party integrations. Frontend-only. Static-first with optional --with-scan enrichment. Optionally generates an implementation plan for the gaps.
+description: Audit a TypeScript, React, or Next.js codebase for exploitable weaknesses — server access control, injection and unsafe output, secrets and browser hardening, and large-language-model features — tracing each finding from an attacker's entry point.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--with-scan] [--learn|--teach]"
+argument-hint: "[--worktree] [--since=<ref>] [--with-scan] [--learn|--teach]"
 ---
 
 # /security-audit
 
-Audit a TypeScript and React frontend against an opinionated security baseline organised in four layers — **authentication, authorization, and sessions**, **input handling and XSS prevention**, **transport, headers, and cookies**, **secrets, data protection, and third-party integrations** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
+Find the weaknesses an attacker can actually use in a TypeScript application, and what to fix first.
 
-## Publishing results
+Server Actions, route handlers, and API routes are public HTTP endpoints, so this audit reads the server code in the repository as closely as the browser code. It has three sources:
+- a deterministic collector, which finds committed secrets, environment-file ignore gaps, and `eval`, and inventories every entry point and dangerous sink;
+- an optional history and pattern scan (`--with-scan`);
+- the judgement of the model, spent tracing input from entry points to sinks.
 
-Record every result through the shared audit protocol. Never write the four findings files by hand.
+It is static and read-only. It never runs the application or attempts an exploit.
 
-```bash
-python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin security-audit
-```
+**A supported finding** follows gstack's `/cso` bar. A `violation` of a model check needs four things:
+- a concrete attacker-controlled entry point;
+- a path across a security boundary (anonymous to user, user to another user, browser to server, user to model tool);
+- a demonstrated impact;
+- a challenge of the protective controls that the finding survives.
 
-Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+Missing hardening, such as an absent header, becomes a violation only with a concrete failure scenario. Otherwise it is `partial` and judged as hardening. Tool checks grade invariants the collector can decide, such as a committed secret or a call to `eval`, and you then trace their reach. There is no blanket exclusion list: every candidate is judged on its trace.
 
-A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
-
-Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
-
-## Scope: frontend-only
-
-This skill targets browser-shipped code and the frontend-relevant infrastructure that surrounds it. It is **deliberately not** a full-stack security audit. The user should know exactly what they are getting before they trust the report.
-
-### In scope
-
-- React and TypeScript code shipped to browsers.
-- Frontend-relevant security configuration wherever it lives: framework configuration (Next.js `headers()`, Remix `loader`/`action` headers, Vite plugins) and deployment configuration (`vercel.json`, `netlify.toml`, Cloudflare Pages `_headers`, Apache/Nginx config when checked into the repository).
-- Frontend-side OAuth and OpenID Connect flow patterns (PKCE, `state`, `nonce`, redirect URI handling).
-- Client-side data-protection patterns (`localStorage` hygiene, PII in URLs and analytics events, secrets in source).
-- Third-party integration safety (Subresource Integrity for external scripts, iframe sandboxing, `postMessage` origin validation).
-
-### Out of scope
-
-- Backend application security: SQL injection, server-side request forgery, command injection, server-side authorization logic, server-side rate limiting. A future `/backend-security-audit` is the home for those concerns.
-- Penetration testing or runtime attack simulation. This audit reads code; it does not exploit anything.
-- Cryptography scheme review. The audit flags use of weak primitives (MD5, SHA-1) when found in source; it does not review whole protocols, key rotation, or certificate handling.
-- Compliance frameworks (PCI-DSS, HIPAA, GDPR, SOC 2). These are legal and policy frameworks; the audit cannot certify compliance.
-- Infrastructure security (cloud IAM, network segmentation, secret managers themselves).
-- Dependency vulnerabilities and supply-chain analysis. Those are owned by `/dependency-audit`. This skill mentions Subresource Integrity for externally-loaded `<script>` tags and notes the existence of `postinstall` scripts because both are frontend-bundle concerns; it does not re-audit the dependency tree.
-
-## Static-first design with optional scan enrichment
-
-This skill is read-only and never modifies anything. Two modes:
-
-- **Static (default).** Pattern detection across source files, framework configuration, and deployment configuration. Catches the majority of the baseline.
-- **Static plus opt-in `--with-scan`.** When the flag is passed, the skill additionally invokes any installed security-focused linter in JSON-reporter mode: `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security`. If `semgrep` is on PATH, it runs Semgrep with the `p/owasp-top-ten` and `p/javascript` rule packs. The captured findings enrich the relevant checks. No installs, no network requests beyond what those tools issue themselves.
-
-The skill never invokes any tool with `--fix` or any other mutating flag.
+[Detection notes](references/detection.md) explain how to trace and evaluate each check.
 
 ## Usage
 
 ```
-/security-audit                                   # default: concise Top 5 + full report saved + ask about plan
-/security-audit --worktree                          # create an isolated Git worktree, then run the audit there
-/security-audit --learn                           # mid-level engineer teaching mode (detailed explanations + file/line examples)
-/security-audit --teach                           # alias for --learn
-/security-audit --with-scan                       # static plus enrichment from installed scanners
+/security-audit                  # audit the current repository
+/security-audit --worktree       # run in .worktrees/security-audit on its own branch
+/security-audit --since=<ref>    # judge only what changed since <ref> (a provisional, filtered run)
+/security-audit --with-scan      # also scan Git history with gitleaks and run installed Semgrep and ESLint security rules
+/security-audit --learn          # teaching mode; --teach is an alias
 ```
 
-**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
+`--since` makes the run provisional, because it changes what the audit measures. The three tool checks always cover the whole repository, because a committed secret is exposed wherever it sits.
 
-The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
+## Ownership
 
-This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance (any open redirect, any `eval`, any unsandboxed third-party iframe is a finding); soft checks report `partial` based on qualitative pattern detection. The canonical path to evolving the baseline itself is `/system-self-improve`.
+| Concern | Owner |
+| --- | --- |
+| Exploitable weaknesses in the application's own code and configuration | `/security-audit` |
+| Known-vulnerable dependencies, including the framework version | `/dependency-audit` |
+| Whether secret scans, dependency scans, and other gates run in hooks and continuous integration | `/quality-gates-audit` |
+| Error-reporter redaction configuration | `/error-handling-audit` |
+| Secrets in Claude Code settings files | `/agentic-audit` |
 
-**💡 Pro tip**: Run `/preflight --audit=security` first to detect — and optionally install — the development dependencies that make `--with-scan` useful (`eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security`). Skip if you already know the tooling is wired up.
+When a vulnerable framework version makes a finding worse, as CVE-2025-29927 does for middleware-only authorization, cite it as context and leave the version itself to `/dependency-audit`.
 
-## The opinionated baseline
+## The baseline
 
-A check resolves to one of four statuses:
-
-- **present** — the invariant holds.
-- **partial** — most signals resolve, with a small number of exceptions; or the check is heuristic and the codebase shows mixed adherence (PII detection in particular is reported as `partial` rather than `violation` because the heuristic is imperfect).
-- **missing** — a structural prerequisite is absent (no Content Security Policy detected anywhere, for example).
-- **violation** — the audit identified concrete code or configuration that breaks the invariant.
-
-Layer 0 is informational only and has no status.
+Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violation`. Checks that cannot apply are recorded as not applicable, and checks you could not evaluate as not evaluated. Severity follows Architecture Decision Record 0004, read for security in the detection notes: `critical` only for directly exploitable problems. The method column says whether the collector decides the check (`tool`) or you do (`model`).
 
 ### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
 
-- Detected authentication library: NextAuth/Auth.js, Clerk, Auth0 SDK, Supabase Auth, AWS Cognito, Firebase Auth, custom, or none.
-- Detected sanitization library: DOMPurify, sanitize-html, isomorphic-dompurify, or none.
-- Content Security Policy: detected yes/no, source location (header, meta tag, framework configuration), summary of directives.
-- Security headers detected with source location: X-Frame-Options or `frame-ancestors`, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Strict-Transport-Security.
-- Cookie-handling primitive: framework session helpers, `cookies-next`, `js-cookie`, manual `document.cookie`, or none.
-- `dangerouslySetInnerHTML` usage count and file references.
-- `eval` / `new Function` / string-form `setTimeout`/`setInterval` usage count.
-- `localStorage` and `sessionStorage` usage count, with a flag for keys whose names match auth-related patterns (`token`, `session`, `auth`, `jwt`).
-- Inline `<script>` tag count.
-- External `<script>` tag count and Subresource-Integrity coverage rate.
-- Detected deployment platform: Vercel, Netlify, Cloudflare Pages, custom, or local-only. Used to resolve where security headers are expected to live.
+The collector records:
+- frameworks and versions, and the Next.js router;
+- every Server Action, route handler, API route, loader, and action, with its path;
+- middleware or proxy files;
+- authentication, validation, sanitizer, and AI libraries, and direct model API calls;
+- candidate sites for `dangerouslySetInnerHTML` and other HTML sinks, server requests with dynamic URLs, dynamic redirects, auth-like web-storage keys, and message listeners;
+- public-prefixed variable names that look secret (names only, never values);
+- where security headers are set, and deployment configuration files;
+- committed environment files and secret-scan counts (never values).
 
-### Layer 1 — Authentication, authorization, and sessions
+Add the trust boundaries you identify (anonymous, user, other users or tenants, administrator, model), what is deliberately public, and the deployment platform's header and HTTPS defaults.
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Session tokens not in `localStorage` | Long-lived session and authentication tokens (JWT, session ID) live in HttpOnly cookies, not in `localStorage` or `sessionStorage` (which are accessible to any script running on the page). | `localStorage.setItem`/`getItem` calls keyed on names matching auth patterns. |
-| Logout invalidates server session | Logout calls a server endpoint (and the call is awaited or its failure is handled), not just clearing local state. | A logout flow that only clears local store/state with no server request. |
-| Authentication state is server-derived | The "is the user logged in" check resolves against a server source of truth on each navigation or load — not from client-cached state alone. | Authentication state read only from client storage with no server validation step (route loader, middleware, or `useEffect` fetch). |
-| OAuth and OIDC flows use PKCE | Public clients (browser apps) use Proof Key for Code Exchange: a `code_verifier` is generated and a `code_challenge` is sent in the authorization request. Explicitly not applicable when no OAuth flow is detected. | OAuth flow without PKCE for a public client. |
-| OAuth flows use a `state` parameter | Every OAuth authorization request includes a CSRF-resistant `state`, validated on callback. | `state` absent from the request, or absent from callback validation. |
-| OIDC flows use a `nonce` | OpenID Connect flows include a `nonce` in the authorization request, validated on the ID token. Explicitly not applicable when no OIDC flow is detected. | `nonce` absent or unvalidated. |
-| Redirect URIs are explicitly handled | Post-authentication redirect destinations are validated against an allowlist or restricted to relative paths. They are never reflected from a query parameter without a check. | An `?next=...`/`?returnTo=...` parameter passed straight to `router.push` or `window.location` with no validation. |
-| Server-side authorization referenced | UI-only authorization checks (component guards, conditional rendering by role) are paired with server-enforced checks at the data-fetching layer. The audit cannot verify the server-side check exists; it flags reliance on UI-only patterns. Soft check — reported as `partial`. | Permission checks appear only in components and route guards; data-fetching layer has no role/permission references. |
+### Layer 1 — Access control and sessions
 
-### Layer 2 — Input handling and XSS prevention
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Server entry points authenticate the caller | critical | model | Every non-public Server Action, route handler, API route, loader, and action verifies the session itself. | An entry point that reads or changes non-public data with no session check of its own. |
+| Each request is authorized for the records it touches | critical | model | Every lookup or mutation by a request-supplied identifier is scoped to the caller's ownership, tenant, or role. | A query by request identifier with no ownership, tenant, or role condition. |
+| Authorization does not rely on middleware alone | high | model | Middleware is an optimistic first pass; the entry point or its data-access layer enforces the rule again. | Protected data or mutations whose only check is in middleware or a proxy file. |
+| State changes resist cross-site requests | high | model | No GET handler changes state; cookie-authenticated mutations rely on SameSite cookies or an origin check. | A state-changing GET, or a cookie-authenticated mutation reachable cross-site. |
+| Hand-written sign-in flows use state, PKCE, and nonce | high | model | Hand-written OAuth sends and verifies `state` and uses PKCE; OpenID Connect also verifies `nonce`. Not applicable when a library runs the flow. | A hand-written authorization request or callback missing one of them. |
+| Session tokens stay out of web storage | high | model | Session and access tokens live in HttpOnly cookies. | A token written to or read from localStorage or sessionStorage. |
+| Session cookies are Secure, HttpOnly, and SameSite | high | model | Session and token cookies carry Secure, HttpOnly, and SameSite=Lax or Strict, explicitly or by library default. | A session cookie set without one of the flags. |
+| Tokens and password hashes use strong cryptography | high | model | Tokens come from a secure generator; passwords use bcrypt, scrypt, or Argon2; verifiers pin the algorithm. | `Math.random()` tokens, fast password hashes, or an unpinned verifier. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| `dangerouslySetInnerHTML` only with sanitization | Every use of `dangerouslySetInnerHTML` either consumes content from a trusted, server-rendered source explicitly marked safe, or runs the input through DOMPurify (or equivalent). | Any `dangerouslySetInnerHTML` whose payload is reachable from user input, untrusted props, or fetched data with no sanitization. The Graphify graph (when present) materially improves accuracy here by tracing the data source. |
-| No `eval` or dynamic code execution | No `eval`, `new Function`, `Function(...)`, or string-form `setTimeout`/`setInterval` in source. | Any of the above. |
-| No raw `innerHTML`/`outerHTML` writes | DOM mutations go through React, not via `element.innerHTML = userInput`. | Direct `innerHTML` or `outerHTML` writes with non-literal right-hand sides. |
-| URL `href` and `src` validated | User-controlled URLs used in `href`, `src`, or `formAction` are validated to allow only `http://`, `https://`, or relative paths — never `javascript:` or `data:`. | An `href={someInput}` or analogous expression with no protocol check. |
-| Open-redirect patterns guarded | Code that performs a redirect (`router.push`, `window.location.assign`, server response redirect) does not pass user-controlled URLs through unchecked. | A redirect call site whose destination originates from a query parameter or form input with no allowlist. |
-| Markdown and rich-text rendering use a safe pipeline | Projects rendering Markdown or rich text use a library configured to disallow HTML by default, or sanitize after rendering. Explicitly not applicable when no Markdown or rich-text rendering is detected. | Markdown rendered with HTML pass-through enabled and no sanitization. |
-| No bypassing React's escaping | `React.createElement` with raw HTML strings, custom JSX runtimes that disable escaping, or third-party "render unsafe" components are flagged. | Any of the above. |
+### Layer 2 — Untrusted input and output
 
-### Layer 3 — Transport, headers, and cookies
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Server entry points validate their input | high | model | Every entry point parses its input with a schema on the server and passes on only allowed fields. | Request data reaching a write or call unparsed, or a whole body spread into a write. |
+| Queries and commands are parameterised | critical | model | Queries use parameters, commands take argument arrays, and request paths are confined. | Request data concatenated into SQL, a shell command, or a file path. |
+| Server requests do not follow user-supplied URLs | critical | model | Server requests go to fixed hosts or an allowlist checked on the parsed URL, without cross-host redirects. | A user-supplied URL reaching a server-side `fetch` or renderer with no allowlist. |
+| dangerouslySetInnerHTML renders only sanitized HTML | critical | model | Its HTML is constant or passed through a sanitizer. | User-controlled, stored, or fetched HTML with no sanitizer on the path. |
+| Other HTML sinks receive only sanitized content | critical | model | `innerHTML`, `insertAdjacentHTML`, `document.write`, and raw-HTML Markdown get constant or sanitized content. | One of these sinks fed user-controlled content without sanitization. |
+| User-supplied URLs use safe schemes | high | model | URLs reaching `href`, `src`, `window.open`, or `location` are limited to safe schemes. | A user URL reaching such a sink unchecked where nothing blocks `javascript:`. |
+| Redirects go only to allowed destinations | high | model | Request-supplied redirect targets are same-origin paths or allowlisted, checked after parsing. | A redirect or callback URL taken from the request without such a check. |
+| No eval or new Function | high | tool | Shipped source never runs strings as code. | `eval`, `new Function`, or a string timer outside tests. |
+| Message listeners check the sender's origin | high | model | Listeners check `event.origin` exactly before using `event.data`. | A listener acting on `event.data` without an exact origin check. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| HTTPS enforced | The deployed application redirects HTTP to HTTPS at the platform/edge layer, or carries a Strict-Transport-Security response header with a meaningful `max-age`. | Neither configuration detected. For projects with no detected deployment configuration (local-only), this check reports `partial` rather than `violation`. |
-| Strict-Transport-Security set | An HSTS header is configured with `max-age >= 15768000`; `includeSubDomains` is recommended; `preload` is recommended for production. | Header missing, or `max-age` shorter than the threshold. |
-| Content Security Policy defined | A Content Security Policy is set, either via response header (deployment configuration, framework `headers()`) or `<meta http-equiv="Content-Security-Policy">`. | No Content Security Policy detected anywhere. |
-| Content Security Policy not overly permissive | The Content Security Policy does not use `unsafe-inline` or `unsafe-eval` for `script-src`, and does not use `*` as a source. Soft check — reported as `partial` if `unsafe-inline` is present alongside a documented nonce/hash strategy. | Direct `unsafe-eval`, `script-src *`, or `unsafe-inline` without a documented mitigation. |
-| Frame-ancestors restricted | `Content-Security-Policy: frame-ancestors` is set, or `X-Frame-Options: DENY`/`SAMEORIGIN` is configured. Prevents clickjacking. | Neither detected. |
-| `X-Content-Type-Options: nosniff` set | The header is configured. | Header missing. |
-| Referrer-Policy set | A non-default Referrer-Policy is configured (`strict-origin-when-cross-origin` or stricter). | Header missing or set to `unsafe-url`. |
-| Permissions-Policy set | A Permissions-Policy header restricts dangerous features (geolocation, camera, microphone, payment, USB, etc.) to the origins that need them. | Header missing. |
-| Cookies use Secure, HttpOnly, SameSite | Authentication and session cookies set by client code (rare) or by detected server adapters carry `Secure`, `HttpOnly`, and `SameSite=Lax` (or stricter). | Cookies set without these flags. |
-| No mixed content | Asset URLs and `fetch` URLs in source use `https://` or relative paths, not `http://`. | Any `http://` literal in production source. |
+### Layer 3 — Secrets, data, and browser hardening
 
-### Layer 4 — Secrets, data protection, and third-party integrations
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| No secrets in source | critical | tool | No high-confidence credential in tracked files and no secret value in committed environment files; with `--with-scan`, none in history. | A credential in a tracked file (value redacted), or gitleaks findings in history. |
+| Local environment files are ignored by Git | high | tool | The repository's `.gitignore` covers local environment files in every application folder. | No repository rule, or coverage only from a personal or global ignore file. |
+| Public environment variables hold no secrets | critical | model | Only values designed to be public use `NEXT_PUBLIC_`, `VITE_`, or another public prefix. | A secret or server token exposed through a public-prefixed variable. |
+| Server secrets never reach client code | critical | model | Secret-reading modules import `server-only`; secrets never reach props, responses, or the client build. | A secret value reaching client code or a response. |
+| Logs record no secrets or tokens | high | model | No token, password, secret value, or whole header or cookie set is logged or reported. | A log or error-report call that includes one. |
+| Personal data stays out of URLs and analytics | medium | model | URLs and analytics events carry no personal data or tokens. Soft check — mixed adherence is reported as partial. | Personal data or tokens in a URL or an analytics payload. |
+| A Content Security Policy restricts scripts | medium | model | HTML responses send a policy whose `script-src` uses nonces, hashes, or `strict-dynamic`. | No policy, or `unsafe-inline`, `unsafe-eval`, or wildcard script sources. |
+| Other sites cannot frame the application | medium | model | `frame-ancestors` or `X-Frame-Options` restricts framing, unless embedding is required. | No framing restriction on pages that perform actions. |
+| HTTPS is enforced | medium | model | HTTPS redirect and HSTS from the application or a documented platform default; no `http://` requests in production. | Neither in place, or plain-HTTP requests in production code. |
+| Baseline security headers are set | low | model | `nosniff`, a strict `Referrer-Policy`, and a `Permissions-Policy` are sent. | One of them missing or permissive. |
+| Third-party scripts and frames are constrained | medium | model | Pinned third-party scripts carry `integrity`; third-party iframes use a narrow `sandbox`. | A pinned script without `integrity`, or an unsandboxed third-party iframe. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| No secrets in source | No API keys, tokens, passwords, private keys, or signing secrets present as string literals in source. Detection uses regex patterns for common secret formats (AWS access keys, Stripe keys, Google API keys, GitHub tokens, JWT, PEM blocks). | Any regex match in source files. |
-| `.env*` files git-ignored | `.gitignore` excludes `.env`, `.env.local`, `.env.*.local`. | Any `.env*` file tracked, or pattern not present in `.gitignore`. |
-| Public-prefix env vars are actually public | Variables prefixed with `VITE_*`, `NEXT_PUBLIC_*`, or `PUBLIC_*` are inlined into the client bundle and therefore published. The check verifies their names don't suggest secret content (`*_SECRET`, `*_PRIVATE`, `*_TOKEN` matching known secret-key patterns, `*_KEY` where the value is a real secret rather than a public identifier). | A variable like `NEXT_PUBLIC_API_SECRET` or `VITE_PRIVATE_KEY` shipping to every client. |
-| No PII in URL paths or query strings | Routing and link generation don't put email addresses, phone numbers, government IDs, or API tokens in URLs (URLs land in browser history, server logs, and analytics). Soft check — heuristic detection by parameter-name patterns. Reported as `partial` rather than `violation` because the heuristic is imperfect. | Routes or link calls with parameter names matching PII patterns (`email`, `phone`, `ssn`, `creditCard`, `taxId`). |
-| No PII in client-side analytics | Analytics event payloads (`gtag`, `posthog`, `mixpanel`, `segment`, `amplitude`, `heap`) don't include obvious PII fields. Soft check — heuristic, reported as `partial`. | Event property names matching PII patterns being passed to analytics. |
-| Subresource Integrity on external scripts | `<script src="https://...">` tags from non-first-party origins carry an `integrity` attribute. | External scripts without SRI hashes. |
-| Third-party iframes are sandboxed | `<iframe>` elements pointing at non-first-party origins use the `sandbox` attribute (with the most restrictive set of permissions the embed actually needs). | Unsandboxed third-party iframes. |
-| `postMessage` origin validation | `window.addEventListener('message', ...)` handlers check `event.origin` against an allowlist before acting on `event.data`. | Listeners that read `event.data` without an origin check. |
-| `target="_blank"` paired with `rel="noopener noreferrer"` | External links opening in new tabs include the `rel` attribute to prevent reverse-tab-nabbing. | `<a target="_blank">` without `rel="noopener noreferrer"`. |
-| No console-logged secrets | The codebase doesn't pass auth tokens, environment-variable values, or full request-header objects directly to `console.*` or to third-party loggers. (Some overlap with `/error-handling-audit`'s redaction check; both surface the same gap so a single fix passes both.) | Patterns matching the above. |
-| Weak cryptographic primitives flagged | Use of MD5 or SHA-1 for any security-relevant purpose (hashing passwords, signing, fingerprinting tokens) is reported. The audit does **not** flag MD5/SHA-1 used for non-security purposes (cache busting, content fingerprinting); the user-visible recommendation makes that distinction. Soft check. | `crypto.createHash('md5')` or `'sha1'` calls in code paths that look security-relevant. |
+### Layer 4 — Large-language-model features
+
+Not applicable, and decided by the collector, when no AI SDK or model API call is found.
+
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Model tool calls act only with the user's permissions | critical | model | Tools validate arguments, run as the end user with the same ownership checks, and confirm destructive or financial actions. | A tool acting on a model-supplied identifier without user scoping, or acting irreversibly without confirmation. |
+| Model output is never rendered as raw HTML | critical | model | Output is rendered as text, or Markdown with raw HTML off and link schemes restricted. | Model output reaching an HTML sink or raw-HTML Markdown. |
+| Prompts carry no secrets or other users' data | high | model | Prompts and retrieval hold nothing the current user may not see. | A secret or another user's data in a prompt or retrieval context. |
+| Model usage is bounded per user | medium | model | Model endpoints need a session, rate-limit per user, and cap tokens, steps, and input size. | No rate limit, no output cap, or unbounded tool loops. |
 
 ## What this skill does
 
-1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit performs lightweight taint-flow analysis — tracing user-input sources to dangerous sinks (`dangerouslySetInnerHTML`, redirects, `eval`, raw URL handling) — which sharpens the input-handling layer's findings. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript or React project.** Detects `package.json` and (for layer 1's React-conditional checks) `react` in dependencies. If `package.json` is absent, the skill stops.
-3. **Detects framework, deployment platform, and authentication library** for the diagnostic snapshot and for resolving where security headers are expected to live.
-4. **When `--with-scan` is set**, invokes any installed security scanners and captures their output:
-   - ESLint plugins via `npx eslint --no-eslintrc --rulesdir ... --format json` (or by reading the project's existing ESLint configuration if those plugins are already enabled there).
-   - Semgrep via `semgrep --config=p/owasp-top-ten --config=p/javascript --json` if `semgrep` is on PATH.
-
-   If none of the recognised scanners is installed (no security ESLint plugins in `devDependencies` and `semgrep` is not on PATH), record `scannersExecuted: []` in metadata, print to the chat and prepend to `findings.md`: "`--with-scan` was requested but none of the recognised security scanners is installed. Run `/preflight --audit=security --install` to install the ESLint security plugins, then re-run this audit. The static analysis has been completed; only the scan-derived enrichment degraded. (Semgrep is a global CLI and out of scope for `/preflight` — install it manually if you want it.)" Record `recoveryHint: "/preflight --audit=security --install"` on each scan-dependent check that degraded in `findings.json`. Continue with the static analysis.
-5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/security-audit/snapshot.md` and prepends the same content to `findings.md`.
-6. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check. Heuristic checks (PII detection) explicitly mark `confidence: "heuristic"` in `findings.json` and report `partial`.
-7. **Writes phase 1 outputs** to `.architect-audits/security-audit/`:
-   - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
-   - `findings.json` — machine-readable.
-   - `snapshot.md` — diagnostic snapshot on its own.
-   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), framework, deployment platform, detected authentication library, sanitization library, scanner output presence, applied filters.
-8. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
-
-   > "Generate an implementation plan for the security gaps? (yes/no)"
-
-   On `yes`, writes `.architect-audits/security-audit/implementation-plan.md` describing exactly which configuration entries to add (security headers, Content Security Policy directives, cookie flags), which source-level changes to make (sanitization wrapping, redirect allowlists, SRI hashes), and which third-party integrations to harden. The plan is ordered by **severity** rather than by layer, because security findings cross layers and the user wants to fix the highest-impact issues first.
-
-   On `no`, exits cleanly.
+1. Stages a run through the shared audit protocol. The collector decides the three tool checks, marks Layer 4 not applicable when no model is used, and records the Layer 0 inventory.
+2. Traces every entry point in the inventory to the data and sinks it reaches, instead of grepping for patterns.
+3. Grades each model check against the supported-finding bar, challenges every critical and high candidate before recording it, and keeps disproved candidates as coverage evidence.
+4. Publishes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` through the protocol, and summarises the act-on findings.
+5. Offers an implementation plan of agent briefs.
 
 ## Implementation steps
 
-### Step 1 — Confirm the prerequisites
+1. **Begin.** Follow [the run protocol](../audit-protocol/references/run-protocol.md). With `--worktree`, create the worktree as it describes.
 
-```bash
-test -f package.json || { echo "security-audit: no package.json detected. This skill currently supports TypeScript and React frontend projects only."; exit 1; }
-```
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin security-audit
+   ```
 
-### Step 2 — Detect framework, deployment platform, and security stack
+   - Pass `--since <ref>` for a diff-scoped run, and judge the entry points and sinks in the changed files.
+   - Pass `--enrichment with-scan` to record `--with-scan`. The collector then scans history with gitleaks.
+2. **Read the inventory.** Read the `snapshot` in `.architect-audits/security-audit/.staging/run.json`. Record the trust boundaries, the deliberately public entry points, and the platform defaults with `snapshot --set`.
+3. **Run the scanners when asked.** With `--with-scan`, run Semgrep (`semgrep scan --config p/owasp-top-ten --config p/typescript --json --metrics=off`) and the project's own ESLint when it configures security plugins (`npx --no-install eslint . --format json`), if installed. Treat their hits as candidates to trace, not as findings. Cite a scanner in a `command:` entry beside the citation it led to.
+4. **Trace every entry point.** For each Server Action, route handler, API route, loader, action, and model tool:
+   - who can call it;
+   - what it reads from the request;
+   - which session, ownership, and validation checks run, including in the data-access functions it calls;
+   - which queries, requests, redirects, and responses its input reaches.
 
-Read `package.json`, framework configuration, and deployment configuration. Resolve:
+   Then follow the client sinks in the snapshot back to their sources. The detection notes give the method per check.
+5. **Evaluate every model check.**
+   - Record each with `record`, citing `path:line` with quoted fragments, and give every non-present result a `--tier`.
+   - Quote secrets only as `<REDACTED>`.
+   - A violation needs the full trace from entry point to impact. Missing hardening without a concrete failure scenario is `partial`.
+   - Use `hypothesis` for a path you suspect but cannot complete from the code.
+   - Use `not-applicable` when the code has no such surface, such as no hand-written OAuth flow.
+6. **Challenge before recording.** For each critical or high candidate, try to refute it: look for the protective control in middleware, the data-access layer, framework defaults, React's escaping, or cookie defaults. When a subagent tool is available, give a fresh subagent the candidate and the trace and ask it to refute the failure scenario. Record a refuted candidate as present, citing the control that stops it.
+7. **Judge.** Keep at most about five findings `act-on`, ranked by severity, then by how reachable the entry point is (anonymous before authenticated). Dismiss with a reason anything a recorded decision covers.
+8. **Finish.** Run `audit_run.py finish security-audit`, fix anything it rejects, and present the chat summary the protocol defines.
 
-- Framework variant: Next.js (App Router or Pages Router), Remix, Vite-React, Create React App, plain React, plain TypeScript.
-- Deployment platform (where security headers are likely defined): Vercel (`vercel.json`), Netlify (`netlify.toml`, `_headers`), Cloudflare Pages (`_headers`), or custom/local-only.
-- Authentication library: scan `dependencies` for `next-auth`, `@auth/*`, `@clerk/*`, `@auth0/*`, `@supabase/auth-helpers-*`, `aws-amplify`, `firebase`, custom-marker. Record the first match or `none`.
-- Sanitization library: scan for `dompurify`, `isomorphic-dompurify`, `sanitize-html`. Record or `none`.
+## Phase 2: the implementation plan
 
-### Step 3 — Optionally run scanners
-
-When `--with-scan` is set:
-
-- Detect `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security` in `devDependencies`. If present and already configured in the project's ESLint configuration, run `npx eslint . --format json` and parse the output (filter to only the security-plugin rules). If present but not configured, do not execute it; record that fact in metadata and mark only scanner-dependent enrichment as degraded with an evaluation reason.
-- Detect `semgrep` on PATH (`command -v semgrep`). If present, run `semgrep --config=p/owasp-top-ten --config=p/javascript --json` (no `--autofix`) and parse the output.
-
-If any scanner fails to start, record the failure and continue. Scan-dependent enrichment of layer-2 and layer-4 checks degrades gracefully.
-
-### Step 4 — Build the diagnostic snapshot
-
-Compute the items listed in Layer 0 by reading source files, framework configuration, and deployment configuration. Write `snapshot.md` and prepend the same content to `findings.md`.
-
-### Step 5 — Resolve each check
-
-For each check in the active layer list, walk its detection logic. Use the standard status taxonomy. Heuristic checks explicitly carry `confidence: "heuristic"` in their `findings.json` entry and report `partial`. Layer 2 and layer 4 checks that have additional scanner-derived findings record those alongside the static evidence.
-
-### Step 6 — Write phase 1 outputs
-
-Create `.architect-audits/security-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
-
-### Step 7 — Print the concise chat summary and offer phase 2
-
-Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 6. The chat output has exactly this shape:
-
-1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
-2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
-   - **Title** (one clear line).
-   - **Why it matters** (explain the principle in 1–2 sentences).
-   - **Real consequences if ignored** (honest downside for the team or project).
-   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
-   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
-3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/security-audit/findings.md`
-
-When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
-- For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
-- Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
-- Include a short "What you'll learn from fixing this" section for each recommendation.
-- Keep the numbered/lettered structure so the user can still reply with "2b" or "1 and 3".
-- End with the same bottom-line link to the full report.
-
-After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
-
-### Step 8 — Phase 2: generate the implementation plan
-
-When the user agrees, build `implementation-plan.md`, **ordered by severity** rather than by layer:
-
-1. **Header** — repository name, baseline version, framework, deployment platform, authentication library, timestamp, total counts per layer.
-2. **Critical: authentication and XSS gaps** — every layer 1 violation and every layer 2 violation goes here, with file references and concrete remediation snippets (sanitization wrapping, redirect allowlist, PKCE wiring, etc.).
-3. **High: transport and header gaps** — every layer 3 violation. Per missing header, the exact configuration snippet for the detected deployment platform (vercel.json fragment, netlify.toml fragment, `_headers` fragment, framework `headers()` function fragment).
-4. **Medium: secrets and third-party integration gaps** — every layer 4 violation. Per finding, the file or configuration to change.
-5. **Soft findings** — every `partial` from heuristic checks (PII detection, server-side authorization reliance), with recommendations but no urgent action expected.
-6. **Closing checklist** — flat checkbox list mirroring the gaps, suitable for pasting into a pull-request description.
-
-The plan is descriptive, not executable. It does not modify configuration, install packages, or edit source.
+Ask once: "Generate an implementation plan for the act-on findings? (yes/no)". On yes, write `.architect-audits/security-audit/implementation-plan.md` as agent briefs, in the format the run protocol defines.
+- Order the briefs: rotate exposed secrets first, then close anonymous entry points, then cross-user access, then everything else.
+- Every change to authentication, authorization, sessions, or data flow is ASK. Only mechanical configuration, such as an ignore rule or a header, is AUTO-FIX.
+- Each brief's acceptance criteria name an exploit check that succeeds at the current commit and fails after the fix. Examples: a request as another user returns 404; a request to `http://169.254.169.254/` is refused; the collector reports no secret.
+- Prefer the highest enforcement level: a data-access layer that cannot query without a user, a schema that rejects extra fields, a lint rule, a test, then documentation.
 
 ## Repository Quality Score findings contract
 
-`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
-top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
-`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
-`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
-repository, exact Git commit, and whether the audited source tree was clean.
-`execution` records `filtersApplied`, `filterArguments`, threshold and policy
-overrides, `enrichmentArguments`, and graph availability.
-
-Emit every entry from `checks.json` exactly once and use its full `checkId` and
-layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
-`classification`, canonical `status`, and `evidence`. A check that does not apply
-is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
-unresolved applicable check is `applicable`/`not-evaluated` with a null status;
-never guess a pass or failure. `metadata.json` repeats the common run, target,
-catalog, and execution identity. The complete contract is
-`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
-
-## Findings file shape
-
-`findings.json` (the example shows one representative check; emitted output
-contains every catalog check exactly once):
-
-```json
-{
-  "schemaVersion": "2.0.0",
-  "runIdentifier": "<uuid>",
-  "skillName": "security-audit",
-  "skillVersion": "1.0.0",
-  "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.0.0",
-  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
-  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
-  "runStartedAt": "2026-04-26T13:47:00Z",
-  "runFinishedAt": "2026-04-26T13:47:18Z",
-  "framework": "next-app-router",
-  "deploymentPlatform": "vercel",
-  "authLibrary": "next-auth",
-  "sanitizationLibrary": "dompurify",
-  "withScan": true,
-  "scannersExecuted": ["eslint-plugin-security", "semgrep p/owasp-top-ten"],
-  "snapshot": {
-    "contentSecurityPolicy": { "detected": true, "source": "vercel.json", "directives": ["default-src 'self'", "script-src 'self' 'nonce-...'"] },
-    "securityHeaders": {
-      "strictTransportSecurity": { "present": true, "source": "vercel.json", "maxAge": 31536000, "includeSubDomains": true, "preload": false },
-      "xFrameOptions": { "present": true, "source": "vercel.json", "value": "DENY" },
-      "xContentTypeOptions": { "present": false },
-      "referrerPolicy": { "present": true, "source": "vercel.json", "value": "strict-origin-when-cross-origin" },
-      "permissionsPolicy": { "present": false }
-    },
-    "dangerouslySetInnerHtmlCount": 6,
-    "evalCount": 0,
-    "localStorageAuthKeys": ["accessToken"],
-    "externalScriptCount": 4,
-    "externalScriptSriCoverage": 0.5
-  },
-  "summary": {
-    "authenticationAndSessions":   { "present": 4, "partial": 1, "missing": 0, "violation": 2 },
-    "inputHandlingAndXss":         { "present": 4, "partial": 0, "missing": 0, "violation": 1 },
-    "transportHeadersAndCookies":  { "present": 6, "partial": 1, "missing": 2, "violation": 1 },
-    "secretsDataAndThirdParty":    { "present": 7, "partial": 2, "missing": 0, "violation": 2 }
-  },
-  "checks": [
-    {
-      "layer": "authentication-authorization-and-sessions",
-      "checkId": "security-audit.session-tokens-not-in-browser-storage",
-      "applicability": "applicable",
-      "applicabilityReason": null,
-      "evaluationState": "evaluated",
-      "evaluationReason": null,
-      "evidenceQuality": "complete",
-      "classification": "client-token-storage",
-      "status": "violation",
-      "confidence": "high",
-      "evidence": [],
-      "samples": [
-        { "path": "src/lib/auth/session.ts", "line": 14, "key": "accessToken" }
-      ],
-      "expectation": "Long-lived session and authentication tokens live in HttpOnly cookies, not in localStorage or sessionStorage.",
-      "gap": "accessToken is written to localStorage; any script running on the page can read it.",
-      "remediation": "Move token storage to an HttpOnly, Secure, SameSite=Lax cookie set by the server; refactor the client to call /api/me for the session rather than reading from localStorage."
-    }
-  ]
-}
-```
-
-`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top and one section per check, grouped by layer. `snapshot.md` contains only the snapshot. `metadata.json` carries skill identity, timestamps, Graphify revision (when present), the framework, the deployment platform, the detected authentication and sanitization libraries, the `withScan` flag, the list of scanners that actually executed, and the applied filters.
-
-## Idempotency rules
-
-- Re-running with no flags overwrites `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` in place.
-- `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it.
-- Filter flags and the `--with-scan` flag are recorded in `metadata.json` so a partial run can be reproduced.
-- Scanner-derived findings are timestamp-tagged; staleness is the user's responsibility to manage by re-running.
-
-## Failure modes and remediation
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The taint-flow analysis on layer 2 falls back to per-file pattern matching with reduced precision; everything else is unaffected. |
-| `--with-scan` set but no scanners installed | None of the recognised security scanners is in `devDependencies` and `semgrep` is not on PATH. | Continue with the static analysis. Record `scannersExecuted: []` in metadata. **Recovery:** run `/preflight --audit=security --install` to install `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, and `eslint-plugin-react-security`, then re-run with `--with-scan`. Semgrep is a global CLI and out of scope for `/preflight` — install it manually if you want it. |
-| Scanner fails to start | Configuration mismatch, version incompatibility, or path resolution issue. | Record the failure in metadata and continue. Scanner-derived enrichment of relevant checks is omitted; the static-derived findings still report. |
-| Multiple deployment platforms detected (e.g., both `vercel.json` and `netlify.toml` present) | Project supports multiple deployment targets. | Record both in the snapshot. Header checks resolve against whichever has the most security headers configured; the user is recommended to harmonise both in the implementation plan. |
-| Content Security Policy split across header and meta tag | CSP defined in both `<meta http-equiv>` and a response header. | Record both sources. Treat the union of directives as the effective policy for permissiveness checks. Surface the dual-definition as a `partial` finding on a synthetic "single-csp-source" check. |
-| `.env` files exist but `.gitignore` is missing entirely | New project, never initialised. | The "`.env*` files git-ignored" check reports `violation` regardless of whether `.env` files happen to be tracked yet (the protection is missing). |
-| Heuristic check matches a false positive | Parameter name like `email` is used for a non-PII purpose (newsletter campaign identifier, etc.). | The check reports `partial` not `violation`, and the remediation guidance asks the user to confirm the parameter does not actually carry PII before acting. |
+The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `runStartedAt` and `runFinishedAt`, and the `checkCatalogVersion`. It records `applicability`, `evaluationState`, and `evidenceQuality` for every catalog check, and repeats the run identity in `metadata.json`. See `.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
 
 ## What this skill explicitly does NOT do
 
-- Run any code, exploit any vulnerability, or interact with the running application.
-- Audit backend application security. SQL injection, server-side request forgery, command injection, server-side authorization logic, server-rate-limiting are out of scope for this skill.
-- Audit dependency vulnerabilities or supply chain. That is owned by `/dependency-audit`.
-- Modify any source file, configuration file, or continuous-integration workflow.
-- Install any package or dependency.
-- Open pull requests or commit anything to git.
-- Certify compliance with PCI-DSS, HIPAA, GDPR, SOC 2, or any other regulatory framework. The audit's findings can support a compliance effort but are not themselves a compliance assessment.
-- Replace human security review for high-risk changes (payment flows, authentication code, data export, admin tooling). The audit catches structural issues; nuanced threat modelling remains a human responsibility.
-- Audit cryptography schemes. The audit flags use of weak primitives in source; it does not review key rotation, certificate handling, or protocol design.
-- Detect every possible secret. Regex-based detection has a false-negative tail; the audit recommends pairing it with a dedicated secrets-scanning tool (gitleaks, trufflehog) in continuous integration.
+- Modify, move, or delete any project file. The only writes are under `.architect-audits/security-audit/`, through the protocol.
+- Run the application, send requests, or attempt an exploit. Every finding comes from reading code and configuration.
+- Print, store, or quote a secret value. Every citation replaces it with `<REDACTED>`.
+- Audit dependency vulnerabilities or whether gates run in continuous integration. `/dependency-audit` and `/quality-gates-audit` own those.
+- Report missing hardening as a violation without a concrete failure scenario, or skip a candidate because of its category.
+- Review cryptographic protocol design, cloud or network infrastructure, or compliance with any regulatory framework.
+- Prove the absence of vulnerabilities. A clean run means none of these checks found one.

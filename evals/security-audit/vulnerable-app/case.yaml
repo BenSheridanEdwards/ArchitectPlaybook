@@ -1,0 +1,19 @@
+schema_version: "1.1"
+name: security-vulnerable-app
+description: A small Next.js App Router invoicing app with planted, realistic security problems across all four layers.
+tags: [security, planted]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run. The collector reports the committed Stripe key with its value redacted, the
+  missing ignore rule for local environment files, and no eval. The model finds the unauthenticated
+  deleteInvoice Server Action, cross-user invoice reads in the route handler and the page, middleware-only
+  authorization on a Next.js version that can bypass it, server-side request forgery in the embed route,
+  the customer note rendered as unsanitized HTML, the open redirect after sign-in, the token in
+  localStorage, and the assistant's refund tool acting on any invoice the model names.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /security-audit
+  max_turns: 150
+  timeout_seconds: 2400
+  allowed_tools: [Read, Glob, Grep, Skill]

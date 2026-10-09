@@ -50,6 +50,8 @@ Results go to `evals/results/<timestamp>/` in the copy.
 | --- | --- |
 | `architecture-audit/tangled-store` | Recall. A storefront with an import cycle, no boundary tooling, a component importing another feature's internal file, Zustand and Redux both writing cart state, two HTTP clients, effect-based fetching beside a query layer, storage access in components, a wire type rendered in a component, and an untested checkout hotspot. |
 | `architecture-audit/well-kept-store` | Precision. The same storefront built well, so every finding it raises is a false positive. |
+| `security-audit/vulnerable-app` | Recall. A Next.js invoicing app with a committed live-format Stripe key (assembled when the fixture is built), no ignore rule for local environment files, an unauthenticated Server Action that deletes any invoice by id, a route handler and a page that return any user's invoice, middleware-only authorization on a bypassable Next.js version, server-side request forgery in a link preview, a customer note rendered as unsanitized HTML, an open redirect after sign-in, a token in localStorage, and an assistant tool that refunds any invoice the model names. |
+| `security-audit/hardened-app` | Precision. The same app with a data-access layer, input validation, a hardened session cookie, rate-limited sign-in, a random payment-link token, a safe redirect, sanitized HTML, an oEmbed allowlist, a nonce-based Content Security Policy, and scoped, rate-limited assistant tools, so every finding it raises is a false positive. |
 
 ## Grading
 

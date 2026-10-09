@@ -1,14 +1,14 @@
 {
-  "schemaVersion": "1.1.0",
-  "catalogVersion": "1.0.0",
+  "schemaVersion": "1.2.0",
+  "catalogVersion": "2.0.0",
   "skillName": "security-audit",
   "humanCanonicalSource": "SKILL.md",
-  "description": "Machine-readable inventory of security audit checks for validation and generated maps.",
+  "description": "Machine-readable inventory of security audit checks: access control and sessions, untrusted input and output, secrets, data, and browser hardening, and large-language-model features.",
   "statusTaxonomy": {
-    "present": "The expected invariant is fully satisfied.",
-    "partial": "Most signals resolve, with a small number of exceptions, or the check is heuristic and the codebase shows mixed adherence.",
+    "present": "The invariant holds.",
+    "partial": "The invariant mostly holds, with exceptions; or a hardening control is missing without a concrete failure scenario; or a soft check shows mixed adherence.",
     "missing": "A structural prerequisite is absent.",
-    "violation": "Concrete code or configuration breaks the invariant."
+    "violation": "Concrete code or configuration breaks the invariant. A model-judged weakness also names an attacker-controlled entry point, a path across a security boundary, and an impact."
   },
   "informationalLayers": [
     "diagnostic-snapshot"
@@ -16,293 +16,365 @@
   "enrichmentFlags": [
     {
       "flag": "--with-scan",
-      "description": "Run installed security-focused linters and Semgrep when available, then use their JSON output to enrich relevant findings."
-    }
-  ],
-  "relatedAudits": [
-    {
-      "audit": "dependency-audit",
-      "relationship": "Owns dependency vulnerabilities and supply-chain analysis."
-    },
-    {
-      "audit": "error-handling-audit",
-      "relationship": "Owns error redaction and logging hygiene; secret logging gaps overlap."
+      "description": "Scan Git history with gitleaks, and run Semgrep and the project's configured ESLint security rules when installed, to confirm and extend findings."
     }
   ],
   "checks": [
     {
+      "checkId": "security-audit.server-entry-points-authenticated",
+      "layer": "access-control-and-sessions",
+      "title": "Server entry points authenticate the caller",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Server Actions and route handlers are public HTTP endpoints, so one that skips the session check lets anyone on the internet call it.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every Server Action, route handler, API route, and loader or action that is not deliberately public verifies the session itself, with a verified token (never a decoded-only one), before it reads or changes data.",
+      "violationSignal": "An entry point that reads or changes non-public data with no session verification of its own, reported with the entry point and what an anonymous caller can do."
+    },
+    {
+      "checkId": "security-audit.object-level-authorization",
+      "layer": "access-control-and-sessions",
+      "title": "Each request is authorized for the records it touches",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "An authenticated user who can change an identifier in a request can read or change every other user's records.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every query or mutation that takes a record identifier from the request scopes it to the caller (owner, tenant, or role) on the server, and privileged operations check the caller's role.",
+      "violationSignal": "A lookup or mutation by a request-supplied identifier with no ownership, tenant, or role condition, reported with the entry point and the query."
+    },
+    {
+      "checkId": "security-audit.authorization-not-middleware-only",
+      "layer": "access-control-and-sessions",
+      "title": "Authorization does not rely on middleware alone",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Middleware is skipped by matcher gaps and was bypassable outright in vulnerable Next.js versions (CVE-2025-29927), so it cannot be the only gate.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Middleware or proxy checks are an optimistic first pass; the page, Server Action, or route handler, or the data-access layer it calls, enforces the same rule again.",
+      "violationSignal": "Protected data or mutations whose only check is in middleware or a proxy file, reported with the matcher and the unguarded entry point."
+    },
+    {
+      "checkId": "security-audit.state-changes-resist-cross-site-requests",
+      "layer": "access-control-and-sessions",
+      "title": "State changes resist cross-site requests",
+      "severity": "high",
+      "method": "model",
+      "rationale": "A state change that a cross-site page can trigger with the victim's cookies acts on the victim's behalf without their intent.",
+      "lastVerified": "2026-10-09",
+      "expectation": "State changes use non-GET methods; cookie-authenticated route handlers rely on SameSite=Lax or Strict cookies or check the Origin header; Server Action allowed origins are not widened to arbitrary sites.",
+      "violationSignal": "A GET handler that changes state, or a cookie-authenticated mutation reachable cross-site (SameSite=None, or wildcard allowed origins) with no origin or token check."
+    },
+    {
+      "checkId": "security-audit.sign-in-flows-protected",
+      "layer": "access-control-and-sessions",
+      "title": "Hand-written sign-in flows use state, PKCE, and nonce",
+      "severity": "high",
+      "method": "model",
+      "rationale": "A hand-built OAuth or OpenID Connect flow without these parameters allows login cross-site request forgery, code interception, or token replay.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Hand-written OAuth flows send and verify a `state` value and use PKCE; OpenID Connect flows also send and verify a `nonce`. Not applicable when a maintained library runs the flow or there is no OAuth flow.",
+      "violationSignal": "A hand-written authorization request or callback that omits or does not verify `state`, PKCE, or `nonce`."
+    },
+    {
       "checkId": "security-audit.session-tokens-not-in-browser-storage",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "Session tokens not in localStorage",
-      "expectation": "Long-lived session and authentication tokens live in HttpOnly cookies, not localStorage or sessionStorage.",
-      "violationSignal": "localStorage or sessionStorage calls use keys matching authentication-token patterns."
-    },
-    {
-      "checkId": "security-audit.logout-invalidates-server-session",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "Logout invalidates server session",
-      "expectation": "Logout calls a server endpoint and awaits or handles the result, instead of only clearing local state.",
-      "violationSignal": "A logout flow only clears local store or state with no server request."
-    },
-    {
-      "checkId": "security-audit.authentication-state-server-derived",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "Authentication state is server-derived",
-      "expectation": "The logged-in check resolves against a server source of truth on navigation or load.",
-      "violationSignal": "Authentication state is read only from client storage without server validation."
-    },
-    {
-      "checkId": "security-audit.oauth-uses-pkce",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "OAuth and OIDC flows use PKCE",
-      "expectation": "Public-client OAuth flows generate a code verifier and send a code challenge in the authorization request.",
-      "violationSignal": "An OAuth flow for a public client does not use PKCE.",
-      "skipWhenAbsent": "No OAuth flow is detected."
-    },
-    {
-      "checkId": "security-audit.oauth-state-parameter",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "OAuth flows use a state parameter",
-      "expectation": "Every OAuth authorization request includes a CSRF-resistant state value that is validated on callback.",
-      "violationSignal": "The state value is absent from the authorization request or absent from callback validation."
-    },
-    {
-      "checkId": "security-audit.oidc-nonce",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "OIDC flows use a nonce",
-      "expectation": "OpenID Connect flows include a nonce in the authorization request and validate it on the ID token.",
-      "violationSignal": "The nonce is absent or unvalidated.",
-      "skipWhenAbsent": "No OpenID Connect flow is detected."
-    },
-    {
-      "checkId": "security-audit.redirect-uris-explicitly-handled",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "Redirect URIs are explicitly handled",
-      "expectation": "Post-authentication redirect destinations are validated against an allowlist or restricted to relative paths.",
-      "violationSignal": "A next or returnTo query parameter is passed directly to router.push or window.location without validation."
-    },
-    {
-      "checkId": "security-audit.server-side-authorization-referenced",
-      "layer": "authentication-authorization-and-sessions",
-      "title": "Server-side authorization referenced",
-      "expectation": "UI-only authorization checks are paired with server-enforced checks at the data-fetching layer.",
-      "violationSignal": "Permission checks appear only in components and route guards, with no role or permission references in the data-fetching layer.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "security-audit.dangerously-set-inner-html-sanitized",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "dangerouslySetInnerHTML only with sanitization",
-      "expectation": "Every dangerouslySetInnerHTML use consumes trusted server-rendered content or sanitized input from DOMPurify or an equivalent library.",
-      "violationSignal": "dangerouslySetInnerHTML payload is reachable from user input, untrusted props, or fetched data without sanitization.",
-      "enrichmentSources": ["graphify-out/graph.json"],
-      "enrichmentFlags": ["--with-scan"]
-    },
-    {
-      "checkId": "security-audit.no-dynamic-code-execution",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "No eval or dynamic code execution",
-      "expectation": "Source code does not use eval, new Function, Function(...), or string-form setTimeout or setInterval.",
-      "violationSignal": "Any dynamic code execution primitive appears in source.",
-      "enrichmentFlags": ["--with-scan"]
-    },
-    {
-      "checkId": "security-audit.no-raw-inner-html-writes",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "No raw innerHTML or outerHTML writes",
-      "expectation": "DOM mutations go through React instead of direct innerHTML or outerHTML writes.",
-      "violationSignal": "Direct innerHTML or outerHTML writes use a non-literal right-hand side."
-    },
-    {
-      "checkId": "security-audit.url-href-src-validated",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "URL href and src validated",
-      "expectation": "User-controlled URLs in href, src, or formAction allow only http, https, or relative paths.",
-      "violationSignal": "A user-controlled href, src, or formAction expression has no protocol check and may allow javascript or data schemes."
-    },
-    {
-      "checkId": "security-audit.open-redirects-guarded",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "Open-redirect patterns guarded",
-      "expectation": "Redirect destinations are not user-controlled unless validated by an allowlist or constrained to safe relative paths.",
-      "violationSignal": "A redirect call site uses a destination from query parameters or form input without an allowlist."
-    },
-    {
-      "checkId": "security-audit.markdown-rich-text-safe-pipeline",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "Markdown and rich-text rendering use a safe pipeline",
-      "expectation": "Markdown or rich text is rendered with HTML disabled by default or sanitized after rendering.",
-      "violationSignal": "Markdown is rendered with HTML pass-through enabled and no sanitization.",
-      "skipWhenAbsent": "No Markdown or rich-text rendering is detected."
-    },
-    {
-      "checkId": "security-audit.no-react-escaping-bypass",
-      "layer": "input-handling-and-xss-prevention",
-      "title": "No bypassing React escaping",
-      "expectation": "React escaping remains active; raw HTML strings, custom JSX runtimes that disable escaping, and unsafe rendering components are absent.",
-      "violationSignal": "React.createElement with raw HTML strings, unsafe custom JSX runtimes, or third-party unsafe render components are detected."
-    },
-    {
-      "checkId": "security-audit.https-enforced",
-      "layer": "transport-headers-and-cookies",
-      "title": "HTTPS enforced",
-      "expectation": "The deployed application redirects HTTP to HTTPS at the platform or edge layer, or sends a meaningful Strict-Transport-Security header.",
-      "violationSignal": "No HTTPS redirect configuration or meaningful Strict-Transport-Security response header is detected.",
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "security-audit.strict-transport-security-set",
-      "layer": "transport-headers-and-cookies",
-      "title": "Strict-Transport-Security set",
-      "expectation": "The Strict-Transport-Security header has max-age of at least 15768000 seconds; includeSubDomains and preload are recommended for production.",
-      "violationSignal": "The header is missing or max-age is shorter than the threshold."
-    },
-    {
-      "checkId": "security-audit.content-security-policy-defined",
-      "layer": "transport-headers-and-cookies",
-      "title": "Content Security Policy defined",
-      "expectation": "A Content Security Policy is set by response header or meta tag.",
-      "violationSignal": "No Content Security Policy is detected anywhere."
-    },
-    {
-      "checkId": "security-audit.content-security-policy-not-permissive",
-      "layer": "transport-headers-and-cookies",
-      "title": "Content Security Policy not overly permissive",
-      "expectation": "The Content Security Policy avoids unsafe-eval, wildcard script sources, and unsafe-inline unless a nonce or hash strategy is documented.",
-      "violationSignal": "The policy uses unsafe-eval, script-src *, or unsafe-inline without documented mitigation.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "security-audit.frame-ancestors-restricted",
-      "layer": "transport-headers-and-cookies",
-      "title": "Frame ancestors restricted",
-      "expectation": "Content Security Policy frame-ancestors is set, or X-Frame-Options is DENY or SAMEORIGIN.",
-      "violationSignal": "Neither frame-ancestors nor X-Frame-Options is detected."
-    },
-    {
-      "checkId": "security-audit.x-content-type-options-set",
-      "layer": "transport-headers-and-cookies",
-      "title": "X-Content-Type-Options nosniff set",
-      "expectation": "The X-Content-Type-Options header is configured with nosniff.",
-      "violationSignal": "The X-Content-Type-Options header is missing."
-    },
-    {
-      "checkId": "security-audit.referrer-policy-set",
-      "layer": "transport-headers-and-cookies",
-      "title": "Referrer-Policy set",
-      "expectation": "A non-default Referrer-Policy is configured, such as strict-origin-when-cross-origin or stricter.",
-      "violationSignal": "The header is missing or set to unsafe-url."
-    },
-    {
-      "checkId": "security-audit.permissions-policy-set",
-      "layer": "transport-headers-and-cookies",
-      "title": "Permissions-Policy set",
-      "expectation": "A Permissions-Policy header restricts dangerous browser features to origins that need them.",
-      "violationSignal": "The Permissions-Policy header is missing."
+      "layer": "access-control-and-sessions",
+      "title": "Session tokens stay out of web storage",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Any script on the page can read web storage, so one cross-site scripting flaw becomes a stolen session.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Session and access tokens live in HttpOnly cookies, not in localStorage or sessionStorage.",
+      "violationSignal": "A session, access, or refresh token written to or read from localStorage or sessionStorage."
     },
     {
       "checkId": "security-audit.cookies-secure-httponly-samesite",
-      "layer": "transport-headers-and-cookies",
-      "title": "Cookies use Secure, HttpOnly, SameSite",
-      "expectation": "Authentication and session cookies carry Secure, HttpOnly, and SameSite=Lax or stricter flags.",
-      "violationSignal": "Cookies are set without Secure, HttpOnly, or SameSite flags."
+      "layer": "access-control-and-sessions",
+      "title": "Session cookies are Secure, HttpOnly, and SameSite",
+      "severity": "high",
+      "method": "model",
+      "rationale": "A session cookie without these flags can be read by scripts, sent over plain HTTP, or attached to cross-site requests.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Cookies that carry a session or token are set with Secure, HttpOnly, and SameSite=Lax or Strict, either explicitly or by a library whose defaults set them.",
+      "violationSignal": "A session or token cookie set without HttpOnly, without Secure, or with SameSite=None and no other protection."
     },
     {
-      "checkId": "security-audit.no-mixed-content",
-      "layer": "transport-headers-and-cookies",
-      "title": "No mixed content",
-      "expectation": "Production asset URLs and fetch URLs use https or relative paths.",
-      "violationSignal": "An http URL literal appears in production source."
+      "checkId": "security-audit.strong-cryptography",
+      "layer": "access-control-and-sessions",
+      "title": "Tokens and password hashes use strong cryptography",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Predictable tokens can be guessed, and fast or unsalted password hashes are cracked as soon as the database leaks.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Session, reset, and invitation tokens come from a cryptographically secure generator; passwords are hashed with bcrypt, scrypt, or Argon2; signed tokens are verified with a pinned algorithm.",
+      "violationSignal": "`Math.random()` used for a security token, MD5 or SHA-1 or a single unsalted SHA-256 for passwords, or a token verifier that accepts any algorithm."
     },
     {
-      "checkId": "security-audit.no-secrets-in-source",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "No secrets in source",
-      "expectation": "Source files contain no API keys, tokens, passwords, private keys, or signing secrets as string literals.",
-      "violationSignal": "Secret-detection patterns match source files.",
-      "enrichmentFlags": ["--with-scan"],
-      "relatedAudits": ["dependency-audit"]
+      "checkId": "security-audit.server-input-validated",
+      "layer": "untrusted-input-and-output",
+      "title": "Server entry points validate their input",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Unvalidated input lets callers write fields they should not (mass assignment) and turns type confusion into logic flaws.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every Server Action and route handler parses its arguments, form data, JSON body, and parameters with a schema on the server, and passes only the allowed fields on.",
+      "violationSignal": "An entry point that passes request data to a query, mutation, or downstream call without server-side parsing, or spreads a whole request body into a write."
     },
     {
-      "checkId": "security-audit.env-files-gitignored",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": ".env files git-ignored",
-      "expectation": ".gitignore excludes .env, .env.local, and .env.*.local files.",
-      "violationSignal": "An .env file is tracked, or the required ignore pattern is absent."
+      "checkId": "security-audit.no-injection-in-queries-or-commands",
+      "layer": "untrusted-input-and-output",
+      "title": "Queries and commands are parameterised",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Request data concatenated into SQL, a shell command, or a file path lets an attacker run their own query or command.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Database queries use parameters or a query builder, shell commands take argument arrays, and file paths from requests are resolved and confined to an allowed directory.",
+      "violationSignal": "Request data reaching a raw query (`$queryRawUnsafe`, `sql.raw`, string-built SQL), `exec` or a shell, or a filesystem path without parameterisation or confinement."
     },
     {
-      "checkId": "security-audit.public-prefix-environment-variables-are-public",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "Public-prefix environment variables are actually public",
-      "expectation": "Environment variables that are inlined into the client bundle do not carry secret-looking names or values.",
-      "violationSignal": "A public-prefix variable name suggests secret, private, token, or non-public key material."
+      "checkId": "security-audit.no-server-side-request-forgery",
+      "layer": "untrusted-input-and-output",
+      "title": "Server requests do not follow user-supplied URLs",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "A server that fetches a URL the caller chooses can be pointed at cloud metadata, internal services, and localhost.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Server-side requests go to fixed hosts, or validate the parsed URL against an allowlist of schemes and hosts and refuse redirects to other hosts.",
+      "violationSignal": "A user-supplied URL or host reaching `fetch`, an HTTP client, or an image or PDF renderer on the server without an allowlist."
     },
     {
-      "checkId": "security-audit.no-pii-in-url-paths-or-query-strings",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "No PII in URL paths or query strings",
-      "expectation": "Routing and link generation avoid email addresses, phone numbers, government identifiers, and API tokens in URLs.",
-      "violationSignal": "Route or link parameter names match PII patterns such as email, phone, ssn, creditCard, or taxId.",
-      "softCheck": true,
-      "confidence": "heuristic",
-      "allowedStatuses": ["present", "partial", "violation"]
+      "checkId": "security-audit.dangerously-set-inner-html-sanitized",
+      "layer": "untrusted-input-and-output",
+      "title": "dangerouslySetInnerHTML renders only sanitized HTML",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "HTML rendered without sanitization runs any script an attacker can place in it, in every viewer's session.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every `dangerouslySetInnerHTML` renders constant HTML, or content passed through DOMPurify or an equivalent sanitizer on the way in.",
+      "violationSignal": "A `dangerouslySetInnerHTML` whose HTML can contain user-controlled, stored, or fetched content with no sanitizer on the path."
     },
     {
-      "checkId": "security-audit.no-pii-in-client-side-analytics",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "No PII in client-side analytics",
-      "expectation": "Analytics event payloads do not include obvious PII fields.",
-      "violationSignal": "Event property names matching PII patterns are passed to analytics providers.",
-      "softCheck": true,
-      "confidence": "heuristic",
-      "allowedStatuses": ["present", "partial", "violation"]
+      "checkId": "security-audit.other-html-sinks-sanitized",
+      "layer": "untrusted-input-and-output",
+      "title": "Other HTML sinks receive only sanitized content",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Raw DOM writes and HTML-enabled Markdown bypass React's escaping exactly as `dangerouslySetInnerHTML` does.",
+      "lastVerified": "2026-10-09",
+      "expectation": "`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, and Markdown or rich-text renderers with raw HTML enabled receive only constant or sanitized content.",
+      "violationSignal": "One of these sinks receiving user-controlled, stored, or fetched content without sanitization."
     },
     {
-      "checkId": "security-audit.subresource-integrity-on-external-scripts",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "Subresource Integrity on external scripts",
-      "expectation": "Script tags from non-first-party origins carry an integrity attribute.",
-      "violationSignal": "External scripts lack Subresource Integrity hashes."
+      "checkId": "security-audit.url-href-src-validated",
+      "layer": "untrusted-input-and-output",
+      "title": "User-supplied URLs use safe schemes",
+      "severity": "high",
+      "method": "model",
+      "rationale": "A `javascript:` or `data:` URL in a link, frame, or navigation runs script when it is followed.",
+      "lastVerified": "2026-10-09",
+      "expectation": "URLs from users or stored data that reach `href`, `src`, `formAction`, `window.open`, or `location` are parsed and limited to `https:`, `http:`, `mailto:`, or relative paths.",
+      "violationSignal": "A user-controlled URL reaching one of these sinks with no scheme check, where the React version or framework does not already block `javascript:` URLs for that sink."
     },
     {
-      "checkId": "security-audit.third-party-iframes-sandboxed",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "Third-party iframes are sandboxed",
-      "expectation": "Iframes pointing at non-first-party origins use the sandbox attribute with the most restrictive permissions that still work.",
-      "violationSignal": "Third-party iframes lack a sandbox attribute."
+      "checkId": "security-audit.open-redirects-guarded",
+      "layer": "untrusted-input-and-output",
+      "title": "Redirects go only to allowed destinations",
+      "severity": "high",
+      "method": "model",
+      "rationale": "An open redirect on a trusted domain makes phishing links convincing and can leak authorization codes or tokens.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Redirect targets from query parameters, form fields, or sign-in callbacks are limited to same-origin paths or an allowlist, checked after URL parsing so `//host` and backslash forms are refused.",
+      "violationSignal": "A `redirect()`, `router.push`, `location` assignment, or callback URL that uses a request-supplied destination without such a check."
+    },
+    {
+      "checkId": "security-audit.no-dynamic-code-execution",
+      "layer": "untrusted-input-and-output",
+      "title": "No eval or new Function",
+      "severity": "high",
+      "method": "tool",
+      "rationale": "Running strings as code turns any attacker-influenced text into code execution and forces a Content Security Policy to allow 'unsafe-eval'.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Shipped source never calls `eval`, `new Function`, `Function` with a string, or string-form `setTimeout` and `setInterval`.",
+      "violationSignal": "Any such call outside tests, cited by line. The collector decides presence; the model traces whether attacker-influenced text reaches it."
     },
     {
       "checkId": "security-audit.postmessage-origin-validation",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "postMessage origin validation",
-      "expectation": "message event handlers check event.origin against an allowlist before acting on event.data.",
-      "violationSignal": "A message listener reads event.data without checking event.origin."
+      "layer": "untrusted-input-and-output",
+      "title": "Message listeners check the sender's origin",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Any site that can open or frame the page can post messages to it, so a listener that skips the origin check obeys attackers.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every `message` event listener checks `event.origin` against an exact allowlist before reading `event.data`, and every `postMessage` names a target origin rather than `*` when the data is sensitive.",
+      "violationSignal": "A listener that acts on `event.data` without an exact origin check, or sensitive data posted to `*`."
     },
     {
-      "checkId": "security-audit.blank-target-noopener-noreferrer",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "target blank paired with rel noopener noreferrer",
-      "expectation": "External links opening new tabs include rel=\"noopener noreferrer\".",
-      "violationSignal": "An anchor has target=\"_blank\" without rel=\"noopener noreferrer\"."
+      "checkId": "security-audit.no-secrets-in-source",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "No secrets in source",
+      "severity": "critical",
+      "method": "tool",
+      "rationale": "A committed secret is usable by anyone who can read the repository or any clone of it, and stays in Git history after it is deleted.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Tracked files contain no credential in a high-confidence format (cloud, payment, source-control, chat, and model-provider keys, private keys, database URLs with passwords), and committed environment files assign no real value to a secret-named variable. With `--with-scan`, gitleaks finds none in Git history either.",
+      "violationSignal": "A credential in a tracked file, cited with its value redacted, or gitleaks findings in history."
+    },
+    {
+      "checkId": "security-audit.env-files-gitignored",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Local environment files are ignored by Git",
+      "severity": "high",
+      "method": "tool",
+      "rationale": "Local environment files hold real secrets, and without an ignore rule the first `git add .` commits them.",
+      "lastVerified": "2026-10-09",
+      "expectation": "A rule in the repository's own `.gitignore` covers `.env`, `.env.local`, and `.env.*.local` in every application folder, except environment files the team commits on purpose.",
+      "violationSignal": "No repository ignore rule for these files, or coverage only from a personal or global ignore file."
+    },
+    {
+      "checkId": "security-audit.public-prefix-environment-variables-are-public",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Public environment variables hold no secrets",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Variables with a public prefix such as `NEXT_PUBLIC_` or `VITE_` are inlined into the JavaScript every visitor downloads.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Only values designed to be public (publishable keys, public identifiers, URLs) use a public prefix.",
+      "violationSignal": "A secret, private key, service-role key, or server token exposed through a public-prefixed variable."
+    },
+    {
+      "checkId": "security-audit.server-secrets-stay-on-server",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Server secrets never reach client code",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "A secret passed to a client component, returned from a Server Action, or added to the client build is shipped to every browser.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Modules that read secrets import `server-only`; secrets are never passed as props to client components, returned from Server Actions or route handlers, or added to the build's client `env`.",
+      "violationSignal": "A secret value that reaches a client component, a response, or the client bundle. A secret-reading module without `server-only` but with no concrete leak is partial."
     },
     {
       "checkId": "security-audit.no-console-logged-secrets",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "No console-logged secrets",
-      "expectation": "Code does not pass authentication tokens, environment-variable values, or full request-header objects to console calls or third-party loggers.",
-      "violationSignal": "Logging patterns include authentication tokens, environment-variable values, or full request headers.",
-      "relatedAudits": ["error-handling-audit"]
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Logs record no secrets or tokens",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Tokens and credentials in logs are readable by everyone with log access and by every log vendor.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Code never passes tokens, passwords, secret environment values, or whole request headers or cookies to `console`, a logger, or an error reporter.",
+      "violationSignal": "A log or error-report call that includes a token, password, secret value, or full headers or cookies.",
+      "relatedChecks": [
+        "error-handling-audit.sensitive-data-redaction-configured"
+      ]
     },
     {
-      "checkId": "security-audit.weak-cryptographic-primitives-flagged",
-      "layer": "secrets-data-protection-and-third-party-integrations",
-      "title": "Weak cryptographic primitives flagged",
-      "expectation": "MD5 and SHA-1 are not used for security-relevant hashing, signing, or fingerprinting.",
-      "violationSignal": "crypto.createHash calls with md5 or sha1 appear in security-looking code paths.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
+      "checkId": "security-audit.personal-data-out-of-urls-and-analytics",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Personal data stays out of URLs and analytics",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Personal data in URLs lands in history, logs, and referrers, and in analytics it is shared with a third party.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Routes and links do not carry email addresses, phone numbers, government identifiers, or tokens, and analytics events do not include them. Soft check — mixed adherence is reported as partial.",
+      "violationSignal": "Personal data or tokens in a URL path or query, or in an analytics event payload.",
+      "softCheck": true
+    },
+    {
+      "checkId": "security-audit.content-security-policy-restricts-scripts",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "A Content Security Policy restricts scripts",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A strict policy stops most injected scripts from running, so one missed sanitizer does not become account takeover.",
+      "lastVerified": "2026-10-09",
+      "expectation": "A Content Security Policy is sent on HTML responses, and its `script-src` uses nonces, hashes, or `strict-dynamic` without `unsafe-inline`, `unsafe-eval`, or wildcard sources.",
+      "violationSignal": "No policy, or a policy whose `script-src` allows `unsafe-inline`, `unsafe-eval`, or any host. Without a concrete injection path it is a hardening gap, graded partial or missing."
+    },
+    {
+      "checkId": "security-audit.frame-ancestors-restricted",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Other sites cannot frame the application",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A page that any site can frame can be overlaid to trick users into clicking (clickjacking).",
+      "lastVerified": "2026-10-09",
+      "expectation": "HTML responses send `frame-ancestors` in the Content Security Policy, or `X-Frame-Options: DENY` or `SAMEORIGIN`, unless embedding is a product requirement.",
+      "violationSignal": "Neither header on pages that perform actions, with no embedding requirement."
+    },
+    {
+      "checkId": "security-audit.https-enforced",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "HTTPS is enforced",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Plain HTTP exposes sessions and data on the network and lets an attacker rewrite responses.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Production traffic is redirected to HTTPS with Strict-Transport-Security (a long `max-age`), set by the application or documented as set by the platform, and code requests no `http://` URLs outside local development.",
+      "violationSignal": "No HTTPS redirect or HSTS from the application or a documented platform default, or `http://` requests in production code."
+    },
+    {
+      "checkId": "security-audit.baseline-security-headers-set",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Baseline security headers are set",
+      "severity": "low",
+      "method": "model",
+      "rationale": "These headers close small leaks (MIME sniffing, full referrer URLs, unused browser features) cheaply.",
+      "lastVerified": "2026-10-09",
+      "expectation": "HTML responses send `X-Content-Type-Options: nosniff`, a `Referrer-Policy` of `strict-origin-when-cross-origin` or stricter, and a `Permissions-Policy` that disables unused features.",
+      "violationSignal": "One or more of these headers missing or set to a permissive value."
+    },
+    {
+      "checkId": "security-audit.third-party-content-constrained",
+      "layer": "secrets-data-and-browser-hardening",
+      "title": "Third-party scripts and frames are constrained",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A third-party script runs with the page's full authority, and an unsandboxed frame can navigate or prompt the user.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Scripts loaded from other origins at fixed versions carry `integrity`, or are loaded through the framework's script component from a vendor the team accepts; third-party iframes use the narrowest `sandbox` and `allow` they need.",
+      "violationSignal": "A pinned third-party script without `integrity`, or a third-party iframe without `sandbox` that does not need full permissions."
+    },
+    {
+      "checkId": "security-audit.model-tool-calls-authorized",
+      "layer": "large-language-model-features",
+      "title": "Model tool calls act only with the user's permissions",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Anyone who can put text in front of the model, including through retrieved documents, can make it call tools, so a tool that skips authorization is a public endpoint.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every tool a model can call validates its arguments with a schema, runs with the end user's identity and the same ownership checks as the equivalent endpoint, and requires explicit user confirmation for destructive or financial actions.",
+      "violationSignal": "A tool that reads or changes records by a model-supplied identifier without scoping to the user, or that performs a destructive or financial action without confirmation."
+    },
+    {
+      "checkId": "security-audit.model-output-rendered-as-text",
+      "layer": "large-language-model-features",
+      "title": "Model output is never rendered as raw HTML",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "Prompt injection controls model output, so rendering it as HTML is cross-site scripting by proxy.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Model output is rendered as text, or through a Markdown renderer with raw HTML disabled and link schemes restricted.",
+      "violationSignal": "Model output reaching `dangerouslySetInnerHTML`, `innerHTML`, or a Markdown renderer with raw HTML enabled."
+    },
+    {
+      "checkId": "security-audit.no-secrets-in-prompts",
+      "layer": "large-language-model-features",
+      "title": "Prompts carry no secrets or other users' data",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Anything in a prompt can be extracted by prompt injection, so a secret or another user's data in context is one question away from disclosure.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Prompts and system messages contain no keys, internal URLs with credentials, or data the current user is not allowed to see; retrieved content is scoped to the user.",
+      "violationSignal": "A secret, credential, or another user's personal data placed in a prompt, system message, or retrieval context."
+    },
+    {
+      "checkId": "security-audit.model-usage-bounded",
+      "layer": "large-language-model-features",
+      "title": "Model usage is bounded per user",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "An unbounded model endpoint lets one caller run up the bill or exhaust the provider quota for everyone.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Model endpoints require a session, apply a per-user rate limit, cap output tokens and tool-call steps, and limit input size.",
+      "violationSignal": "A model endpoint with no rate limit, no output-token cap, or unbounded tool-call loops."
     }
   ]
 }

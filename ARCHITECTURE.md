@@ -96,7 +96,7 @@ Every audit is fully static by default. Some audits offer opt-in flags that enri
 - `--with-run` (`/linting-audit`, `/testing-audit`, `/typescript-audit`): runs the linter/test runner/`tsc --noEmit` in read-only mode.
 - `--with-lighthouse-results` (`/performance-audit`): reads existing Lighthouse JSON.
 - `--with-link-check` (`/documentation-audit`): HEAD-requests external URLs.
-- `--with-scan` (`/security-audit`): runs installed security scanners (`eslint-plugin-security`, Semgrep, etc.).
+- `--with-scan` (`/security-audit`): scans Git history with gitleaks, and runs installed Semgrep and the project's configured ESLint security rules.
 
 These flags have side effects (network requests, subprocess invocation) but never mutate the codebase. The static default keeps audits fast and safe; opt-in enrichment makes the trade-off explicit.
 
