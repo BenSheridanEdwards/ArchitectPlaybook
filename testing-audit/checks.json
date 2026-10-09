@@ -1,319 +1,236 @@
 {
-  "schemaVersion": "1.1.0",
-  "catalogVersion": "1.0.0",
+  "schemaVersion": "1.2.0",
+  "catalogVersion": "2.0.0",
   "skillName": "testing-audit",
   "humanCanonicalSource": "SKILL.md",
-  "description": "Machine-readable inventory of testing audit checks for validation and generated maps.",
+  "description": "Machine-readable inventory of testing audit checks: test infrastructure, test effectiveness, test levels and critical paths, and component tests.",
   "statusTaxonomy": {
-    "present": "The expected invariant is fully satisfied.",
-    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "present": "The invariant holds.",
+    "partial": "The invariant mostly holds, with exceptions, or a soft check shows mixed adherence.",
     "missing": "A structural prerequisite is absent.",
-    "violation": "Concrete code breaks the invariant."
+    "violation": "Concrete tests, code, or configuration break the invariant."
   },
   "informationalLayers": [
     "diagnostic-snapshot"
   ],
   "enrichmentFlags": [
     {
-      "flag": "--with-run",
-      "description": "Run the detected Vitest or Jest test runner in coverage mode and use the result to enrich coverage and test-count signals."
+      "flag": "--with-mutation",
+      "description": "Run an installed Stryker on the five riskiest source files and grade the mutation score."
     }
   ],
   "thresholdFlags": [
-    "--threshold-priority-one-ratio",
-    "--threshold-testid-ratio",
-    "--threshold-by-role-ratio",
-    "--threshold-user-event-ratio",
-    "--threshold-snapshot-lines"
+    "--months"
   ],
   "relatedAudits": [
     {
       "audit": "quality-gates-audit",
-      "relationship": "Owns whether tests run at each development lifecycle stage."
+      "relationship": "Owns whether tests, coverage, and end-to-end suites run in hooks and continuous integration."
     },
     {
-      "audit": "linting-audit",
-      "relationship": "Owns lint plugin configuration; overlapping plugin gaps are surfaced here too."
+      "audit": "architecture-audit",
+      "relationship": "Owns whether change hotspots are cohesive; this audit judges whether their tests would catch a regression."
     },
     {
       "audit": "error-handling-audit",
-      "relationship": "Owns whether tests catch error paths well."
+      "relationship": "Owns whether error paths are handled; this audit judges whether tests exercise them."
     },
     {
       "audit": "accessibility-audit",
-      "relationship": "Owns end-to-end accessibility scanning."
+      "relationship": "Owns automated accessibility scanning in tests."
     },
     {
       "audit": "performance-audit",
-      "relationship": "Owns end-to-end performance measurement."
+      "relationship": "Owns performance measurement in end-to-end runs."
     }
   ],
   "checks": [
     {
-      "checkId": "testing-audit.single-test-runner-installed",
-      "layer": "test-runner-and-tooling",
-      "title": "Single test runner installed",
-      "expectation": "Exactly one of Vitest or Jest is present in development dependencies.",
-      "violationSignal": "Both Vitest and Jest are present with no clear migration.",
-      "relatedAudits": ["quality-gates-audit"]
+      "checkId": "testing-audit.tests-run-under-configured-runner",
+      "layer": "test-infrastructure",
+      "title": "Tests run under a configured runner",
+      "severity": "high",
+      "method": "tool",
+      "rationale": "Without a runner and a command that starts it, no test can fail when the product breaks.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Test files exist, a runner is declared (Vitest, Jest, node:test, Playwright, Cypress, Storybook test-runner, Mocha, or AVA), and a package script runs it.",
+      "violationSignal": "No test files, test files with no runner to run them, or no package script that runs the suite.",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "missing"
+      ],
+      "relatedChecks": [
+        "quality-gates-audit.unit-tests"
+      ]
     },
     {
-      "checkId": "testing-audit.react-testing-library-installed",
-      "layer": "test-runner-and-tooling",
-      "title": "React Testing Library installed",
-      "expectation": "When React is detected, @testing-library/react is present in development dependencies.",
-      "violationSignal": "A React project that ships tests is missing @testing-library/react."
-    },
-    {
-      "checkId": "testing-audit.user-event-installed",
-      "layer": "test-runner-and-tooling",
-      "title": "User Event installed",
-      "expectation": "@testing-library/user-event is available for interaction simulation.",
-      "violationSignal": "@testing-library/user-event is missing."
-    },
-    {
-      "checkId": "testing-audit.jest-dom-installed",
-      "layer": "test-runner-and-tooling",
-      "title": "Jest DOM installed",
-      "expectation": "@testing-library/jest-dom is available so assertions describe user-visible state with DOM-aware matchers.",
-      "violationSignal": "@testing-library/jest-dom is missing."
-    },
-    {
-      "checkId": "testing-audit.testing-library-plugin-configured",
-      "layer": "test-runner-and-tooling",
-      "title": "Testing Library lint plugin configured",
-      "expectation": "eslint-plugin-testing-library is installed and enabled.",
-      "violationSignal": "eslint-plugin-testing-library is missing or not enabled.",
-      "relatedAudits": ["linting-audit"]
-    },
-    {
-      "checkId": "testing-audit.jest-dom-plugin-configured",
-      "layer": "test-runner-and-tooling",
-      "title": "Jest DOM lint plugin configured",
-      "expectation": "eslint-plugin-jest-dom is installed and enabled.",
-      "violationSignal": "eslint-plugin-jest-dom is missing or not enabled.",
-      "relatedAudits": ["linting-audit"]
-    },
-    {
-      "checkId": "testing-audit.jest-dom-matchers-loaded",
-      "layer": "test-runner-and-tooling",
-      "title": "Jest DOM matchers loaded in setup file",
-      "expectation": "The test runner setup file imports @testing-library/jest-dom.",
-      "violationSignal": "No setup file exists, or the setup file does not import @testing-library/jest-dom."
+      "checkId": "testing-audit.no-focused-or-skipped-tests",
+      "layer": "test-infrastructure",
+      "title": "No focused or skipped tests committed",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "A committed `.only` silently stops the rest of a file's tests from running, and a skipped test checks nothing.",
+      "lastVerified": "2026-10-09",
+      "expectation": "No `.only`, `fit`, or `fdescribe` in committed tests, and no `.skip`, `xit`, `.todo`, or `.fixme` left in the suite.",
+      "violationSignal": "A focused test is a violation; skipped or to-do tests are partial.",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "violation"
+      ]
     },
     {
       "checkId": "testing-audit.coverage-thresholds-configured",
-      "layer": "test-runner-and-tooling",
-      "title": "Coverage tool configured with thresholds",
-      "expectation": "The test runner has coverage configuration with explicit line, statement, branch, and function thresholds.",
-      "violationSignal": "Coverage is configured without thresholds, or no coverage configuration exists.",
-      "enrichmentFlags": ["--with-run"],
-      "relatedAudits": ["quality-gates-audit"]
+      "layer": "test-infrastructure",
+      "title": "Coverage thresholds configured",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "A coverage floor stops untested new code from landing unnoticed, although coverage alone never proves a test checks anything.",
+      "lastVerified": "2026-10-09",
+      "expectation": "The unit or integration runner sets coverage thresholds, and a configuration or script collects coverage so they can fail a run. Not applicable without a unit or integration runner.",
+      "violationSignal": "No thresholds (missing), or thresholds that nothing collects coverage for (partial).",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "missing"
+      ],
+      "relatedChecks": [
+        "quality-gates-audit.coverage-threshold-enforced"
+      ]
     },
     {
-      "checkId": "testing-audit.end-to-end-framework-present",
-      "layer": "test-runner-and-tooling",
-      "title": "End-to-end framework present",
-      "expectation": "Playwright or Cypress is present in development dependencies for user-facing applications.",
-      "violationSignal": "Neither Playwright nor Cypress is present in a user-facing application.",
+      "checkId": "testing-audit.tests-fail-when-behaviour-breaks",
+      "layer": "test-effectiveness",
+      "title": "Tests would fail if the behaviour broke",
+      "severity": "high",
+      "method": "model",
+      "rationale": "A test that stays green when the behaviour its title names is broken gives false confidence exactly where the code is riskiest.",
+      "lastVerified": "2026-10-09",
+      "expectation": "For each risky module and each pre-filter candidate, a plausible bug in the behaviour the test title names turns the test red: the expected value comes from a specification or a worked example, and the Given could go the other way.",
+      "violationSignal": "Tests on risky code with no assertion, an expected value computed by the code under test, a Given that never reaches the named case, or assertions that pass when every imported function returns undefined."
+    },
+    {
+      "checkId": "testing-audit.mocks-only-at-boundaries",
+      "layer": "test-effectiveness",
+      "title": "Mocking only at boundaries",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Mocking the code's own collaborators tests the wiring the test itself wrote, so the test passes when the collaborator is broken and fails when it is refactored.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Tests fake only what the product does not own: the network (preferably at the HTTP layer, for example with Mock Service Worker), the clock, randomness, and third-party services. Call assertions are kept for effects at a system boundary, and assert the content sent.",
+      "violationSignal": "Module mocks of the repository's own modules, or tests whose only assertions are on calls to mocks they set up or on values they fed into those mocks."
+    },
+    {
+      "checkId": "testing-audit.tests-are-deterministic",
+      "layer": "test-effectiveness",
+      "title": "Tests are deterministic",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A test that fails at random teaches the team to re-run and ignore failures, including real ones.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Tests control time, randomness, and shared state, and wait for conditions rather than for fixed delays.",
+      "violationSignal": "Fixed sleeps or timeouts, the real clock or randomness in an assertion, order-dependent tests, or state shared between tests without reset."
+    },
+    {
+      "checkId": "testing-audit.test-titles-state-behaviour",
+      "layer": "test-effectiveness",
+      "title": "Test titles state the behaviour checked",
+      "severity": "low",
+      "method": "model",
+      "rationale": "A title that names the behaviour lets a reader judge what a failure means and what the test should catch.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Each test title states an observable behaviour or outcome, not the implementation steps or function names involved.",
+      "violationSignal": "Titles such as `works`, `calls saveInvoice`, or `test 3`, or titles that promise behaviour the test does not check. Soft check — mixed adherence is reported as partial.",
       "softCheck": true,
-      "allowedStatuses": ["present", "partial", "missing", "violation"]
+      "allowedStatuses": [
+        "present",
+        "partial"
+      ]
     },
     {
-      "checkId": "testing-audit.priority-one-query-distribution",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "Query distribution favours Priority 1",
-      "expectation": "At least the configured threshold percentage of all Testing Library queries are Priority 1 queries.",
-      "violationSignal": "Priority 1 query distribution is below the threshold.",
-      "thresholdFlag": "--threshold-priority-one-ratio",
-      "defaultThreshold": 70
+      "checkId": "testing-audit.mutations-in-riskiest-files-caught",
+      "layer": "test-effectiveness",
+      "title": "Mutations in the riskiest files are caught",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "A mutation score shows directly whether the suite notices small changes to the code it covers, which coverage cannot.",
+      "lastVerified": "2026-10-09",
+      "expectation": "With --with-mutation and Stryker installed, at least 80 percent of the mutants Stryker makes in the five riskiest files are detected. Without the flag or the tool, the check is not evaluated.",
+      "violationSignal": "A mutation score below 80 percent (partial) or below 60 percent (violation) on the riskiest files.",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "violation"
+      ]
     },
     {
-      "checkId": "testing-audit.testid-usage-rare",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "Test ID usage is rare",
-      "expectation": "At most the configured threshold percentage of all queries use getByTestId.",
-      "violationSignal": "getByTestId distribution is above the threshold.",
-      "thresholdFlag": "--threshold-testid-ratio",
-      "defaultThreshold": 10
+      "checkId": "testing-audit.critical-paths-covered-by-integration-tests",
+      "layer": "test-levels-and-critical-paths",
+      "title": "Critical paths covered by integration or end-to-end tests",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Unit tests of each piece can all pass while the flow users depend on is broken where the pieces meet.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Each critical path, such as sign-in, payment, a primary write, or a refund, is exercised through its real wiring by an integration test (route-level, real database, Mock Service Worker at the network edge) or an end-to-end test.",
+      "violationSignal": "A critical path, or a top-ranked risky module on one, with no test above the unit level, or no test at all.",
+      "relatedChecks": [
+        "quality-gates-audit.end-to-end-tests"
+      ]
     },
     {
-      "checkId": "testing-audit.no-query-selector-for-element-lookup",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "No querySelector for finding elements",
-      "expectation": "Tests use Testing Library queries instead of container.querySelector or document.querySelector for element lookup.",
-      "violationSignal": "querySelector calls are used in tests for element lookup."
+      "checkId": "testing-audit.data-access-tested-against-real-database",
+      "layer": "test-levels-and-critical-paths",
+      "title": "Data access tested against a real database",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Queries, migrations, and constraints fail in the database, not in a mock of the database client.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Repository and query code is tested against the same database engine it runs on, for example with Testcontainers or a database service in continuous integration. Not applicable without a database client.",
+      "violationSignal": "Data-access code tested only through a mocked client or ORM, or not tested."
     },
     {
-      "checkId": "testing-audit.queries-via-screen",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "Queries via screen, not destructured",
-      "expectation": "Queries come from screen.getBy*, not destructured from the render return value.",
-      "violationSignal": "Patterns such as const { getByRole } = render(...) appear."
+      "checkId": "testing-audit.testing-library-lint-rules-enforced",
+      "layer": "component-tests",
+      "title": "Testing Library lint rules enforced",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "The rules catch Testing Library mistakes that make tests pass without waiting for, or finding, what users see.",
+      "lastVerified": "2026-10-09",
+      "expectation": "ESLint enables eslint-plugin-testing-library with its framework configuration plus prefer-user-event and prefer-explicit-assert, so these rules are on: prefer-screen-queries, render-result-naming-convention, no-container, no-node-access, prefer-find-by, prefer-presence-queries, no-wait-for-multiple-assertions, no-wait-for-side-effects, no-unnecessary-act, no-manual-cleanup, prefer-user-event, and prefer-explicit-assert. Not applicable without Testing Library.",
+      "violationSignal": "The plugin is not enabled (missing), or some of the rules are off (partial).",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "missing"
+      ]
     },
     {
-      "checkId": "testing-audit.render-return-not-wrapper",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "Render return named view, not wrapper",
-      "expectation": "When the render return is captured, it is named view, or destructured for only what is needed.",
-      "violationSignal": "Patterns such as const wrapper = render(...) appear.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
+      "checkId": "testing-audit.jest-dom-lint-rules-enforced",
+      "layer": "component-tests",
+      "title": "jest-dom lint rules enforced",
+      "severity": "low",
+      "method": "tool",
+      "rationale": "The rules replace raw DOM-property checks with matchers whose failures say what the user would see.",
+      "lastVerified": "2026-10-09",
+      "expectation": "ESLint enables eslint-plugin-jest-dom's recommended rules. Not applicable without @testing-library/jest-dom.",
+      "violationSignal": "The plugin is not enabled (missing), or some recommended rules are off (partial).",
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "missing"
+      ]
     },
     {
-      "checkId": "testing-audit.by-role-dominates-priority-one",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "ByRole is the dominant Priority 1 query",
-      "expectation": "Of Priority 1 queries, at least the configured threshold percentage are getByRole with the name option.",
-      "violationSignal": "Priority 1 queries are used without meaningful getByRole adoption.",
-      "softCheck": true,
-      "thresholdFlag": "--threshold-by-role-ratio",
-      "defaultThreshold": 50,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "testing-audit.no-redundant-aria-role-assertions",
-      "layer": "query-priority-and-selector-hygiene",
-      "title": "No redundant ARIA roles in test assertions",
-      "expectation": "Tests do not assert on role attributes that semantic elements already provide implicitly.",
-      "violationSignal": "Assertions match redundant roles such as [role=\"button\"] on a button element.",
-      "relatedAudits": ["accessibility-audit"]
-    },
-    {
-      "checkId": "testing-audit.user-event-preferred",
-      "layer": "interaction-and-async-patterns",
-      "title": "User Event preferred over Fire Event",
-      "expectation": "At least the configured threshold percentage of interaction calls use userEvent rather than fireEvent.",
-      "violationSignal": "The userEvent interaction ratio is below the threshold.",
-      "thresholdFlag": "--threshold-user-event-ratio",
-      "defaultThreshold": 80
-    },
-    {
-      "checkId": "testing-audit.findby-for-delayed-elements",
-      "layer": "interaction-and-async-patterns",
-      "title": "find* used for elements not yet present",
-      "expectation": "When waiting for an element to appear, tests use findBy* instead of waitFor(() => getBy*()).",
-      "violationSignal": "waitFor callbacks contain only a getBy* lookup."
-    },
-    {
-      "checkId": "testing-audit.queryby-only-for-absence",
-      "layer": "interaction-and-async-patterns",
-      "title": "query* only for absence assertions",
-      "expectation": "queryBy* is used only with not.toBeInTheDocument() or analogous absence checks.",
-      "violationSignal": "queryBy* is used in a positive-presence assertion."
-    },
-    {
-      "checkId": "testing-audit.waitfor-single-assertion",
-      "layer": "interaction-and-async-patterns",
-      "title": "waitFor callback contains a single assertion",
-      "expectation": "Each waitFor callback wraps exactly one expect call.",
-      "violationSignal": "waitFor callbacks contain multiple expect calls."
-    },
-    {
-      "checkId": "testing-audit.waitfor-not-empty",
-      "layer": "interaction-and-async-patterns",
-      "title": "waitFor callback is not empty",
-      "expectation": "The assertion being retried is inside the waitFor callback.",
-      "violationSignal": "waitFor(() => {}) is followed by assertions outside the callback."
-    },
-    {
-      "checkId": "testing-audit.no-side-effects-in-waitfor",
-      "layer": "interaction-and-async-patterns",
-      "title": "No side effects in waitFor",
-      "expectation": "waitFor callbacks contain assertions only, not event simulation or state mutation.",
-      "violationSignal": "fireEvent or userEvent calls appear inside waitFor."
-    },
-    {
-      "checkId": "testing-audit.no-unnecessary-act-wrapping",
-      "layer": "interaction-and-async-patterns",
-      "title": "No unnecessary act wrapping",
-      "expectation": "render and fireEvent calls are not wrapped in act(...), because React Testing Library already wraps them.",
-      "violationSignal": "Patterns such as act(() => { render(...) }) or act(() => { fireEvent.click(...) }) appear."
-    },
-    {
-      "checkId": "testing-audit.no-manual-cleanup",
-      "layer": "interaction-and-async-patterns",
-      "title": "No manual cleanup calls",
-      "expectation": "Tests do not import or call cleanup from @testing-library/react.",
-      "violationSignal": "cleanup is imported or called."
-    },
-    {
-      "checkId": "testing-audit.assertions-explicit",
-      "layer": "interaction-and-async-patterns",
-      "title": "Assertions are explicit",
-      "expectation": "Tests wrap relevant getBy* lookups with expect(...).toBeInTheDocument() or analogous assertions.",
-      "violationSignal": "getBy* calls appear on a line by themselves without expect."
-    },
-    {
-      "checkId": "testing-audit.tests-describe-user-behaviour",
-      "layer": "test-design-and-coverage",
-      "title": "Tests describe user behaviour",
-      "expectation": "Test names describe user-visible behaviour rather than implementation details.",
-      "violationSignal": "Test names describe internal state changes or internal function calls.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "testing-audit.no-hard-coded-utility-class-assertions",
-      "layer": "test-design-and-coverage",
-      "title": "No assertions against hard-coded utility classes",
-      "expectation": "Class assertions use semantic theme tokens, or preferably role, label, or text assertions, instead of raw utility classes.",
-      "violationSignal": "toHaveClass assertions reference raw utility classes such as numeric colour scales, raw spacing utilities, or raw layout utilities."
-    },
-    {
-      "checkId": "testing-audit.snapshots-bounded-and-intentional",
-      "layer": "test-design-and-coverage",
-      "title": "Snapshots are bounded and intentional",
-      "expectation": "Snapshot tests cover small, intentional, named outputs.",
-      "violationSignal": "A snapshot exceeds the configured line threshold, captures whole-component output, captures internal tree shape, or appears as the default assertion style.",
-      "thresholdFlag": "--threshold-snapshot-lines",
-      "defaultThreshold": 100,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "testing-audit.coverage-thresholds-enforced-in-continuous-integration",
-      "layer": "test-design-and-coverage",
-      "title": "Coverage thresholds enforced in continuous integration",
-      "expectation": "The continuous-integration test step fails when coverage drops below the configured threshold.",
-      "violationSignal": "Coverage is configured, but continuous integration does not fail on regression.",
-      "softCheck": true,
-      "enrichmentFlags": ["--with-run"],
-      "relatedAudits": ["quality-gates-audit"]
-    },
-    {
-      "checkId": "testing-audit.critical-path-end-to-end-coverage",
-      "layer": "test-design-and-coverage",
-      "title": "Critical-path end-to-end coverage",
-      "expectation": "At least one Playwright or Cypress spec covers the primary user journey for a user-facing application.",
-      "violationSignal": "No end-to-end specs exist in a user-facing application.",
-      "softCheck": true,
-      "relatedAudits": ["quality-gates-audit", "accessibility-audit", "performance-audit"]
-    },
-    {
-      "checkId": "testing-audit.no-flaky-pattern-signals",
-      "layer": "test-design-and-coverage",
-      "title": "No flaky-pattern signals",
-      "expectation": "Tests avoid fixed waits, ordering dependencies, and shared mutable state across tests.",
-      "violationSignal": "Fixed setTimeout or setInterval waits, ordering-dependent patterns, or shared mutable state are detected."
-    },
-    {
-      "checkId": "testing-audit.mocking-at-module-boundaries",
-      "layer": "test-design-and-coverage",
-      "title": "Mocking at module boundaries",
-      "expectation": "Mocks are placed at module or network boundaries, not inside internal implementations of the system under test.",
-      "violationSignal": "Internal helpers used by the component under test are mocked, coupling tests to implementation details.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "testing-audit.components-have-minimal-coverage",
-      "layer": "test-design-and-coverage",
-      "title": "Components have at least minimal coverage",
-      "expectation": "Every user-facing component identified by Graphify or folder heuristics has at least one related test file.",
-      "violationSignal": "User-facing components have no associated test file.",
-      "softCheck": true,
-      "enrichmentSources": ["graphify-out/graph.json"],
-      "allowedStatuses": ["present", "partial", "missing", "violation"]
+      "checkId": "testing-audit.components-tested-as-users-perceive-them",
+      "layer": "component-tests",
+      "title": "Components tested through what users perceive",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Tests that find elements by role and label and act like a user survive refactors and catch the regressions users would notice.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Component tests query by role, label, or text, interact with user-event or a real browser (Vitest browser mode, Playwright component tests, Storybook interaction tests), and assert on what the user sees, never on raw utility classes or internal state. Not applicable without a user-interface framework.",
+      "violationSignal": "Test IDs or DOM selectors as the main way to find elements, assertions on internal state, props, or raw utility classes, or snapshots in place of assertions."
     }
   ]
 }

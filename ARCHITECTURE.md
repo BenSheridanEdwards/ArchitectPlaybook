@@ -93,7 +93,8 @@ Every audit is fully static by default. Some audits offer opt-in flags that enri
 
 - `--with-network` (`/dependency-audit`): runs the package manager's read-only audit and outdated commands.
 - `--with-stats` (`/bundle-build-audit`): reads existing bundle-stats artefacts.
-- `--with-run` (`/linting-audit`, `/testing-audit`, `/typescript-audit`): runs the linter/test runner/`tsc --noEmit` in read-only mode.
+- `--with-run` (`/linting-audit`, `/typescript-audit`): runs the linter or `tsc --noEmit` in read-only mode.
+- `--with-mutation` (`/testing-audit`): runs an installed Stryker on the five riskiest source files.
 - `--with-lighthouse-results` (`/performance-audit`): reads existing Lighthouse JSON.
 - `--with-link-check` (`/documentation-audit`): HEAD-requests external URLs.
 - `--with-scan` (`/security-audit`): runs installed security scanners (`eslint-plugin-security`, Semgrep, etc.).
