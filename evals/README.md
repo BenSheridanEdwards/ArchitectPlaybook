@@ -18,7 +18,7 @@ Run them against a copy of the plugin outside it:
 ```bash
 rsync -a --delete --exclude .git --exclude evals/results ./ /tmp/architect-playbook-eval/
 cd /tmp/architect-playbook-eval
-claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash
+claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash --judge-model sonnet
 ```
 
 - `--scaffold` runs each case's `fixture.sh`, which builds the fixture
@@ -33,7 +33,13 @@ claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash
   protocol commands the audit writes, and the run stalls before publishing.
 - Add `--case architecture-tangled-store` to run one case, `--runs 1` for a
   quick check, `--concurrency 2` to run two at once, and `--max-cost-usd
-  <amount>` to cap spending. An architecture run costs about a dollar.
+  <amount>` to cap spending. An architecture run costs about a dollar and a
+  security run about a dollar and a half.
+- Add `--judge-model sonnet` for the `llm` graders. They read the whole
+  findings report, often over 30,000 characters, and the default judge model
+  gives noisy verdicts at that length. On the same security report, it voted
+  to fail a list that met every point of its rubric, while `sonnet` passed it
+  unanimously.
 
 **macOS:** `/usr/bin/git` and `/usr/bin/python3` are Xcode shims that cannot
 start inside the sandbox. Put the real tools first on `PATH`:
