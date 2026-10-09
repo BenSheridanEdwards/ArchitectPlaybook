@@ -150,7 +150,7 @@ result of the test in the evidence or gap.
 
 ## Severity and judgement
 
-Act on at most five findings; `finish` refuses more. Rank by severity, then by how often the
-affected code changes: a finding in a hotspot outranks the same finding in
-dormant code. Mark speculative design observations `consider`. If every
+Act on at most five findings; `finish` refuses more. Rank by severity, then by
+how often the affected code changes: a finding in a hotspot outranks the same
+finding in dormant code. Mark speculative design observations `consider`. If every
 candidate is speculative, say plainly that there are no material findings.

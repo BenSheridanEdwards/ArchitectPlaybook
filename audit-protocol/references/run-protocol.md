@@ -246,9 +246,11 @@ Status and judgement are separate. A dismissed or noted finding still reports
 its true status, and the score stays honest.
 
 A result recorded without `--judgement` is `act-on`, or `noted` when a
-recorded decision covers it. Collector results usually carry no judgement, so
-every non-present collector check starts as `act-on`. Review them with the
-rest. To change a judgement without re-recording the evidence, run:
+recorded decision covers it. A collector result takes the collector's own
+judgement, or `act-on` if it gives none, so review collector checks with the
+rest. When a recorded decision covers a collector result, the collector's
+judgement is ignored and the finding is `noted` and linked to the decision.
+To change a judgement without re-recording the evidence, run:
 
 ```bash
 python3 "$PROTOCOL" judge <audit-name> <check-id> --judgement consider --reason "<why>"

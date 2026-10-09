@@ -1166,6 +1166,11 @@ def record_evaluation(
         ]
         if applicable_decisions:
             decision_id = str(applicable_decisions[0].get("id"))
+            if recorded_by == "collector":
+                # A collector cannot know about the user's decisions, so its
+                # judgement gives way and the finding is noted under the decision.
+                judgement = None
+                judgement_reason = None
         judgement, judgement_reason = resolve_judgement(judgement, judgement_reason, decision_id)
     else:
         judgement = None

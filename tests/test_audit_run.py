@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -95,6 +96,7 @@ print(json.dumps({
         "collector-audit.lint-check": {
             "status": "partial", "evidence": ["command: `collect.py lint` → plugin missing"],
             "gap": "A lint plugin is missing.", "remediation": "Add the plugin.",
+            "judgement": "consider", "judgementReason": "Style only.",
         },
     },
     "snapshot": {
@@ -560,7 +562,10 @@ class SearchTests(AuditRunTestCase):
 
 
 class JudgementTests(AuditRunTestCase):
-    GRADED = (FETCH_CHECK, CYCLES_CHECK, IMPORTS_CHECK, f"{AUDIT}.extra-1", f"{AUDIT}.extra-2", f"{AUDIT}.extra-3")
+    # Catalog order puts the low-severity language check before the medium extras,
+    # so report order (severity, then catalog order) differs from catalog order.
+    GRADED = (FETCH_CHECK, CYCLES_CHECK, IMPORTS_CHECK, LANGUAGE_CHECK, f"{AUDIT}.extra-1", f"{AUDIT}.extra-2")
+    REPORT_ORDER = (FETCH_CHECK, CYCLES_CHECK, IMPORTS_CHECK, f"{AUDIT}.extra-1", f"{AUDIT}.extra-2", LANGUAGE_CHECK)
 
     def judge(self, check: str, *arguments: str, audit: str = AUDIT) -> tuple[int, str]:
         return self.run_command("judge", audit, check, *arguments)
@@ -575,10 +580,10 @@ class JudgementTests(AuditRunTestCase):
         self.assert_accepted(self.run_command("begin", COLLECTOR_AUDIT))
         lint = f"{COLLECTOR_AUDIT}.lint-check"
         before = self.check(lint, COLLECTOR_AUDIT)
-        self.assertEqual((before["judgement"], before["recordedBy"]), ("act-on", "collector"))
-        self.assert_accepted(self.judge(lint, "--judgement", "consider", "--reason", "Low value here.", audit=COLLECTOR_AUDIT))
+        self.assertEqual((before["judgement"], before["recordedBy"]), ("consider", "collector"))
+        self.assert_accepted(self.judge(lint, "--judgement", "dismissed", "--reason", "Plugin is vendored.", audit=COLLECTOR_AUDIT))
         after = self.check(lint, COLLECTOR_AUDIT)
-        self.assertEqual((after["judgement"], after["judgementReason"]), ("consider", "Low value here."))
+        self.assertEqual((after["judgement"], after["judgementReason"]), ("dismissed", "Plugin is vendored."))
         unchanged = {key: value for key, value in after.items() if key not in {"judgement", "judgementReason"}}
         self.assertEqual(unchanged, {key: value for key, value in before.items() if key not in {"judgement", "judgementReason"}})
 
@@ -616,6 +621,56 @@ class JudgementTests(AuditRunTestCase):
         self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "act-on"), "decision-001")
         self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", "act-on", "--reason", "The route is live again."))
 
+    def test_a_recorded_decision_overrides_a_collector_judgement(self) -> None:
+        lint = f"{COLLECTOR_AUDIT}.lint-check"
+        self.assert_accepted(
+            self.run_command("decide", lint, "--decision", "accepted-risk", "--reason", "Known gap.", "--owner", "Owner")
+        )
+        code, output = self.run_command("begin", COLLECTOR_AUDIT)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn(f"collector result for {lint} rejected", output)
+        check = self.check(lint, COLLECTOR_AUDIT)
+        self.assertEqual(
+            (check["status"], check["recordedBy"], check["judgement"], check["decisionId"], check["judgementReason"]),
+            ("partial", "collector", "noted", "decision-001", "Covered by recorded decision decision-001."),
+        )
+
+    def test_judge_under_a_decision(self) -> None:
+        self.run_command("decide", FETCH_CHECK, "--decision", "accepted-risk", "--reason", "Legacy.", "--owner", "Owner")
+        self.run_command("begin", AUDIT)
+        self.assert_accepted(self.record_partial(FETCH_CHECK))
+        self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "consider"), "decision-001")
+        self.assertEqual(self.check(FETCH_CHECK)["judgement"], "noted")
+        self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", "consider", "--reason", "Worth a look now."))
+        self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", "dismissed"))
+        check = self.check(FETCH_CHECK)
+        self.assertEqual(
+            (check["judgement"], check["judgementReason"], check["decisionId"]),
+            ("dismissed", "Covered by recorded decision decision-001.", "decision-001"),
+        )
+
+    def test_judge_refuses_a_check_after_audit_not_applicable(self) -> None:
+        self.run_command("begin", AUDIT)
+        self.run_command("audit-not-applicable", AUDIT, "--reason", "No sources.")
+        self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "consider"), "not applicable")
+
+    def test_secret_like_reasons_are_rejected(self) -> None:
+        secret = f"Token is {fake_secret('gh', 'p_', 'a' * 36)}."
+        self.run_command("begin", AUDIT)
+        before = self.staged()
+        self.assert_rejected(
+            self.record(
+                FETCH_CHECK, "--status", "partial", "--tier", "direct", "--evidence", "src/a.ts:3",
+                "--gap", "A gap.", "--remediation", "A fix.", "--judgement", "dismissed", "--reason", secret,
+            ),
+            "secret",
+        )
+        self.assertEqual(self.staged(), before)
+        self.assert_accepted(self.record_partial(FETCH_CHECK))
+        before = self.staged()
+        self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "noted", "--reason", secret), "secret")
+        self.assertEqual(self.staged(), before)
+
     def test_finish_refuses_more_than_five_act_on_findings(self) -> None:
         self.run_command("begin", AUDIT)
         for check in self.GRADED:
@@ -624,16 +679,15 @@ class JudgementTests(AuditRunTestCase):
         code, output = self.run_command("finish", AUDIT)
         self.assertEqual(code, 1, output)
         self.assertIn("6 checks are act-on", output)
-        # Report order: high severity first, then catalog order.
-        positions = [output.index(f"{check} (") for check in self.GRADED]
-        self.assertEqual(positions, sorted(positions))
+        listed = re.findall(r"^  [0-9]+\. (\S+) \(", output, re.MULTILINE)
+        self.assertEqual(listed, list(self.REPORT_ORDER))
         self.assertIn(f"judge {AUDIT} <check-id> --judgement consider", output)
         self.assertFalse((self.root / ".architect-audits" / AUDIT / "findings.json").exists())
-        self.assert_accepted(self.judge(f"{AUDIT}.extra-3", "--judgement", "consider", "--reason", "Lowest value."))
+        self.assert_accepted(self.judge(LANGUAGE_CHECK, "--judgement", "consider", "--reason", "Lowest value."))
         code, output = self.run_command("finish", AUDIT)
         self.assertEqual(code, 0, output)
         self.assertIn("5. Extra check 2", output)
-        self.assertNotIn("Extra check 3 [", output)
+        self.assertNotIn("Domain language [", output)
         markdown = (self.root / ".architect-audits" / AUDIT / "findings.md").read_text(encoding="utf-8")
         self.assertIn("## Consider", markdown)
 

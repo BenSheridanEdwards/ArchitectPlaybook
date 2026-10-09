@@ -472,9 +472,11 @@ hypothesis so a human can close it.
 
 ## Severity and judgement
 
-Act on at most five findings; `finish` refuses more. Rank critical before high, then anonymous
-entry points before authenticated ones, then by the number of affected
-entry points. Exposed secrets always come first, because rotation cannot wait
-for the rest of the plan. Mark hardening gaps `consider`. If every candidate
+Act on at most five findings; `finish` refuses more. When choosing the five,
+rank exposed secrets first, because rotation cannot wait for the rest of the
+plan. Then rank critical before high, then anonymous entry points before
+authenticated ones, then by the number of affected entry points. The report
+itself lists act-on findings by severity, then catalog order. Mark hardening
+gaps `consider`. If every candidate
 failed its challenge, say plainly that there are no material findings and
 list what was traced.
