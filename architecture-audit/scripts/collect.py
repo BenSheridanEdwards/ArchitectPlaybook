@@ -472,6 +472,8 @@ def detect_boundary_tooling(root: Path, directories: list[Path]) -> tuple[list[s
             if (directory / name).is_file():
                 found.append(f"{relative(root, directory / name)} — dependency-cruiser configuration")
                 configured.add("dependency-cruiser")
+                if "tsConfig" not in read_text(directory / name):
+                    configured.add("dependency-cruiser-without-tsconfig")
         manifest = directory / "package.json"
         package_text = read_text(manifest)
         package = load_jsonc(manifest)
@@ -492,6 +494,7 @@ def detect_boundary_tooling(root: Path, directories: list[Path]) -> tuple[list[s
 TOOL_RUNNERS = {
     "dependency-cruiser": ("depcruise", "dependency-cruiser"),
     "eslint": ("eslint", "next lint", "nx lint", "nx affected", "nx run-many"),
+    "dependency-cruiser-without-tsconfig": (),
 }
 
 
@@ -603,6 +606,18 @@ def churn(root: Path, months: int) -> tuple[Counter[str], list[set[str]]]:
     return counts, commits
 
 
+CONTAINER_FOLDERS = {"features", "modules", "packages", "apps", "domains", "services", "libs"}
+
+
+def module_boundary(path: str) -> str:
+    """The folder that owns a file: each child of a container such as `features/`, else the top two folders."""
+    folders = path.split("/")[:-1]
+    for index, folder in enumerate(folders[:-1]):
+        if folder in CONTAINER_FOLDERS:
+            return "/".join(folders[: index + 2])
+    return "/".join(folders[:2])
+
+
 def change_coupling(commits: list[set[str]], counts: Counter[str], minimum: int = 4) -> list[dict[str, Any]]:
     pairs: Counter[tuple[str, str]] = Counter()
     for files in commits:
@@ -612,7 +627,7 @@ def change_coupling(commits: list[set[str]], counts: Counter[str], minimum: int 
     for (left, right), together in pairs.items():
         if together < minimum:
             continue
-        if left.split("/")[:2] == right.split("/")[:2]:
+        if module_boundary(left) == module_boundary(right):
             continue
         strength = together / min(counts[left], counts[right])
         if strength >= 0.5:
@@ -678,7 +693,24 @@ def collect(root: Path, months: int) -> dict[str, Any]:
     key = f"{AUDIT}.boundaries-enforced-by-tooling"
     if tooling:
         evidence = tooling[:3]
-        if tooling_runs(root, directories, configured):
+        uses_aliases = any(
+            isinstance((load_jsonc(config).get("compilerOptions") or {}).get("paths"), dict) for config in config_files(root)
+        )
+        blind = (
+            uses_aliases
+            and "dependency-cruiser-without-tsconfig" in configured
+            and not tooling_runs(root, directories, configured - {"dependency-cruiser"})
+        )
+        if tooling_runs(root, directories, configured) and blind:
+            checks[key] = {
+                "status": "partial",
+                "evidence": evidence,
+                "evidenceTier": "supported",
+                "gap": "dependency-cruiser runs, but its configuration has no tsConfig option, so it cannot resolve the repository's path aliases and its rules never see alias imports.",
+                "remediation": "Add `options: { tsConfig: { fileName: 'tsconfig.json' } }` and a `not-to-unresolvable` rule, then prove the check fails on a deliberate alias import that crosses a boundary.",
+                "judgement": "act-on",
+            }
+        elif tooling_runs(root, directories, configured):
             checks[key] = {"status": "present", "evidence": evidence, "evidenceTier": "supported"}
         else:
             checks[key] = {

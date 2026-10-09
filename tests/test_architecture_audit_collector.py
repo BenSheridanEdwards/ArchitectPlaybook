@@ -112,6 +112,20 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "present")
 
+    def test_dependency_cruiser_without_tsconfig_cannot_see_alias_imports(self) -> None:
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        self.commit()
+        key = CHECK + "boundaries-enforced-by-tooling"
+        result = self.collect()["checks"][key]
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("tsConfig", result["gap"])
+        self.write(".dependency-cruiser.js", "module.exports = { options: { tsConfig: { fileName: 'tsconfig.json' } }, forbidden: [] };\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][key]["status"], "present")
+
     def test_boundary_tooling_is_missing_partial_or_present(self) -> None:
         self.write("src/a.ts", "export const a = 1;\n")
         self.write("package.json", '{"name": "fixture"}\n')
@@ -262,6 +276,20 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.write("packages/web/src/kit.ts", "import { kit } from '@acme/kit';\nexport const usesKit = kit;\n")
         self.commit()
         self.assertEqual(self.collect()["checks"][key]["status"], "violation")
+
+    def test_change_coupling_separates_sibling_features(self) -> None:
+        self.write("src/features/cart/view.ts", "export const view = 0;\n")
+        self.write("src/features/checkout/total.ts", "export const total = 0;\n")
+        self.write("src/features/checkout/tax.ts", "export const tax = 0;\n")
+        self.commit("initial")
+        for number in range(4):
+            self.write("src/features/cart/view.ts", f"export const view = {number + 1};\n")
+            self.write("src/features/checkout/total.ts", f"export const total = {number + 1};\n")
+            self.write("src/features/checkout/tax.ts", f"export const tax = {number + 1};\n")
+            self.commit(f"change {number}")
+        pairs = [item["files"] for item in self.collect()["snapshot"]["changeCoupling"]]
+        self.assertIn(["src/features/cart/view.ts", "src/features/checkout/total.ts"], pairs)
+        self.assertNotIn(["src/features/checkout/tax.ts", "src/features/checkout/total.ts"], pairs)
 
     def test_history_keeps_non_ascii_names_and_skips_configuration(self) -> None:
         for number in range(3):

@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: architecture-well-kept-store
+description: The same storefront structured well; measures false positives.
+tags: [architecture, clean]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run with no import cycles, boundary tooling present and run in continuous
+  integration, and no violation on state ownership, data fetching, client state, side effects, or
+  representations. The act-on list is short or empty and invents no problems.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /architecture-audit
+  max_turns: 120
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill]

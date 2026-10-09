@@ -46,3 +46,6 @@ coverage/
 # Git worktrees created inside this repository by agents and maintainers
 .worktrees/
 .claude/worktrees/
+
+# Evaluation results from claude plugin eval
+evals/results/
