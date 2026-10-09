@@ -10,7 +10,8 @@ broke. Everything here serves that question.
    - `riskRanking`: source files ranked by commits in the history window plus
      the number of source files that import them, with the tests that import
      each one;
-   - `untestedRiskyFiles`: ranked files no test imports directly;
+   - `untestedRiskyFiles`: ranked files that no test or test helper imports
+     directly;
    - `preFilter`: tests flagged by shape, already in risk order;
    - `moduleMocks`, `flakeSignals`, `queryUsage`, and `interactions`;
    - `firstClassTooling`, `testFiles.byKind`, and `continuousIntegration`.

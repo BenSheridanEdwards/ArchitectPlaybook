@@ -463,6 +463,7 @@ class RiskAndSnapshotTests(CollectorTestCase):
         self.write("src/checkout.ts", "import { refund } from './refunds';\nimport { format } from './format';\nexport const checkout = () => format(refund(1));\n")
         self.write("src/admin.ts", "import { refund } from './refunds';\nexport const admin = () => refund(2);\n")
         self.write("src/format.test.ts", "import { format } from './format';\nit('formats', () => { format(1); });\n")
+        self.write("src/test/helpers.ts", "import { admin } from '../admin';\nexport const run = () => admin();\n")
         self.write("src/refunds.test.ts", "import { refund } from './refunds';\nit('refunds', () => { expect(refund(1)).not.toBe(0); });\n")
         self.commit("start")
         for amount in range(3):
@@ -474,7 +475,7 @@ class RiskAndSnapshotTests(CollectorTestCase):
         self.assertEqual(ranking[0]["commits"], 4)
         self.assertEqual(ranking[0]["fanIn"], 2)
         self.assertEqual(ranking[0]["importedByTests"], ["src/refunds.test.ts"])
-        self.assertEqual(snapshot["untestedRiskyFiles"], ["src/admin.ts", "src/checkout.ts"])
+        self.assertEqual(snapshot["untestedRiskyFiles"], ["src/checkout.ts"], "a test helper's imports count as tested")
         self.assertEqual(snapshot["mutationTargets"][0], "src/refunds.ts")
         self.assertEqual([item["path"] for item in snapshot["preFilter"]["candidates"]], ["src/refunds.test.ts", "src/format.test.ts"])
 

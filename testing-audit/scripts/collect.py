@@ -140,6 +140,7 @@ NON_SOURCE_PATTERN = re.compile(
     r"(^|/)(__tests__|__mocks__|tests?|e2e|cypress|playwright|fixtures?|mocks?|scripts|\.storybook|stories)/"
     r"|\.(test|spec|cy|e2e|stories|d)\.[cm]?[jt]sx?$|(^|/)[^/]*\.config\.[cm]?[jt]s$|(^|/)[^/]*\.setup\.[cm]?[jt]sx?$"
 )
+TEST_SUPPORT_PATTERN = re.compile(r"(^|/)(__tests__|__mocks__|tests?|fixtures?|mocks?)/")
 TEST_API_PATTERN = re.compile(r"(?<![\w$.])(?:describe|it|test)\s*\(")
 IMPORT_PATTERN = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^[ \t]*import\s*)(['"])(?P<specifier>[^'"\n]+)\1""",
@@ -1474,7 +1475,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
             target = resolver.resolve(path, specifier)
             if not target or target == path:
                 continue
-            if path in test_paths:
+            if path in test_paths or TEST_SUPPORT_PATTERN.search(path):
                 tested_by.setdefault(target, set()).add(path)
             else:
                 fan_in[target] += 1
