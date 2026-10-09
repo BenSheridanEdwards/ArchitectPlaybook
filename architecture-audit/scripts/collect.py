@@ -1,0 +1,583 @@
+#!/usr/bin/env python3
+"""Deterministic, read-only collector for /architecture-audit.
+
+Builds a static import graph of the repository's TypeScript and JavaScript
+sources (relative imports and tsconfig path aliases), then reports:
+
+- import cycles, decided here as a tool check, with one cited import per edge;
+- whether boundary rules are enforced by tooling, decided here;
+- deep imports into another workspace's internals, decided here for monorepos;
+- hubs, orphan candidates, Git hotspots, and change coupling, recorded as
+  snapshot facts for the model's judgement checks.
+
+The output follows the audit protocol's collector contract: a JSON object with
+`checks` (results keyed by checkId) and `snapshot` (Layer 0 facts). The script
+never writes to the repository. Standard library only; Python 3.9 or later.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from collections import Counter, defaultdict
+from itertools import combinations
+from pathlib import Path
+from typing import Any
+
+AUDIT = "architecture-audit"
+SOURCE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+RESOLVE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".jsx", ".mjs", ".cjs")
+SKIPPED_DIRECTORIES = {
+    ".git", "node_modules", "dist", "build", "out", "coverage", ".next", ".nuxt",
+    ".turbo", ".cache", ".vercel", ".output", "storybook-static", ".architect-audits",
+    "graphify-out", ".worktrees", ".claude",
+}
+MAX_FILES = 20_000
+MAX_FILE_BYTES = 1_000_000
+IMPORT_PATTERN = re.compile(
+    r"""(?mx)
+    ^[ \t]*(?:import|export)\s+(?P<type>type\s+)?[^'"`;]*?\bfrom\s*['"](?P<from>[^'"]+)['"]
+    | ^[ \t]*import\s*['"](?P<side>[^'"]+)['"]
+    | \bimport\s*\(\s*['"](?P<dynamic>[^'"]+)['"]\s*\)
+    | \brequire\s*\(\s*['"](?P<require>[^'"]+)['"]\s*\)
+    """
+)
+BOUNDARY_TOOL_FILES = (
+    ".dependency-cruiser.js", ".dependency-cruiser.cjs", ".dependency-cruiser.mjs",
+    ".dependency-cruiser.json", "dependency-cruiser.config.js", "dependency-cruiser.config.cjs",
+)
+
+
+def read_text(path: Path) -> str:
+    try:
+        if path.stat().st_size > MAX_FILE_BYTES:
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def strip_json_comments(text: str) -> str:
+    """Remove // and /* */ comments and trailing commas outside strings (JSONC)."""
+    output: list[str] = []
+    index = 0
+    in_string = False
+    while index < len(text):
+        character = text[index]
+        if in_string:
+            output.append(character)
+            if character == "\\" and index + 1 < len(text):
+                output.append(text[index + 1])
+                index += 2
+                continue
+            if character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            output.append(character)
+            index += 1
+            continue
+        if text.startswith("//", index):
+            newline = text.find("\n", index)
+            index = len(text) if newline == -1 else newline
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end == -1 else end + 2
+            continue
+        output.append(character)
+        index += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(output))
+
+
+def load_jsonc(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(strip_json_comments(read_text(path)))
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def git(root: Path, *arguments: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return completed.stdout if completed.returncode == 0 else ""
+
+
+def source_files(root: Path) -> list[Path]:
+    listed = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    if listed:
+        candidates = [root / entry for entry in listed.split("\0") if entry]
+    else:
+        candidates = [path for path in root.rglob("*") if path.is_file()]
+    files = []
+    for path in candidates:
+        relative = path.relative_to(root)
+        if any(part in SKIPPED_DIRECTORIES for part in relative.parts[:-1]):
+            continue
+        if path.suffix in SOURCE_SUFFIXES and not path.name.endswith(".d.ts") and path.is_file():
+            files.append(path)
+        if len(files) > MAX_FILES:
+            break
+    return sorted(files)
+
+
+class Resolver:
+    """Resolve import specifiers to repository files: relative paths and tsconfig paths."""
+
+    def __init__(self, root: Path, files: list[Path]) -> None:
+        self.root = root
+        self.files = set(files)
+        self.aliases: list[tuple[str, list[Path]]] = []
+        self.base_url: Path | None = None
+        self._load_tsconfig(root / "tsconfig.json", depth=0)
+
+    def _load_tsconfig(self, path: Path, depth: int) -> None:
+        if depth > 5 or not path.is_file():
+            return
+        config = load_jsonc(path)
+        extends = config.get("extends")
+        if isinstance(extends, str) and extends.startswith("."):
+            target = (path.parent / extends).resolve()
+            if target.suffix != ".json":
+                target = target.with_suffix(".json") if not target.is_file() else target
+            self._load_tsconfig(target, depth + 1)
+        options = config.get("compilerOptions") or {}
+        if isinstance(options.get("baseUrl"), str):
+            self.base_url = (path.parent / options["baseUrl"]).resolve()
+        paths = options.get("paths")
+        if isinstance(paths, dict):
+            base = self.base_url or path.parent.resolve()
+            self.aliases = [
+                (pattern, [(base / target) for target in targets if isinstance(target, str)])
+                for pattern, targets in paths.items()
+                if isinstance(targets, list)
+            ]
+
+    def _candidates(self, base: Path) -> list[Path]:
+        options = [base]
+        options += [Path(str(base) + suffix) for suffix in RESOLVE_SUFFIXES]
+        options += [base / f"index{suffix}" for suffix in RESOLVE_SUFFIXES]
+        if base.suffix in (".js", ".jsx", ".mjs", ".cjs"):
+            stem = base.with_suffix("")
+            options += [Path(str(stem) + suffix) for suffix in (".ts", ".tsx", ".mts", ".cts")]
+        return options
+
+    def _first_file(self, base: Path) -> Path | None:
+        for candidate in self._candidates(base):
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if resolved in self.files:
+                return resolved
+        return None
+
+    def resolve(self, importer: Path, specifier: str) -> Path | None:
+        if specifier.startswith("."):
+            return self._first_file(importer.parent / specifier)
+        for pattern, targets in self.aliases:
+            if "*" in pattern:
+                prefix, _, suffix = pattern.partition("*")
+                if specifier.startswith(prefix) and specifier.endswith(suffix):
+                    middle = specifier[len(prefix): len(specifier) - len(suffix) if suffix else None]
+                    for target in targets:
+                        found = self._first_file(Path(str(target).replace("*", middle)))
+                        if found:
+                            return found
+            elif specifier == pattern:
+                for target in targets:
+                    found = self._first_file(target)
+                    if found:
+                        return found
+        if self.base_url is not None and not specifier.startswith("@") and "/" in specifier:
+            return self._first_file(self.base_url / specifier)
+        return None
+
+
+def build_graph(root: Path, files: list[Path]) -> tuple[dict[Path, dict[Path, tuple[int, str, bool]]], int]:
+    """Return edges importer -> {imported: (line, specifier, type_only)} and the unresolved count."""
+    resolver = Resolver(root, [file.resolve() for file in files])
+    graph: dict[Path, dict[Path, tuple[int, str, bool]]] = {file.resolve(): {} for file in files}
+    unresolved = 0
+    for file in files:
+        importer = file.resolve()
+        text = read_text(file)
+        for match in IMPORT_PATTERN.finditer(text):
+            group = next((name for name in ("from", "side", "dynamic", "require") if match.group(name)), None)
+            if group is None:
+                continue
+            specifier = match.group(group)
+            type_only = bool(match.group("type"))
+            target = resolver.resolve(importer, specifier)
+            if target is None:
+                if specifier.startswith("."):
+                    unresolved += 1
+                continue
+            if target == importer:
+                continue
+            line = text.count("\n", 0, match.start(group)) + 1
+            previous = graph[importer].get(target)
+            if previous is None or (previous[2] and not type_only):
+                graph[importer][target] = (line, specifier, type_only)
+    return graph, unresolved
+
+
+def strongly_connected_components(graph: dict[Path, set[Path]]) -> list[list[Path]]:
+    """Iterative Tarjan; returns components with more than one node."""
+    index_of: dict[Path, int] = {}
+    low: dict[Path, int] = {}
+    on_stack: set[Path] = set()
+    stack: list[Path] = []
+    components: list[list[Path]] = []
+    counter = 0
+    for start in sorted(graph):
+        if start in index_of:
+            continue
+        work: list[tuple[Path, list[Path]]] = [(start, sorted(graph[start]))]
+        index_of[start] = low[start] = counter
+        counter += 1
+        stack.append(start)
+        on_stack.add(start)
+        while work:
+            node, children = work[-1]
+            if children:
+                child = children.pop(0)
+                if child not in graph:
+                    continue
+                if child not in index_of:
+                    index_of[child] = low[child] = counter
+                    counter += 1
+                    stack.append(child)
+                    on_stack.add(child)
+                    work.append((child, sorted(graph[child])))
+                elif child in on_stack:
+                    low[node] = min(low[node], index_of[child])
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index_of[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                if len(component) > 1:
+                    components.append(sorted(component))
+    return components
+
+
+def cycle_path(component: list[Path], graph: dict[Path, set[Path]]) -> list[Path]:
+    """Find one concrete cycle through the component's first node."""
+    members = set(component)
+    start = component[0]
+    previous: dict[Path, Path] = {}
+    queue = [start]
+    seen = {start}
+    while queue:
+        node = queue.pop(0)
+        for child in sorted(graph[node]):
+            if child == start:
+                path = [node]
+                while path[-1] != start:
+                    path.append(previous[path[-1]])
+                return list(reversed(path)) + [start]
+            if child in members and child not in seen:
+                seen.add(child)
+                previous[child] = node
+                queue.append(child)
+    return component + [start]
+
+
+TEST_PATH_PATTERN = re.compile(r"(^|/)(__tests__|__mocks__|tests?|e2e|fixtures?)/|\.(test|spec|stories)\.[cm]?[jt]sx?$")
+
+
+def is_test_path(path: str) -> bool:
+    return bool(TEST_PATH_PATTERN.search(path))
+
+
+def relative(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def detect_boundary_tooling(root: Path) -> list[str]:
+    """Return verifiable evidence entries for configured boundary enforcement."""
+    found: list[str] = []
+    for name in BOUNDARY_TOOL_FILES:
+        if (root / name).is_file():
+            found.append(f"{name} — dependency-cruiser configuration")
+    package_text = read_text(root / "package.json")
+    package = load_jsonc(root / "package.json")
+    dependencies = {**(package.get("dependencies") or {}), **(package.get("devDependencies") or {})}
+    for name in ("eslint-plugin-boundaries", "@nx/eslint-plugin", "dependency-cruiser"):
+        if name in dependencies and f'"{name}"' in package_text:
+            found.append(f'package.json — `"{name}"` declared')
+    for config in sorted(root.glob("eslint.config.*")) + sorted(root.glob(".eslintrc*")):
+        text = read_text(config)
+        for marker in ("boundaries/element-types", "boundaries/", "enforce-module-boundaries", "no-restricted-paths", "import/no-cycle", "import-x/no-cycle"):
+            if marker in text:
+                found.append(f"{config.name} — `{marker}` rule configured")
+                break
+    return found
+
+
+def tooling_runs(root: Path) -> bool:
+    package = load_jsonc(root / "package.json")
+    scripts = " ".join(str(value) for value in (package.get("scripts") or {}).values())
+    workflows = " ".join(read_text(path) for path in sorted((root / ".github" / "workflows").glob("*.y*ml")))
+    combined = scripts + " " + workflows
+    return any(token in combined for token in ("depcruise", "dependency-cruiser", "eslint", "nx lint", "nx affected"))
+
+
+def workspaces(root: Path) -> list[Path]:
+    package = load_jsonc(root / "package.json")
+    patterns = package.get("workspaces")
+    if isinstance(patterns, dict):
+        patterns = patterns.get("packages")
+    globs: list[str] = list(patterns) if isinstance(patterns, list) else []
+    pnpm = root / "pnpm-workspace.yaml"
+    if pnpm.is_file():
+        globs += re.findall(r"^\s*-\s*['\"]?([^'\"\n]+)['\"]?\s*$", read_text(pnpm), flags=re.M)
+    found: list[Path] = []
+    for pattern in globs:
+        if pattern.startswith("!"):
+            continue
+        for directory in sorted(root.glob(pattern)):
+            if (directory / "package.json").is_file():
+                found.append(directory.resolve())
+    return sorted(set(found))
+
+
+def churn(root: Path, months: int) -> tuple[Counter[str], list[set[str]]]:
+    log = git(root, "log", f"--since={months}.months", "--no-merges", "--name-only", "--pretty=tformat:@@commit")
+    counts: Counter[str] = Counter()
+    commits: list[set[str]] = []
+    current: set[str] = set()
+    for line in log.splitlines():
+        if line == "@@commit":
+            if current:
+                commits.append(current)
+            current = set()
+            continue
+        path = line.strip()
+        if path and Path(path).suffix in SOURCE_SUFFIXES and (root / path).is_file():
+            current.add(path)
+    if current:
+        commits.append(current)
+    for files in commits:
+        counts.update(files)
+    return counts, commits
+
+
+def change_coupling(commits: list[set[str]], counts: Counter[str], minimum: int = 4) -> list[dict[str, Any]]:
+    pairs: Counter[tuple[str, str]] = Counter()
+    for files in commits:
+        if 1 < len(files) <= 30:
+            pairs.update(combinations(sorted(files), 2))
+    results = []
+    for (left, right), together in pairs.items():
+        if together < minimum:
+            continue
+        if left.split("/")[:2] == right.split("/")[:2]:
+            continue
+        strength = together / min(counts[left], counts[right])
+        if strength >= 0.5:
+            results.append({"files": [left, right], "changedTogether": together, "strength": round(strength, 2)})
+    return sorted(results, key=lambda item: (-item["changedTogether"], item["files"]))[:15]
+
+
+def collect(root: Path, months: int) -> dict[str, Any]:
+    files = source_files(root)
+    graph, unresolved = build_graph(root, files)
+    runtime = {node: {target for target, (_, _, type_only) in edges.items() if not type_only} for node, edges in graph.items()}
+    checks: dict[str, Any] = {}
+    snapshot: dict[str, Any] = {
+        "sourceFiles": len(files),
+        "importEdges": sum(len(edges) for edges in graph.values()),
+        "unresolvedRelativeImports": unresolved,
+    }
+
+    if not files:
+        return {"checks": checks, "snapshot": snapshot}
+
+    components = strongly_connected_components(runtime)
+    if components:
+        evidence = []
+        cycles = []
+        for component in components[:5]:
+            path = cycle_path(component, runtime)
+            cycles.append([relative(root, node) for node in path])
+            for importer, imported in zip(path, path[1:]):
+                line, specifier, _ = graph[importer][imported]
+                evidence.append(f"{relative(root, importer)}:{line} — `{specifier}`")
+        snapshot["importCycles"] = {"count": len(components), "examples": cycles}
+        checks[f"{AUDIT}.no-circular-dependencies"] = {
+            "status": "violation",
+            "evidence": evidence[:12],
+            "evidenceTier": "direct",
+            "gap": f"{len(components)} import cycle(s) among runtime imports; the first cycle is "
+            + " → ".join(cycles[0]) + ".",
+            "remediation": "Break each cycle at its weakest edge: move the shared code both sides need into a module neither imports from, or invert the dependency behind an interface the lower module owns.",
+            "judgement": "act-on",
+            "classification": "observed",
+        }
+    else:
+        checks[f"{AUDIT}.no-circular-dependencies"] = {
+            "status": "present",
+            "evidence": [f"command: `collect.py import graph` → {len(files)} source files, {snapshot['importEdges']} resolved imports, 0 runtime cycles"],
+            "evidenceTier": "supported" if unresolved else "direct",
+        }
+
+    tooling = detect_boundary_tooling(root)
+    snapshot["boundaryTooling"] = tooling
+    key = f"{AUDIT}.boundaries-enforced-by-tooling"
+    if tooling:
+        evidence = tooling[:3]
+        if tooling_runs(root):
+            checks[key] = {"status": "present", "evidence": evidence, "evidenceTier": "supported"}
+        else:
+            checks[key] = {
+                "status": "partial",
+                "evidence": evidence,
+                "evidenceTier": "supported",
+                "gap": "Boundary rules are configured but no package script or workflow runs them, so nothing fails when a boundary is crossed.",
+                "remediation": "Run the boundary check in the lint script and in continuous integration, then prove it fails by adding a deliberate violation on a scratch branch.",
+                "judgement": "act-on",
+            }
+    else:
+        checks[key] = {
+            "status": "missing",
+            "evidence": ["command: `collect.py boundary detection` → no dependency-cruiser configuration, eslint-plugin-boundaries, Nx module boundary rule, restricted-path rule, or import-cycle rule found"],
+            "evidenceTier": "direct",
+            "gap": "No tool enforces module boundaries, so any file can import any other and the structure erodes one shortcut at a time.",
+            "remediation": "Add dependency-cruiser (or eslint-plugin-boundaries) with a no-cycle rule and the repository's layer or feature rules, run it in continuous integration, and prove it fails on a deliberate violation.",
+            "judgement": "act-on",
+        }
+
+    packages = workspaces(root)
+    key = f"{AUDIT}.cross-workspace-contracts-respected"
+    if len(packages) < 2:
+        checks[key] = {"applicability": "not-applicable", "reason": "The repository is not a multi-package workspace."}
+    else:
+        def owner(path: Path) -> Path | None:
+            for package in packages:
+                if package in path.parents:
+                    return package
+            return None
+        deep: list[str] = []
+        for importer, edges in graph.items():
+            source = owner(importer)
+            for target, (line, specifier, _) in edges.items():
+                destination = owner(target)
+                if source and destination and source != destination and specifier.startswith("."):
+                    deep.append(f"{relative(root, importer)}:{line} — `{specifier}`")
+        snapshot["workspaces"] = [relative(root, package) for package in packages]
+        production = [entry for entry in deep if not is_test_path(entry.split(":", 1)[0])]
+        if deep:
+            only_tests = not production
+            checks[key] = {
+                "status": "partial" if only_tests else "violation",
+                "evidence": (production or deep)[:10],
+                "evidenceTier": "direct",
+                "gap": (
+                    f"{len(deep)} relative import(s) from test files reach into another workspace's files; tests share fixtures through internals."
+                    if only_tests
+                    else f"{len(production)} relative import(s) in production code reach into another workspace's files instead of its published entry point."
+                ),
+                "remediation": "Import other workspaces by package name through their `exports` entry points; move shared test fixtures into a test-utilities package; add `exports` maps so internals cannot be imported.",
+                "judgement": "consider" if only_tests else "act-on",
+            }
+        else:
+            checks[key] = {
+                "status": "present",
+                "evidence": [f"command: `collect.py import graph` → 0 relative imports across {len(packages)} workspaces"],
+                "evidenceTier": "supported",
+            }
+
+    fan_in: Counter[Path] = Counter()
+    for importer, edges in graph.items():
+        for target in edges:
+            fan_in[target] += 1
+    fan_out = {node: len(edges) for node, edges in graph.items()}
+    hubs = sorted(
+        (node for node in graph if fan_in[node] >= 10 and fan_out[node] >= 10),
+        key=lambda node: (-(fan_in[node] * fan_out[node]), relative(root, node)),
+    )[:10]
+    snapshot["hubs"] = [
+        {"path": relative(root, node), "fanIn": fan_in[node], "fanOut": fan_out[node]} for node in hubs
+    ]
+    snapshot["mostImported"] = [
+        {"path": relative(root, node), "fanIn": count} for node, count in fan_in.most_common(10)
+    ]
+    entry_markers = ("/app/", "/pages/", "/routes/", "main.", "index.", "server.", "cli.", ".test.", ".spec.", ".config.", ".stories.", "/scripts/", "/bin/")
+    orphans = [
+        relative(root, node)
+        for node in sorted(graph)
+        if fan_in[node] == 0
+        and "/" in relative(root, node)
+        and not any(marker in "/" + relative(root, node) for marker in entry_markers)
+    ]
+    snapshot["orphanCandidates"] = {"count": len(orphans), "examples": orphans[:15]}
+
+    counts, commits = churn(root, months)
+    snapshot["hotspots"] = [{"path": path, "commits": count} for path, count in counts.most_common(15)]
+    snapshot["changeCoupling"] = change_coupling(commits, counts)
+    snapshot["historyWindowMonths"] = months
+    decision_directories = [name for name in ("docs/adr", "docs/decisions", "docs/architecture/decisions", "adr", "decisions") if (root / name).is_dir()]
+    snapshot["decisionRecords"] = decision_directories
+    snapshot["glossary"] = [name for name in ("GLOSSARY.md", "CONTEXT.md", "docs/glossary.md", "UBIQUITOUS_LANGUAGE.md") if (root / name).is_file()]
+    return {"checks": checks, "snapshot": snapshot}
+
+
+def history_months(thresholds: list[str], default: int) -> int:
+    """Read `months=<n>` from the run's recorded threshold overrides."""
+    months = default
+    for item in thresholds:
+        key, _, value = item.partition("=")
+        if key.strip() == "months":
+            try:
+                months = int(value)
+            except ValueError as error:
+                raise SystemExit(f"collect.py: --threshold months must be a whole number, not {value!r}") from error
+            if months < 1:
+                raise SystemExit("collect.py: --threshold months must be at least 1")
+    return months
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--repository", default=".")
+    parser.add_argument("--enrichment", action="append", default=[])
+    parser.add_argument("--threshold", action="append", default=[], help="a recorded key=value override; months=<n> widens the history window")
+    parser.add_argument("--months", type=int, default=6, help="history window when no months threshold is recorded")
+    arguments = parser.parse_args(argv)
+    root = Path(arguments.repository).resolve()
+    json.dump(collect(root, history_months(arguments.threshold, arguments.months)), sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

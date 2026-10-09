@@ -1,12 +1,12 @@
 {
-  "schemaVersion": "1.1.0",
-  "catalogVersion": "1.0.0",
+  "schemaVersion": "1.2.0",
+  "catalogVersion": "2.0.0",
   "skillName": "architecture-audit",
   "humanCanonicalSource": "SKILL.md",
-  "description": "Machine-readable inventory of architecture audit checks for validation and generated maps.",
+  "description": "Machine-readable inventory of architecture audit checks: dependency structure, module design, change risk, and data flow and decisions.",
   "statusTaxonomy": {
-    "present": "The expected invariant is fully satisfied.",
-    "partial": "Most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.",
+    "present": "The invariant holds.",
+    "partial": "The invariant mostly holds, with exceptions, or a soft check shows mixed adherence.",
     "missing": "A structural prerequisite is absent.",
     "violation": "Concrete code or configuration breaks the invariant."
   },
@@ -15,181 +15,253 @@
   ],
   "enrichmentFlags": [
     {
-      "flag": "--pattern",
-      "description": "Declare the intended architectural pattern (layered, feature-folders, hexagonal) so boundary checks judge against the stated intent."
+      "flag": "--with-run",
+      "description": "Run installed boundary and dead-code tools (dependency-cruiser, madge, knip) to confirm collector results."
     }
   ],
   "thresholdFlags": [
-    "--threshold-god-module",
-    "--threshold-god-component",
-    "--threshold-file-size",
-    "--threshold-fan-out"
-  ],
-  "relatedAudits": [
-    {
-      "audit": "pre-audit-setup",
-      "relationship": "Builds the knowledge graph the boundary and coupling checks read from."
-    },
-    {
-      "audit": "react-audit",
-      "relationship": "Owns component-level design; state and data-flow checks overlap."
-    }
+    "--months"
   ],
   "checks": [
     {
       "checkId": "architecture-audit.no-circular-dependencies",
-      "layer": "module-boundaries",
-      "title": "No circular dependencies",
-      "expectation": "The dependency graph is acyclic.",
-      "violationSignal": "One or more cycles are detected by the knowledge graph; each cycle is reported as an ordered list of module paths.",
-      "enrichmentSources": ["graphify-out/graph.json"]
+      "layer": "dependency-structure",
+      "title": "No import cycles",
+      "severity": "high",
+      "method": "tool",
+      "rationale": "Cycles make load order fragile and stop any part of the cycle from being changed, tested, or extracted on its own.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Runtime imports form no cycles. Type-only imports are excluded.",
+      "violationSignal": "One or more cycles among runtime imports, each reported as the importing lines that form it."
     },
     {
-      "checkId": "architecture-audit.feature-folders-single-entry-point",
-      "layer": "module-boundaries",
-      "title": "Feature folders have a single entry point",
-      "expectation": "Each top-level feature or module folder exposes a barrel index.ts and external imports go through it.",
-      "violationSignal": "An external file imports from a deep path inside a feature folder, bypassing its index.ts."
+      "checkId": "architecture-audit.boundaries-enforced-by-tooling",
+      "layer": "dependency-structure",
+      "title": "Boundaries enforced by tooling",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "A boundary that nothing enforces erodes one convenient import at a time, and agents take the shortest path that compiles.",
+      "lastVerified": "2026-10-07",
+      "expectation": "A boundary tool (dependency-cruiser, eslint-plugin-boundaries, Nx module boundaries, or a restricted-paths or no-cycle rule) encodes the dependency rules and runs in a package script or continuous integration.",
+      "violationSignal": "No boundary tool, or one that is configured but run by nothing."
     },
     {
-      "checkId": "architecture-audit.no-deep-relative-imports",
-      "layer": "module-boundaries",
-      "title": "No deep relative imports",
-      "expectation": "Relative imports go up at most two levels (../../).",
-      "violationSignal": "Any import string containing ../../../ or deeper."
+      "checkId": "architecture-audit.dependency-direction-respected",
+      "layer": "dependency-structure",
+      "title": "Dependencies point the declared way",
+      "severity": "high",
+      "method": "model",
+      "rationale": "When lower layers import higher ones, a change to the user interface can break the domain, and nothing can be reused or tested in isolation.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Domain and shared code do not import user-interface, framework, or infrastructure code; sibling features reach each other only through public entry points.",
+      "violationSignal": "An import against the declared or inferred direction, reported with the importing line and the rule it breaks."
     },
     {
-      "checkId": "architecture-audit.no-back-imports-across-layers",
-      "layer": "module-boundaries",
-      "title": "No back-imports across layers",
-      "expectation": "In a layered pattern, upstream layers do not import from downstream layers; in a feature-folder pattern, sibling features import only through their public entry points.",
-      "violationSignal": "An import that crosses a boundary in the wrong direction, reported with importer, import, and direction."
+      "checkId": "architecture-audit.internals-unreachable",
+      "layer": "dependency-structure",
+      "title": "Module internals are unreachable",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Internals that can be imported become part of the interface, so they can never change without breaking a caller.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Code outside a feature or package imports only its public entry point, and something (a package `exports` map, a boundary rule, or a lint error) makes importing internals fail.",
+      "violationSignal": "Imports that reach into another feature's or package's internal files."
     },
     {
       "checkId": "architecture-audit.cross-workspace-contracts-respected",
-      "layer": "module-boundaries",
-      "title": "Cross-workspace contracts respected",
-      "expectation": "Internal packages import only from each other's published entry points, not deep paths.",
-      "violationSignal": "A deep import into another workspace's src/ directory.",
-      "skipWhenAbsent": "The project is not a monorepo."
+      "layer": "dependency-structure",
+      "title": "Workspaces import each other through entry points",
+      "severity": "medium",
+      "method": "tool",
+      "rationale": "Relative imports across workspaces bypass the published contract, so a refactor inside one package silently breaks another.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Workspaces import each other by package name through published entry points. Not applicable outside multi-package workspaces.",
+      "violationSignal": "A relative import from one workspace into another workspace's files. Test-only cases are graded partial."
     },
     {
-      "checkId": "architecture-audit.no-god-module",
-      "layer": "coupling-and-complexity",
-      "title": "No god module",
-      "expectation": "No single module has fan-in greater than the threshold.",
-      "violationSignal": "A module exceeds the threshold, reported with its path, rank, and inbound edge count.",
-      "thresholdFlag": "--threshold-god-module",
-      "defaultThreshold": 30
+      "checkId": "architecture-audit.modules-are-deep",
+      "layer": "module-design",
+      "title": "Modules are deep",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Shallow modules spread one concept across many files, so every change touches several and callers must understand the implementation anyway.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Important modules hide substantial behaviour behind a small interface; deleting one would concentrate complexity rather than just move it.",
+      "violationSignal": "A shallow module: an interface nearly as complex as its implementation, or callers coordinating several calls to complete one operation, reported with the deletion-test result."
     },
     {
-      "checkId": "architecture-audit.no-god-component",
-      "layer": "coupling-and-complexity",
-      "title": "No god component",
-      "expectation": "No React component is rendered by more than the threshold number of parents.",
-      "violationSignal": "A component exceeds the threshold, reported with its path and the count of distinct rendering parents.",
-      "thresholdFlag": "--threshold-god-component",
-      "defaultThreshold": 25
+      "checkId": "architecture-audit.no-pass-through-layers",
+      "layer": "module-design",
+      "title": "No pass-through layers",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A layer that only forwards calls adds indirection without hiding anything, and every change has to be threaded through it.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Every layer adds policy, adaptation, or a distinct abstraction.",
+      "violationSignal": "A wrapper, service, or hook that forwards the same arguments to another with the same shape."
     },
     {
-      "checkId": "architecture-audit.file-size-budget",
-      "layer": "coupling-and-complexity",
-      "title": "File size budget",
-      "expectation": "No source file exceeds the threshold in lines.",
-      "violationSignal": "A file exceeds the threshold, reported with its line count.",
-      "thresholdFlag": "--threshold-file-size",
-      "defaultThreshold": 400
+      "checkId": "architecture-audit.single-owner-per-state",
+      "layer": "module-design",
+      "title": "Each piece of state has one owner",
+      "severity": "high",
+      "method": "model",
+      "rationale": "When several modules write the same state, their rules diverge and the product shows stale or contradictory data.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Each store, cache entry, table, or shared object has one writer; other modules read it or ask the owner to change it.",
+      "violationSignal": "More than one module writes the same state, reported with each writer."
     },
     {
-      "checkId": "architecture-audit.component-fan-out-budget",
-      "layer": "coupling-and-complexity",
-      "title": "Component fan-out budget",
-      "expectation": "No component imports more than the threshold number of modules.",
-      "violationSignal": "A component exceeds the threshold, reported with the count and the imported modules.",
-      "thresholdFlag": "--threshold-fan-out",
-      "defaultThreshold": 15
+      "checkId": "architecture-audit.one-way-per-task",
+      "layer": "module-design",
+      "title": "One supported way to do each task",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Two ways to do the same thing both keep gaining callers, because people and agents copy whichever they find first.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Each recurring task (fetching, dates, forms, feature flags, logging) has one supported mechanism.",
+      "violationSignal": "Two or more mechanisms for the same task in active use, reported with an example of each."
     },
     {
-      "checkId": "architecture-audit.no-orphaned-files",
-      "layer": "coupling-and-complexity",
-      "title": "No orphaned files",
-      "expectation": "Every source file is reachable from at least one entry point.",
-      "violationSignal": "Files with zero inbound edges that are not themselves entry points, reported as likely-dead modules for the user to verify."
+      "checkId": "architecture-audit.no-hand-synced-lists",
+      "layer": "module-design",
+      "title": "No hand-synced lists",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A list repeated by hand in several places goes out of sync the first time someone updates only the copy they can see.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Each list of items (routes, permissions, feature names, enum values) has one source that the others derive from, or a check that fails when they disagree.",
+      "violationSignal": "The same items listed in two or more places with no derivation or consistency check."
     },
     {
-      "checkId": "architecture-audit.single-state-management-strategy",
-      "layer": "state-and-data-flow",
-      "title": "Single state-management strategy",
-      "expectation": "Exactly one global state strategy is used, not multiple in the same application.",
-      "violationSignal": "Two or more state-management libraries are present with no declared migration path."
+      "checkId": "architecture-audit.information-hidden",
+      "layer": "module-design",
+      "title": "Representations stay behind interfaces",
+      "severity": "high",
+      "method": "model",
+      "rationale": "When wire, storage, or framework types leak across layers, a schema change ripples through code that should not have known about it.",
+      "lastVerified": "2026-10-07",
+      "expectation": "External data is parsed into domain types at the boundary; transport, storage, and framework types stay inside the module that owns them.",
+      "violationSignal": "Wire or storage types re-exported or used deep inside other layers, reported with the leaking import or type."
     },
     {
-      "checkId": "architecture-audit.data-fetching-layer-separated",
-      "layer": "state-and-data-flow",
-      "title": "Data fetching layer separated",
-      "expectation": "Server state lives in a designated data-fetching layer, not in component-level useEffect plus fetch.",
-      "violationSignal": "Files outside the designated hooks or data layer call fetch, axios, or framework data primitives directly."
+      "checkId": "architecture-audit.grouped-by-knowledge",
+      "layer": "module-design",
+      "title": "Code grouped by what it knows",
+      "severity": "low",
+      "method": "model",
+      "rationale": "Organising by execution stage (load, validate, transform, save) repeats one representation and its rules across several modules.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Modules are organised around the knowledge and decisions they own, not the order in which code runs.",
+      "violationSignal": "Stage-named modules that each re-implement knowledge of the same representation."
     },
     {
-      "checkId": "architecture-audit.no-global-mutable-singletons",
-      "layer": "state-and-data-flow",
-      "title": "No global mutable singletons",
-      "expectation": "No top-level let exports hold mutable state.",
-      "violationSignal": "A module-level mutable export such as export let x = ..."
+      "checkId": "architecture-audit.hotspots-under-control",
+      "layer": "change-risk",
+      "title": "Hotspots are cohesive and tested",
+      "severity": "high",
+      "method": "model",
+      "rationale": "The files that change most often carry the most risk; a large, mixed, untested hotspot is where regressions come from.",
+      "lastVerified": "2026-10-07",
+      "expectation": "The most frequently changed files are cohesive and covered by tests at their interface.",
+      "violationSignal": "A top hotspot that is large, mixes responsibilities, or has no tests that exercise it."
     },
     {
-      "checkId": "architecture-audit.side-effects-isolated",
-      "layer": "state-and-data-flow",
-      "title": "Side effects isolated",
-      "expectation": "Components go through a hook or service module rather than reading or writing localStorage, sessionStorage, document.cookie, or window.* directly.",
-      "violationSignal": "Direct usage of those browser globals in component files."
+      "checkId": "architecture-audit.change-coupling-within-boundaries",
+      "layer": "change-risk",
+      "title": "Files that change together live together",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Files in different areas that always change together reveal a hidden dependency the structure does not show.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Files that repeatedly change together sit in the same module or feature, or the coupling is explained.",
+      "violationSignal": "Strong change coupling between files in different features or packages with no structural reason."
     },
     {
-      "checkId": "architecture-audit.server-vs-client-distinction",
-      "layer": "state-and-data-flow",
-      "title": "Server vs. client distinction",
-      "expectation": "The 'use client' directive is used deliberately, and server and client components do not import each other's exclusive modules.",
-      "violationSignal": "A 'use client' file importing a server-only module, a server component importing a client-only one, or more than half of components marked client.",
-      "skipWhenAbsent": "The Next.js App Router is not in use.",
+      "checkId": "architecture-audit.hubs-are-stable",
+      "layer": "change-risk",
+      "title": "Hub modules are stable",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "A module that many others import and that itself imports a lot magnifies every change in both directions.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Modules with high fan-in import little and change rarely; barrels that only re-export are judged by what they expose.",
+      "violationSignal": "A module with both high fan-in and high fan-out, or high fan-in and frequent change, reported with its counts."
+    },
+    {
+      "checkId": "architecture-audit.no-orphaned-modules",
+      "layer": "change-risk",
+      "title": "No orphaned modules",
+      "severity": "low",
+      "method": "model",
+      "rationale": "Unused modules mislead readers and agents, who copy dead patterns as if they were current.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Every source module is reachable from an entry point, a route, a test, or configuration.",
+      "violationSignal": "Modules nothing imports and that are not entry points, verified before reporting."
+    },
+    {
+      "checkId": "architecture-audit.server-state-has-one-home",
+      "layer": "data-flow-and-decisions",
+      "title": "Server state has one home",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Fetching the same data in several ad hoc ways causes waterfalls, duplicated caches, and inconsistent loading and error states.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Server data is loaded in one designated place: a query layer (TanStack Query, SWR, RTK Query, Apollo), or the framework's server-side data primitives (Server Components, loaders, Server Actions).",
+      "violationSignal": "Client components fetching directly with useEffect and fetch, or more than one data-fetching strategy, where the framework or a query layer should own it."
+    },
+    {
+      "checkId": "architecture-audit.single-client-state-strategy",
+      "layer": "data-flow-and-decisions",
+      "title": "One client-state strategy",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Several global state libraries split the application's state across incompatible models.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Global client state uses one strategy; React context is used for dependency injection and stable values, not as a second store.",
+      "violationSignal": "Two or more global state libraries in use with no stated migration."
+    },
+    {
+      "checkId": "architecture-audit.side-effects-at-the-edges",
+      "layer": "data-flow-and-decisions",
+      "title": "Side effects sit at the edges",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Storage, cookies, and window access scattered through components make behaviour hard to test and to change.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Components reach browser storage, cookies, and globals through a hook or service module.",
+      "violationSignal": "Direct storage, cookie, or window access in component files."
+    },
+    {
+      "checkId": "architecture-audit.decisions-recorded-and-honoured",
+      "layer": "data-flow-and-decisions",
+      "title": "Decisions are recorded and still hold",
+      "severity": "medium",
+      "method": "model",
+      "rationale": "Without recorded decisions, every review re-litigates them; decisions the code no longer follows mislead everyone who reads them.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Hard-to-reverse architectural decisions are recorded, for example as architecture decision records, and the code still follows them.",
+      "violationSignal": "No record of the major decisions, or code that contradicts a recorded decision.",
+      "relatedChecks": [
+        "documentation-audit.adrs-present"
+      ]
+    },
+    {
+      "checkId": "architecture-audit.domain-language-consistent",
+      "layer": "data-flow-and-decisions",
+      "title": "Domain language is consistent",
+      "severity": "low",
+      "method": "model",
+      "rationale": "When one concept has several names, people and agents build duplicates of it.",
+      "lastVerified": "2026-10-07",
+      "expectation": "Each domain concept has one name in code and documentation, ideally defined in a glossary.",
+      "violationSignal": "The same concept named differently across modules. Soft check — mixed adherence is reported as partial.",
       "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "architecture-audit.file-naming-consistency",
-      "layer": "convention-adherence",
-      "title": "File-naming consistency",
-      "expectation": "Files match the dominant naming pattern in their directory.",
-      "violationSignal": "Files whose name does not match the dominant pattern in their directory.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "architecture-audit.directory-structure-consistency",
-      "layer": "convention-adherence",
-      "title": "Directory-structure consistency",
-      "expectation": "Every directory at the same depth follows the same organisational convention as siblings of the same kind.",
-      "violationSignal": "A directory that does not match the inferred pattern for its kind.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "architecture-audit.index-barrels-consistent",
-      "layer": "convention-adherence",
-      "title": "Index barrels consistent",
-      "expectation": "If barrel files are used in any feature folder, they are used in every feature folder.",
-      "violationSignal": "Mixed-mode barrel usage across feature folders.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"]
-    },
-    {
-      "checkId": "architecture-audit.public-api-documented",
-      "layer": "convention-adherence",
-      "title": "Public API documented",
-      "expectation": "Each feature folder's index.ts has a documenting comment block, or the folder has a README.md.",
-      "violationSignal": "Feature folders without either a documenting barrel comment or a README.md.",
-      "softCheck": true,
-      "allowedStatuses": ["present", "partial", "violation"],
-      "relatedAudits": ["documentation-audit"]
+      "allowedStatuses": [
+        "present",
+        "partial",
+        "missing"
+      ]
     }
   ]
 }

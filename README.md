@@ -8,7 +8,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - **Ship:** **[Quality Gates](quality-gates-audit/SKILL.md)** — pre-hooks and release QA · **[Bundle and Build Health](bundle-build-audit/SKILL.md)** — build output and artifacts.
 - **Risk:** **[Security](security-audit/SKILL.md)** — app and browser security · **[Dependency Health](dependency-audit/SKILL.md)** — package and lockfile risk.
 - **Experience:** **[Accessibility](accessibility-audit/SKILL.md)** — WCAG and usability · **[Performance](performance-audit/SKILL.md)** — speed and rendering cost · **[Error Handling](error-handling-audit/SKILL.md)** — failure states and recovery.
-- **Code:** **[Architecture](architecture-audit/SKILL.md)** — boundaries and coupling · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
+- **Code:** **[Architecture](architecture-audit/SKILL.md)** — structure and change risk · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
 - **Measure:** **[Repository Quality Score](repository-quality-score/SKILL.md)** — deterministic audit roll-up, category scores, and assessment coverage.
 - **Review:** **[Ben Architect Review](ben-architect-review/SKILL.md)** — principles-based architectural pull request reviews using Ben's judgement.
 - **Knowledge:** **[Documentation](documentation-audit/SKILL.md)** — docs and drift · **[Agentic Setup](agentic-audit/SKILL.md)** — agent instructions and safety rails.
@@ -243,7 +243,7 @@ Every audit accepts the universal `--worktree`, `--learn`, and `--teach` flags. 
 
 #### Code quality
 
-- **[Architecture](architecture-audit/SKILL.md)** (`/architecture-audit`) — module boundaries, coupling, layering, ownership, and architectural conventions. Optional: `--pattern`.
+- **[Architecture](architecture-audit/SKILL.md)** (`/architecture-audit`) — import cycles and boundaries, module depth, state ownership, change hotspots, and data flow, with a deterministic import-graph collector. Optional: `--since`, `--months`, `--with-run`, `--pattern`.
 - **[Testing](testing-audit/SKILL.md)** (`/testing-audit`) — test strategy, Testing Library behavior focus, coverage quality, and brittle tests. Optional: `--with-run`.
 - **[React](react-audit/SKILL.md)** (`/react-audit`) — idiomatic React, component boundaries, state ownership, hooks, and React 19 patterns.
 - **[TypeScript](typescript-audit/SKILL.md)** (`/typescript-audit`) — type system strength, strictness, unsafe escape hatches, and input/output validation. Optional: `--with-run`.
@@ -267,7 +267,7 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 | [Accessibility](accessibility-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--severity=error` |
 | [Performance](performance-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-lighthouse-results`, `--lighthouse-results-path` |
 | [Error Handling](error-handling-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
-| [Architecture](architecture-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--pattern` |
+| [Architecture](architecture-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--since`, `--months`, `--with-run`, `--pattern` |
 | [Testing](testing-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |
 | [React](react-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
 | [TypeScript](typescript-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |
