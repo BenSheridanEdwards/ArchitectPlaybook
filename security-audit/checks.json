@@ -28,7 +28,7 @@
       "method": "model",
       "rationale": "Server Actions and route handlers are public HTTP endpoints, so one that skips the session check lets anyone on the internet call it.",
       "lastVerified": "2026-10-09",
-      "expectation": "Every Server Action, route handler, API route, and loader or action that is not deliberately public verifies the session itself, with a verified token (never a decoded-only one), before it reads or changes data.",
+      "expectation": "Every Server Action, route handler, API route, loader or action, and every page, layout, or `generateMetadata` that loads non-public data from route or search parameters verifies the session itself, with a verified token (never a decoded-only one), before it reads or changes data.",
       "violationSignal": "An entry point that reads or changes non-public data with no session verification of its own, reported with the entry point and what an anonymous caller can do."
     },
     {
@@ -39,8 +39,8 @@
       "method": "model",
       "rationale": "An authenticated user who can change an identifier in a request can read or change every other user's records.",
       "lastVerified": "2026-10-09",
-      "expectation": "Every query or mutation that takes a record identifier from the request scopes it to the caller (owner, tenant, or role) on the server, and privileged operations check the caller's role.",
-      "violationSignal": "A lookup or mutation by a request-supplied identifier with no ownership, tenant, or role condition, reported with the entry point and the query."
+      "expectation": "Every query or mutation that takes a record identifier from the request scopes it to the caller (owner, tenant, or role) on the server, privileged operations check the caller's role, and no cache (`unstable_cache`, `'use cache'`, fetch caching, static rendering, or a public `Cache-Control`) serves one user's data to another.",
+      "violationSignal": "A lookup or mutation by a request-supplied identifier with no ownership, tenant, or role condition, or per-user data cached under a key or header that other users share, reported with the entry point and the query or cache."
     },
     {
       "checkId": "security-audit.authorization-not-middleware-only",
@@ -63,6 +63,28 @@
       "lastVerified": "2026-10-09",
       "expectation": "State changes use non-GET methods; cookie-authenticated route handlers rely on SameSite=Lax or Strict cookies or check the Origin header; Server Action allowed origins are not widened to arbitrary sites.",
       "violationSignal": "A GET handler that changes state, or a cookie-authenticated mutation reachable cross-site (SameSite=None, or wildcard allowed origins) with no origin or token check."
+    },
+    {
+      "checkId": "security-audit.cors-restricted-to-trusted-origins",
+      "layer": "access-control-and-sessions",
+      "title": "Cross-origin access is limited to trusted origins",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "A response that reflects any caller's origin and allows credentials lets every website read the signed-in user's data.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Route handlers and servers send `Access-Control-Allow-Origin` only for an exact allowlist, never reflect the request's `Origin` or use a wildcard together with `Access-Control-Allow-Credentials: true`, and answer preflight requests with the same rule.",
+      "violationSignal": "The request's `Origin` reflected, or a pattern that accepts lookalike origins, together with credentials on a response that carries non-public data."
+    },
+    {
+      "checkId": "security-audit.webhooks-verified",
+      "layer": "access-control-and-sessions",
+      "title": "Webhooks verify their signature before acting",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "A webhook endpoint is public, so one that acts without verifying the sender lets anyone forge payments, sign-ups, or state changes.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Every webhook handler verifies the provider's signature over the raw request body with the provider's library or a constant-time comparison, rejects stale timestamps or replayed event identifiers, and acts only after verification succeeds.",
+      "violationSignal": "A webhook that acts on an unverified body, verifies a re-serialised body, compares signatures with `===`, or accepts replays."
     },
     {
       "checkId": "security-audit.sign-in-flows-protected",
@@ -109,6 +131,17 @@
       "violationSignal": "`Math.random()` used for a security token, MD5 or SHA-1 or a single unsalted SHA-256 for passwords, or a token verifier that accepts any algorithm."
     },
     {
+      "checkId": "security-audit.authentication-rate-limited",
+      "layer": "access-control-and-sessions",
+      "title": "Sign-in and recovery endpoints are rate-limited",
+      "severity": "high",
+      "method": "model",
+      "rationale": "Without attempt limits, passwords, one-time codes, and reset tokens can be guessed, which is account takeover once a password is weak or reused.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Sign-in, one-time-code, password-reset, and sign-up endpoints limit attempts per account and per client with a shared store (not process memory on serverless), or the authentication provider does so, without letting an attacker lock any account out indefinitely.",
+      "violationSignal": "A hand-written sign-in, one-time-code, or reset endpoint with no attempt limit, or a limit kept in process memory on serverless."
+    },
+    {
       "checkId": "security-audit.server-input-validated",
       "layer": "untrusted-input-and-output",
       "title": "Server entry points validate their input",
@@ -116,7 +149,7 @@
       "method": "model",
       "rationale": "Unvalidated input lets callers write fields they should not (mass assignment) and turns type confusion into logic flaws.",
       "lastVerified": "2026-10-09",
-      "expectation": "Every Server Action and route handler parses its arguments, form data, JSON body, and parameters with a schema on the server, and passes only the allowed fields on.",
+      "expectation": "Every Server Action and route handler parses its arguments, including values bound with `.bind`, form data, JSON body, and parameters with a schema on the server, and passes only the allowed fields on.",
       "violationSignal": "An entry point that passes request data to a query, mutation, or downstream call without server-side parsing, or spreads a whole request body into a write."
     },
     {
@@ -162,6 +195,17 @@
       "lastVerified": "2026-10-09",
       "expectation": "`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, and Markdown or rich-text renderers with raw HTML enabled receive only constant or sanitized content.",
       "violationSignal": "One of these sinks receiving user-controlled, stored, or fetched content without sanitization."
+    },
+    {
+      "checkId": "security-audit.file-uploads-constrained",
+      "layer": "untrusted-input-and-output",
+      "title": "Uploaded files cannot run or escape their storage",
+      "severity": "critical",
+      "method": "model",
+      "rationale": "An uploaded HTML or SVG file served from the application's origin runs script as the application, and an uploaded file name can write outside its folder.",
+      "lastVerified": "2026-10-09",
+      "expectation": "Uploads check size and type on the server from the content, not the client's `Content-Type`, store under generated names, and are served from a separate origin or with `Content-Disposition: attachment` and `nosniff`; pre-signed URLs are scoped to one object, a size limit, and a short expiry. Not applicable when the application accepts no files.",
+      "violationSignal": "An uploaded file served inline from the application's origin, a client-supplied file name used in a path, or no size limit, reported with the upload and serving code."
     },
     {
       "checkId": "security-audit.url-href-src-validated",
@@ -222,12 +266,12 @@
       "checkId": "security-audit.env-files-gitignored",
       "layer": "secrets-data-and-browser-hardening",
       "title": "Local environment files are ignored by Git",
-      "severity": "high",
+      "severity": "critical",
       "method": "tool",
-      "rationale": "Local environment files hold real secrets, and without an ignore rule the first `git add .` commits them.",
+      "rationale": "Local environment files hold real secrets, so a missing ignore rule, or a committed local file, exposes them as directly as a committed key; Architecture Decision Record 0004 rates the control like the defect it prevents.",
       "lastVerified": "2026-10-09",
-      "expectation": "A rule in the repository's own `.gitignore` covers `.env`, `.env.local`, and `.env.*.local` in every application folder, except environment files the team commits on purpose.",
-      "violationSignal": "No repository ignore rule for these files, or coverage only from a personal or global ignore file."
+      "expectation": "A rule in a `.gitignore` the repository tracks covers `.env`, `.env.local`, and every `.env.*.local` variant in each application folder, and no local environment file is committed. Committed defaults such as `.env` or `.env.production` are allowed when they hold no secrets.",
+      "violationSignal": "A committed `.env*.local` file is a violation. No tracked ignore rule, or coverage only from an untracked, personal, or global ignore file, is missing or partial."
     },
     {
       "checkId": "security-audit.public-prefix-environment-variables-are-public",
@@ -241,15 +285,15 @@
       "violationSignal": "A secret, private key, service-role key, or server token exposed through a public-prefixed variable."
     },
     {
-      "checkId": "security-audit.server-secrets-stay-on-server",
+      "checkId": "security-audit.server-only-data-stays-on-server",
       "layer": "secrets-data-and-browser-hardening",
-      "title": "Server secrets never reach client code",
+      "title": "Server-only data never reaches client code",
       "severity": "critical",
       "method": "model",
-      "rationale": "A secret passed to a client component, returned from a Server Action, or added to the client build is shipped to every browser.",
+      "rationale": "A secret or a private field passed to a client component, returned from a Server Action, or added to the client build is shipped to every browser that loads it.",
       "lastVerified": "2026-10-09",
-      "expectation": "Modules that read secrets import `server-only`; secrets are never passed as props to client components, returned from Server Actions or route handlers, or added to the build's client `env`.",
-      "violationSignal": "A secret value that reaches a client component, a response, or the client bundle. A secret-reading module without `server-only` but with no concrete leak is partial."
+      "expectation": "Modules that read secrets import `server-only`; secrets, and fields the user may not see such as password hashes, internal flags, or other users' data, are never passed as props to client components, returned from Server Actions or route handlers, or added to the build's client `env`. Data passed to the client is selected field by field or shaped into a transfer object.",
+      "violationSignal": "A secret or a private field that reaches a client component, a response, or the client bundle. A secret-reading module without `server-only` but with no concrete leak is partial."
     },
     {
       "checkId": "security-audit.no-console-logged-secrets",
@@ -358,7 +402,7 @@
       "checkId": "security-audit.no-secrets-in-prompts",
       "layer": "large-language-model-features",
       "title": "Prompts carry no secrets or other users' data",
-      "severity": "high",
+      "severity": "critical",
       "method": "model",
       "rationale": "Anything in a prompt can be extracted by prompt injection, so a secret or another user's data in context is one question away from disclosure.",
       "lastVerified": "2026-10-09",

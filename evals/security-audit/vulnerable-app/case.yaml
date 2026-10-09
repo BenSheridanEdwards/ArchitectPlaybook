@@ -6,10 +6,11 @@ runs: 3
 expected_outcome: >-
   Publishes a complete run. The collector reports the committed Stripe key with its value redacted, the
   missing ignore rule for local environment files, and no eval. The model finds the unauthenticated
-  deleteInvoice Server Action, cross-user invoice reads in the route handler and the page, middleware-only
-  authorization on a Next.js version that can bypass it, server-side request forgery in the embed route,
-  the customer note rendered as unsanitized HTML, the open redirect after sign-in, the token in
-  localStorage, and the assistant's refund tool acting on any invoice the model names.
+  deleteInvoice Server Action, cross-user invoice reads in the route handler and the page,
+  middleware-only authorization on a Next.js version that can bypass it, server-side request forgery in
+  the embed route, the customer note rendered as unsanitized HTML, the open redirect after sign-in,
+  which also runs a `javascript:` URL that can read the token in localStorage, no attempt limit on
+  sign-in, and the assistant's refund tool acting on any invoice the model names.
 context:
   scaffold_script: fixture.sh
 execution:

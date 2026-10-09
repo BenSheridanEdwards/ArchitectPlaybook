@@ -46,9 +46,15 @@ problem it detects. For security:
   a token in web storage (needs a script injection) and an open redirect
   (needs a phishing victim). So are middleware-only authorization (needs a
   matcher gap or a bypass) and `eval` (needs attacker text to reach it).
+  Sign-in without attempt limits is high too: guessing succeeds only against
+  a weak or reused password.
 - **medium:** a missing defence in depth whose absence causes nothing by
   itself, such as a Content Security Policy or framing protection.
 - **low:** hygiene, such as the baseline headers.
+
+A check that finds a control missing is rated like the defect the control
+prevents (Architecture Decision Record 0004). That is why "Local environment
+files are ignored by Git" is critical, like "No secrets in source".
 
 Severity belongs to the check. A partial result on a critical check is still
 weighted as critical, so grade partial only when the gap is real.
@@ -56,13 +62,23 @@ weighted as critical, so grade partial only when the gap is real.
 ## Tracing entry points
 
 Start from the collector's `serverActions`, `routeHandlers`,
-`otherServerRoutes`, and `middleware` lists. For each entry point:
+`pageEntryPoints`, `otherServerRoutes`, `webhookSites`, and `middleware` lists.
+For each entry point:
 
-1. **Who can call it?** Server Actions are POST endpoints. Anyone can call one
-   with any arguments, because action identifiers ship in the client bundle.
-   Route handlers and API routes answer any HTTP client. Loaders and Remix or
-   React Router actions are the same. Treat every argument, `params`,
-   `searchParams`, header, cookie, and body field as attacker-controlled.
+1. **Who can call it?**
+   - Server Actions are POST endpoints. Anyone can call one with any
+     arguments, because action identifiers ship in the client bundle.
+   - Values passed with `.bind(null, id)` (`boundActionArguments`) travel
+     through the client and are attacker-controlled too, unlike variables an
+     inline action closes over. `<form action={remove.bind(null, invoice.id)}>`
+     looks safe and is not.
+   - Route handlers and API routes answer any HTTP client. Loaders and Remix or
+     React Router actions are the same.
+   - Pages, layouts, and `generateMetadata` that load data from `params` or
+     `searchParams` are reads anyone can request by URL. They are where
+     cross-user reads most often sit.
+   - Treat every argument, `params`, `searchParams`, header, cookie, and body
+     field as attacker-controlled.
 2. **What protects it?** Read the function body, then every data-access
    function it calls. A check in a layout does not protect a page's data or a
    Server Action, because layouts do not re-run on every request and actions do
@@ -70,8 +86,9 @@ Start from the collector's `serverActions`, `routeHandlers`,
    below).
 3. **Where does its input go?** Follow each value to a query, a mutation, a
    server-side request, a redirect, a response, a log line, a prompt, or HTML.
-4. **What comes back?** Check that responses return only the fields the
-   caller may see, not whole records with other users' data or secrets.
+4. **What comes back?** Check that responses and client component props
+   carry only the fields the caller may see, not whole records with password
+   hashes, internal flags, other users' data, or secrets.
 
 Then work backwards from the client sinks the collector found:
 `dangerouslySetInnerHTML`, `otherHtmlSinks`, `dynamicRedirects`,
@@ -88,10 +105,11 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     it always calls.
   - A token must be verified, not just decoded: `jwt.decode` and an unverified
     `JSON.parse(atob(...))` are not authentication.
-  - Entry points meant to be public (sign-up, webhooks with signature checks,
-    public pages, capability links with unguessable identifiers) are present
-    when they expose nothing beyond their purpose. A webhook needs its
-    signature verified.
+  - Entry points meant to be public (sign-in, sign-up, public pages,
+    capability links with unguessable tokens) are present when they expose
+    nothing beyond their purpose. Webhooks are graded by their own check.
+  - A page or layout that loads non-public data needs the same session check
+    as an action, in the page or in the data-access function it calls.
 - **Each request is authorized for the records it touches.** Every
   `findUnique`, `update`, `delete`, or SQL statement keyed by a request
   identifier needs an ownership, tenant, or role condition, or a check on the
@@ -100,6 +118,16 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   random token is the authorization, counts as present when the endpoint reads
   or changes nothing beyond its purpose. A sequential or guessable identifier,
   or the record's own primary key reused in other routes, is not a capability.
+  - Caches are authorization too. Look at `cachingSites`:
+    - `unstable_cache` or `'use cache'` whose key omits the user or tenant
+      while the function reads per-user data;
+    - `fetch` with `force-cache` or `revalidate` that sends an `Authorization`
+      header or cookie;
+    - `export const dynamic = 'force-static'`, or `revalidate`, on a route that
+      reads the session;
+    - `Cache-Control: public` or `s-maxage` on an authenticated response.
+
+    Each of these can serve one user's data to another: a violation.
 - **Authorization does not rely on middleware alone.**
   - Read `config.matcher`. Routes outside it, including API routes the matcher
     excludes, get no protection at all.
@@ -117,6 +145,20 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     or a token. SameSite does not separate sibling subdomains.
   - A GET handler that changes state is a violation whenever a cookie
     authenticates it.
+- **Cross-origin access is limited to trusted origins.** Start from
+  `corsSites`. `Access-Control-Allow-Origin` set from `request.headers.get('origin')`,
+  `origin: true` in the `cors` package, or a check with `endsWith` or an
+  unanchored regular expression, combined with `Access-Control-Allow-Credentials:
+  true`, lets any site read the signed-in user's responses: a violation. A
+  wildcard without credentials on public data is present.
+- **Webhooks verify their signature before acting.** Start from
+  `webhookSites` and any route with `webhook` in its path.
+  - Present: the provider's own verifier (`stripe.webhooks.constructEvent`,
+    `svix`, `@octokit/webhooks`), given the raw body from `request.text()`.
+  - A violation: acting before verification, verifying `JSON.stringify` of a
+    parsed body, comparing signatures with `===` instead of
+    `crypto.timingSafeEqual`, or ignoring the signed timestamp so an old
+    event can be replayed.
 - **Hand-written sign-in flows.** Not applicable when Auth.js, Clerk, Auth0, or
   another maintained library builds the authorization request. Otherwise,
   find the request and the callback, and check that `state` (and `nonce` for
@@ -134,6 +176,15 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   `'sha1'`, single unsalted `'sha256'`), and verifiers (`jwt.verify` without
   `algorithms`, `alg: none`). MD5 used for cache keys or ETags is not a
   finding.
+- **Sign-in and recovery endpoints are rate-limited.** Look at every
+  hand-written sign-in, one-time-code, magic-link, password-reset, and sign-up
+  entry point, and at `rateLimitLibraries`.
+  - Present: limits per account and per client in a shared store such as
+    Redis, or a hosted provider (Clerk, Auth0, Supabase) that enforces them.
+  - A limit kept in process memory on serverless functions limits nothing.
+  - A six-digit code with no attempt limit is guessable outright.
+  - A per-account limit alone lets anyone lock a user out; that is a
+    legitimate `consider` finding, not a violation.
 
 ## Layer 2: untrusted input and output
 
@@ -171,6 +222,16 @@ Read a file before citing it. Quote only the fragment that carries the signal.
 - **Other HTML sinks.** The same test for `innerHTML`, `outerHTML`,
   `insertAdjacentHTML`, `document.write`, `createContextualFragment`,
   `rehype-raw`, `allowDangerousHtml`, and Markdown renderers with `html: true`.
+- **Uploaded files cannot run or escape their storage.** Start from
+  `uploadSites`. Not applicable when the application accepts no files.
+  - A violation: an uploaded SVG or HTML file served inline from the
+    application's own origin (stored script injection), or a client-supplied
+    file name joined into a storage path (path traversal).
+  - Also look for a trusted client `Content-Type`, a missing size limit, and a
+    pre-signed URL not scoped to one key, a size, and a short expiry.
+  - Present: content and size checked on the server, generated names, and files
+    served from a separate origin or bucket, or with
+    `Content-Disposition: attachment` and `nosniff`.
 - **User-supplied URLs use safe schemes.** React 19 refuses to render
   `javascript:` URLs in `href` and `src`; earlier versions only warn. Nothing
   protects `window.open`, `location`, or URLs written outside React. A check
@@ -186,10 +247,11 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   - `startsWith('/')` alone is a violation, because `//attacker.example` and
     `/\attacker.example` pass it.
 - **No eval or new Function (tool).** The collector lists every call in
-  shipped code and marks the result `consider`. Trace each site: if request,
-  storage, or message data can reach it, re-record the check with
-  `--judgement act-on` and the trace. Calls in tests and minified vendor files
-  are excluded.
+  shipped code and marks the result `consider`. It ignores strings, comments,
+  regular expressions, prose in JSX text, and method declarations named
+  `eval`. Trace each site: if request, storage, or message data can reach it,
+  re-record the check with `--judgement act-on` and the trace. Calls in tests
+  and minified vendor files are excluded.
 - **Message listeners.** `event.origin === 'https://exact.example'` or a `Set`
   of exact origins is present. `includes`, `endsWith`, `indexOf`, or a
   regular expression without anchors is a violation, because
@@ -198,22 +260,38 @@ Read a file before citing it. Quote only the fragment that carries the signal.
 ## Layer 3: secrets, data, and browser hardening
 
 - **No secrets in source (tool).**
-  - The collector scans tracked files for high-confidence formats, and committed
-    environment files for secret-named variables with real values. It skips
-    placeholders, documentation examples, and local database URLs, and redacts
-    every value.
+  - The collector scans every tracked file, in any folder and of any size, for
+    high-confidence formats, keystore and private-key files, and secret-named
+    variables (including `*_KEY` and `*_PAT`) with real values in committed
+    environment files.
+  - It skips whole-value placeholders (`changeme`, `your-key-here`, `<token>`,
+    `${VAR}`, filler such as `xxxx`), the documented AWS example keys, local
+    database URLs, and private-key headers with no key body after them, as in
+    documentation templates. A value that merely contains a word such as
+    `Example` is still a secret.
+  - Citations quote only a fixed prefix such as `sk_live_` or a variable name
+    before `<REDACTED>`. A file whose path itself looks like a credential is
+    counted but not named. When every hit is under a test path, the result is
+    judged `consider`.
   - A test-only private key or a revoked credential may be dismissed with a
     reason, but the key is still exposed: say whether it was ever live.
   - Google API keys are often public by design (Maps, Firebase) and are not in
     the high-confidence list. Judge them under the public-variable check.
   - With `--with-scan`, history findings are reported as counts, rule names,
     commits, and files. A secret only in history still needs rotating.
-- **Local environment files are ignored by Git (tool).** The collector asks
-  Git which rule ignores `.env`, `.env.local`, and the `.local` variants in
-  each application folder. A rule from `.git/info/exclude` or a global ignore
-  file protects only one person, so it is partial. Files the team commits on
-  purpose, such as `.env.example` or committed non-secret defaults, are left
-  out of the check.
+- **Local environment files are ignored by Git (tool).** Critical, because a
+  missing control is rated like the defect it prevents.
+  - The collector asks Git which rule ignores `.env`, `.env.local`, and the
+    development, test, production, and other `.local` variants. It asks in the
+    root, every folder with a `package.json` or a Next.js or Vite
+    configuration, and every folder that holds an environment file.
+  - Only a rule in a `.gitignore` the repository tracks counts. An untracked
+    `.gitignore`, `.git/info/exclude`, or a global ignore file protects one
+    person, so that coverage is missing or partial.
+  - A committed `.env*.local` file is a violation whatever the ignore rules
+    say, because an ignore rule does not untrack a file.
+  - Committed defaults such as `.env` or `.env.production` are allowed (Next.js
+    documents them); "No secrets in source" checks their values.
 - **Public environment variables hold no secrets.** Start from
   `publicEnvironmentNamesThatLookSecret`, then decide by what the value is:
   - publishable keys, analytics identifiers, and Supabase anonymous keys are
@@ -222,11 +300,17 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     not.
 
   Check `next.config` `env`, which inlines into the client bundle, too.
-- **Server secrets never reach client code.** Follow each secret-reading
-  module's importers. It is a violation when a secret reaches a client
-  component prop, a Server Action return value, or a JSON response. A module
-  that reads secrets without `import 'server-only'` but has no client importer
-  is partial: nothing stops the next import.
+- **Server-only data never reaches client code.**
+  - Follow each secret-reading module's importers. A secret that reaches a
+    client component prop, a Server Action return value, or a JSON response
+    is a violation.
+  - The same holds for private fields: a whole user or account record passed
+    to a client component carries its password hash, internal flags, or other
+    users' email addresses into the page. Present: data shaped with Prisma
+    `select`, a transfer object, or React's
+    `experimental_taintObjectReference` and `experimental_taintUniqueValue`.
+  - A module that reads secrets without `import 'server-only'` but has no
+    client importer is partial: nothing stops the next import.
 - **Logs record no secrets or tokens.** Look at `console.*`, logger, and error
   reporter calls in authentication, payment, and request middleware code.
   Logging a whole `headers`, `cookies()`, or request object counts.
@@ -258,9 +342,12 @@ Read a file before citing it. Quote only the fragment that carries the signal.
 
 ## Layer 4: large-language-model features
 
-The collector marks this layer not applicable when no AI SDK or model API
-call exists. Otherwise, start from every `tool(` definition and every model
-call.
+The collector lists AI SDKs (including Bedrock, Azure OpenAI, Vertex AI,
+Mastra, and LangChain) and model API references, including any
+`/chat/completions` path. When it finds none, `aiDetection` in the snapshot
+says so. Search for a model call yourself (an HTTP call to a model endpoint,
+a self-hosted model) before recording these checks not applicable. Otherwise,
+start from every `tool(` definition and every model call.
 
 - **Model tool calls act only with the user's permissions.** Treat each tool
   as an entry point whose arguments come from the attacker, because prompt
@@ -270,16 +357,24 @@ call.
   mirrors. Refunds, deletions, payments, and messages to third parties need
   explicit user confirmation outside the model. A tool that only files a
   request for a person to review, scoped to the user's own records, already
-  has that confirmation and needs no in-chat step.
+  has that confirmation and needs no in-chat step. AI SDK 6 marks a tool
+  that needs approval with `needsApproval`, which counts as that
+  confirmation.
 - **Model output is never rendered as raw HTML.** Follow the streamed or
   returned text to the component that renders it.
-- **Prompts carry no secrets or other users' data.** Read system prompts and
-  retrieval queries. A retrieval query not filtered by the current user or
-  tenant leaks other users' data to anyone who asks.
+- **Prompts carry no secrets or other users' data.** Critical, because
+  anything in a prompt is one injected question away from disclosure. Read
+  system prompts and retrieval queries. A retrieval query not filtered by the
+  current user or tenant leaks other users' data to anyone who asks.
 - **Model usage is bounded per user.** Look for a session check, a per-user
-  rate limiter, an output token cap (`maxOutputTokens`, `max_tokens`), a step
-  or tool-call limit, and an input size limit. An in-memory limiter on
-  serverless functions limits nothing; grade it partial.
+  rate limiter, an output token cap, a step or tool-call limit, and an input
+  size limit. The names depend on the SDK version:
+  - AI SDK 4: `maxTokens` and `maxSteps`;
+  - AI SDK 5 and later: `maxOutputTokens` and `stopWhen: stepCountIs(n)`;
+  - provider SDKs: `max_tokens` or `max_completion_tokens`.
+
+  An in-memory limiter on serverless functions limits nothing; grade it
+  partial.
 
 ## Citing secrets safely
 
@@ -287,14 +382,18 @@ Never put a secret value in evidence, a gap, a note, a hypothesis, the
 snapshot, or the chat. The protocol rejects text that looks like a key, so a
 leaked value also fails the run.
 
-- Replace the value with `<REDACTED>` inside the quote, and keep some text
-  around it so the quote can be verified:
-  ``lib/payments.ts:4 — `new Stripe('sk_live_<REDACTED>'` ``. `<REDACTED>`
-  matches any text at that position.
+- Replace the value with `<REDACTED>` inside the quote, and keep only a fixed,
+  non-secret prefix or a name beside it so the quote can be verified:
+  ``lib/payments.ts:4 — `sk_live_<REDACTED>` ``. `<REDACTED>` matches any text
+  at that position.
+- Never quote other text from the same line. On a compact or minified line,
+  the text beside one key can be part of another credential.
 - For a secret-named variable in an environment file, quote the name:
   ``.env.production:3 — `SESSION_SECRET=<REDACTED>` ``.
 - For a secret spread over several lines, such as a private key, cite the
-  header line: ``certs/dev.pem:1 — `-----BEGIN <REDACTED>-----` ``.
+  header line: ``certs/dev.pem:1 — `-----BEGIN <REDACTED>` ``.
+- If a file's path itself looks like a credential, describe the finding in a
+  `note:` without the path.
 - For history, cite the scan as a command with counts only.
 - Do not search for a secret's value with `search:`; search for its prefix or
   variable name.

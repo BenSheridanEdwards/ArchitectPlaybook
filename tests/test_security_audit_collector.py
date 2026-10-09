@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,8 @@ ANTHROPIC = "sk-" + "ant-api03-" + "Qw3rTy7UiOp1AsDf5GhJk9LzXc2VbNm4" * 3
 NPM = "np" + "m_" + "a1B2c3D4e5F6g7H8i9J0" + "k1L2m3N4o5P6q7R8"
 DATABASE_PASSWORD = "Pr0d" + "Passw0rd" + "Zebra42"
 PRIVATE_KEY_HEADER = "-----BEGIN RSA " + "PRIVATE KEY-----"
+PRIVATE_KEY_BODY = "".join(("MIIEow", "IBAAKC", "AQEAu1", "SU1L7V", "LPHCgc", "BIjSnT", "3fHxD2", "pNk8qY", "0r1Wv5", "Lz9QmB", "7cT4sX", "e6Ja"))
+GENERIC_PASSWORD = "".join(("q8Zt3L", "w9Rv2X", "n5Kp7Y", "d4Mh"))
 ENV_SECRET = "s3cr3t" + "ValueForTheFixture99"
 
 
@@ -111,7 +114,7 @@ class SecurityCollectorTests(unittest.TestCase):
         secrets = result["checks"][SECRETS]
         self.assertEqual(secrets["status"], "violation")
         self.assertEqual(secrets["judgement"], "act-on")
-        self.assertEqual(secrets["evidence"], ["lib/payments.ts:3 — stripe-live-secret-key: `new Stripe('sk_live_<REDACTED>',`"])
+        self.assertEqual(secrets["evidence"], ["lib/payments.ts:3 — stripe-live-secret-key: `sk_live_<REDACTED>`"])
         self.assert_verifies(result)
         self.assert_no_values(result, STRIPE)
 
@@ -124,7 +127,7 @@ class SecurityCollectorTests(unittest.TestCase):
             "anthropic-api-key": f"new Anthropic({{ apiKey: '{ANTHROPIC}' }})",
             "npm-token": f"//registry.npmjs.org/:_authToken={NPM}",
             "connection-string-password": f"url: 'postgresql://app:{DATABASE_PASSWORD}@db.prod.internal:5432/app',",
-            "private-key": PRIVATE_KEY_HEADER,
+            "private-key": f"{PRIVATE_KEY_HEADER}\n{PRIVATE_KEY_BODY}",
         }
         for index, (rule, line) in enumerate(samples.items()):
             self.write(f"config/{index}.ts", f"// {rule}\n{line}\n")
@@ -145,7 +148,7 @@ class SecurityCollectorTests(unittest.TestCase):
         evidence = result["checks"][SECRETS]["evidence"]
         self.assertEqual(len(evidence), 1)
         self.assertIn("aws-access-key-id, github-token", evidence[0])
-        self.assertEqual(evidence[0].count("<REDACTED>"), 2)
+        self.assertTrue(evidence[0].endswith("`AKIA<REDACTED>`"))
         self.assert_verifies(result)
 
     def test_backticks_and_spaces_in_paths_still_verify(self) -> None:
@@ -175,7 +178,7 @@ class SecurityCollectorTests(unittest.TestCase):
         self.write("scratch.ts", f"const token = '{GITHUB}';\n")
         result = self.collect()
         self.assertEqual(result["checks"][SECRETS]["status"], "present")
-        self.assertIn("in 1 tracked files", result["checks"][SECRETS]["evidence"][0])
+        self.assertIn("in 1 tracked text files", result["checks"][SECRETS]["evidence"][0])
 
     def test_binary_files_are_skipped(self) -> None:
         (self.root / "image.png").write_bytes(b"\x89PNG\0\0" + GITHUB.encode())
@@ -200,23 +203,23 @@ class SecurityCollectorTests(unittest.TestCase):
         secrets = result["checks"][SECRETS]
         self.assertEqual(secrets["status"], "violation")
         self.assertEqual(secrets["evidence"], [".env:2 — secret-named variable SESSION_SECRET: `SESSION_SECRET=<REDACTED>`"])
-        self.assertEqual(result["snapshot"]["environmentFiles"]["committedEnvironmentFiles"], [".env"])
+        self.assertEqual(result["snapshot"]["environmentFiles"]["committed"], [".env"])
         self.assert_verifies(result)
         self.assert_no_values(result, ENV_SECRET)
 
-    def test_committed_defaults_without_secrets_pass_but_local_files_are_noted(self) -> None:
+    def test_committed_defaults_without_secrets_pass_the_secret_check(self) -> None:
         self.write(".env", "NEXT_PUBLIC_APP_URL=https://example.org\nLOG_LEVEL=info\n")
         self.write(".env.local", "FEATURE_FLAG=on\n")
         self.commit()
         result = self.collect()
         self.assertEqual(result["checks"][SECRETS]["status"], "present")
-        self.assertEqual(result["snapshot"]["environmentFiles"]["committedLocalEnvironmentFiles"], [".env.local"])
+        self.assertEqual(result["snapshot"]["environmentFiles"]["committedLocal"], [".env.local"])
 
     def test_quoted_and_exported_environment_values_are_redacted(self) -> None:
         self.write("deploy/production.env", f'export DB_PASSWORD="{ENV_SECRET}"  \n')
         self.commit()
         result = self.collect()
-        self.assertEqual(result["checks"][SECRETS]["evidence"], ["deploy/production.env:1 — secret-named variable DB_PASSWORD: `export DB_PASSWORD=<REDACTED>`"])
+        self.assertEqual(result["checks"][SECRETS]["evidence"], ["deploy/production.env:1 — secret-named variable DB_PASSWORD: `DB_PASSWORD=<REDACTED>`"])
         self.assert_verifies(result)
         self.assert_no_values(result, ENV_SECRET)
 
@@ -259,8 +262,8 @@ class SecurityCollectorTests(unittest.TestCase):
         exclude.write_text(".env*\n", encoding="utf-8")
         result = self.collect()
         ignored = result["checks"][IGNORED]
-        self.assertEqual(ignored["status"], "partial")
-        self.assertIn("personal or global ignore file", ignored["gap"])
+        self.assertEqual(ignored["status"], "missing")
+        self.assertIn("personal, or global ignore file", ignored["gap"])
         self.assert_verifies(result)
 
     def test_a_tracked_env_file_is_not_required_to_be_ignored(self) -> None:
@@ -320,26 +323,31 @@ class SecurityCollectorTests(unittest.TestCase):
 
     # ----------------------------------------------------------------- large-language-model layer
 
-    def test_llm_checks_are_not_applicable_without_a_model_sdk(self) -> None:
+    def test_without_a_model_sdk_the_llm_checks_stay_for_the_model_to_confirm(self) -> None:
         self.write("package.json", '{"dependencies": {"next": "15.3.3", "react": "19.1.0"}}\n')
         self.commit()
-        checks = self.collect()["checks"]
-        for name in collector.LLM_CHECKS:
-            self.assertEqual(checks[CHECK + name]["applicability"], "not-applicable")
+        result = self.collect()
+        self.assertEqual(set(result["checks"]), {SECRETS, IGNORED, DYNAMIC})
+        self.assertIn("Confirm there is no model call", result["snapshot"]["aiDetection"])
 
-    def test_an_sdk_or_a_direct_api_call_makes_the_llm_checks_applicable(self) -> None:
+    def test_enterprise_and_compatible_model_routes_are_detected(self) -> None:
         cases = {
-            "sdk": ('{"dependencies": {"@ai-sdk/openai": "2.0.0"}}\n', "export const a = 1;\n"),
-            "direct call": ('{"dependencies": {}}\n', "export const ask = () => fetch('https://api.anthropic.com/v1/messages');\n"),
+            "ai sdk": ('{"dependencies": {"@ai-sdk/openai": "2.0.0"}}\n', "export const a = 1;\n"),
+            "bedrock": ('{"dependencies": {"@aws-sdk/client-bedrock-runtime": "3.700.0"}}\n', "export const a = 1;\n"),
+            "mastra": ('{"dependencies": {"@mastra/core": "0.10.0"}}\n', "export const a = 1;\n"),
+            "vertex": ('{"dependencies": {"@google-cloud/vertexai": "1.9.0"}}\n', "export const a = 1;\n"),
+            "anthropic host": ('{"dependencies": {}}\n', "export const ask = () => fetch('https://api.anthropic.com/v1/messages');\n"),
+            "azure host": ('{"dependencies": {}}\n', "export const ask = () => fetch('https://acme.openai.azure.com/openai/deployments/x');\n"),
+            "compatible endpoint": ('{"dependencies": {}}\n', "export const ask = () => fetch(`${base}/v1/chat/completions`);\n"),
         }
         for name, (manifest, source) in cases.items():
             with self.subTest(case=name):
                 self.write("package.json", manifest)
                 self.write("src/model.ts", source)
                 self.commit(name)
-                result = self.collect()
-                for check in collector.LLM_CHECKS:
-                    self.assertNotIn(CHECK + check, result["checks"])
+                snapshot = self.collect()["snapshot"]
+                self.assertTrue(snapshot["aiSdks"] or snapshot["modelApiReferences"]["count"], name)
+                self.assertNotIn("aiDetection", snapshot)
 
     # ----------------------------------------------------------------- snapshot
 
@@ -509,6 +517,204 @@ class SecurityCollectorTests(unittest.TestCase):
         self.assertEqual(result["checks"][IGNORED]["status"], "missing")
         self.assert_verifies(result)
 
+    # ----------------------------------------------------------------- review regressions
+
+    def assert_no_fragments(self, result: dict[str, Any], *values: str, size: int = 8) -> None:
+        """No run of `size` characters from any value appears anywhere in the output."""
+        text = json.dumps(result)
+        for value in values:
+            for start in range(len(value) - size + 1):
+                self.assertNotIn(value[start:start + size], text, f"fragment of a secret leaked: {value[start:start + size]!r}")
+
+    def test_an_adjacent_secret_on_a_compact_line_never_leaks(self) -> None:
+        self.write("src/min.js", f'c={{dbPass:"{GENERIC_PASSWORD}",gh:"{GITHUB}"}};x={{k:"{STRIPE}"}}\n')
+        self.write("config/app.json", f'{{"password":"{GENERIC_PASSWORD}","key":"{AWS}","next":"{GENERIC_PASSWORD}"}}\n')
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["checks"][SECRETS]["status"], "violation")
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, GENERIC_PASSWORD, GITHUB[4:], STRIPE[8:], AWS[4:])
+
+    def test_a_credential_in_a_file_name_is_withheld(self) -> None:
+        self.write(f"keys/{GITHUB}.txt", f"token={GITHUB}\n")
+        self.write(f"src/{AWS}.ts", "export const run = (code: string) => eval(code);\n")
+        self.commit()
+        result = self.collect()
+        secrets = result["checks"][SECRETS]
+        self.assertEqual(secrets["status"], "violation")
+        self.assertTrue(any("paths are withheld" in entry for entry in secrets["evidence"]))
+        self.assertTrue(any("withheld because they looked like credentials" in entry for entry in result["checks"][DYNAMIC]["evidence"]))
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, GITHUB[4:], AWS[4:])
+
+    def test_secrets_in_excluded_folders_and_large_files_are_found(self) -> None:
+        self.write("build/credentials.ts", f"export const key = '{STRIPE}';\n")
+        self.write("node_modules/vendored/config.js", f"module.exports = '{GITHUB}';\n")
+        self.write("data/huge.txt", "x" * (collector.MAX_FILE_BYTES + 10) + f"\nkey={AWS}\n")
+        self.commit()
+        result = self.collect()
+        evidence = " ".join(result["checks"][SECRETS]["evidence"])
+        for path in ("build/credentials.ts:1", "node_modules/vendored/config.js:1", "data/huge.txt:2"):
+            self.assertIn(path, evidence)
+        self.assert_verifies(result)
+
+    def test_placeholders_are_whole_values_not_substrings(self) -> None:
+        self.write(
+            ".env.production",
+            "DB_PASSWORD=CorrectHorseExample42!\n"
+            f"PUBLIC_SERVICE_ROLE_KEY={''.join(('Zr8wQe', '2Ty6Ui', '0Op4As'))}\n"
+            f"OPENAI_KEY={''.join(('Lk3Jh5', 'Gf7Ds9', 'Aq1Ws2', 'Ed'))}\n"
+            f"STRIPE_KEY={''.join(('Rf4Tg6', 'Yh8Uj0', 'Ik2Ol4', 'Pz'))}\n"
+            f"SESSION_KEY={''.join(('Mn5Bv7', 'Cx9Zl1', 'Kj3Hg5', 'Fd'))}\n"
+            f"GITHUB_PAT={''.join(('Qa2Ws4', 'Ed6Rf8', 'Tg0Yh2', 'Uj'))}\n"
+            "API_KEY=your-api-key-here\n"
+            "NEXT_PUBLIC_MAP_TOKEN=pk.public-map-token-1234\n"
+            "SIGNING_KEY=changeme\n",
+        )
+        self.commit()
+        result = self.collect()
+        flagged = [entry.split("variable ")[1].split(":")[0] for entry in result["checks"][SECRETS]["evidence"]]
+        self.assertEqual(flagged, ["DB_PASSWORD", "PUBLIC_SERVICE_ROLE_KEY", "OPENAI_KEY", "STRIPE_KEY", "SESSION_KEY", "GITHUB_PAT"])
+        self.assert_verifies(result)
+
+    def test_private_key_templates_are_not_keys_but_real_keys_are(self) -> None:
+        footer = "-----END RSA " + "PRIVATE KEY-----"
+        self.write("docs/keys.md", f"Paste your key:\n\n```\n{PRIVATE_KEY_HEADER}\n...\n{footer}\n```\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][SECRETS]["status"], "present")
+        self.write("certs/server.pem", f"{PRIVATE_KEY_HEADER}\n{PRIVATE_KEY_BODY}\n{footer}\n")
+        self.write("config/service.json", '{"private_key": "' + PRIVATE_KEY_HEADER + "\\n" + PRIVATE_KEY_BODY + '\\n"}\n')
+        self.commit("real keys")
+        result = self.collect()
+        evidence = result["checks"][SECRETS]["evidence"]
+        self.assertEqual([entry.split(" — ")[0] for entry in evidence], ["certs/server.pem:1", "config/service.json:1"])
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, PRIVATE_KEY_BODY)
+
+    def test_keystore_files_are_secrets_and_test_only_hits_are_considered(self) -> None:
+        (self.root / "android").mkdir()
+        (self.root / "android" / "release.jks").write_bytes(b"\xfe\xed\xfe\xed\0\0binary")
+        self.commit()
+        secrets = self.collect()["checks"][SECRETS]
+        self.assertEqual((secrets["status"], secrets["judgement"]), ("violation", "act-on"))
+        self.assertIn("android/release.jks — committed keystore or private key file", secrets["evidence"])
+        self.git("rm", "-q", "android/release.jks")
+        self.write("tests/fixtures/payments.ts", f"export const key = '{STRIPE}';\n")
+        self.commit("test fixture")
+        secrets = self.collect()["checks"][SECRETS]
+        self.assertEqual((secrets["status"], secrets["judgement"]), ("violation", "consider"))
+
+    def test_outside_git_the_secret_check_is_not_evaluated(self) -> None:
+        plain = Path(self.directory.name) / "plain"
+        plain.mkdir()
+        (plain / "a.ts").write_text(f"const k = '{STRIPE}';\n", encoding="utf-8")
+        result = collector.collect(plain, [])
+        self.assertEqual(result["checks"][SECRETS]["evaluationState"], "not-evaluated")
+        self.assert_no_fragments(result, STRIPE[8:])
+
+    def test_a_committed_local_environment_file_is_a_violation(self) -> None:
+        self.write(".gitignore", ".env*\n")
+        self.write("apps/web/next.config.js", "module.exports = {};\n")
+        self.write("apps/web/.env.local", "FEATURE_FLAG=on\n")
+        self.git("add", "-f", "apps/web/.env.local")
+        self.commit()
+        result = self.collect()
+        ignored = result["checks"][IGNORED]
+        self.assertEqual(ignored["status"], "violation")
+        self.assertEqual(ignored["evidence"], ["apps/web/.env.local — committed local environment file"])
+        self.assertIn("git rm --cached", ignored["remediation"])
+        self.assert_verifies(result)
+
+    def test_every_application_folder_and_local_variant_is_probed(self) -> None:
+        self.write(".gitignore", "/.env\n/.env.local\n/.env.development.local\n/.env.production.local\n/.env.staging.local\n")
+        self.write("apps/api/package.json", '{"name": "api", "dependencies": {"express": "5.1.0"}}\n')
+        self.commit()
+        evidence = self.collect()["checks"][IGNORED]["evidence"][0]
+        self.assertIn(".env.test.local", evidence)
+        self.assertIn("apps/api/.env.local", evidence)
+
+    def test_an_untracked_ignore_file_protects_no_one(self) -> None:
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.commit()
+        self.write(".gitignore", ".env*\n")
+        ignored = self.collect()["checks"][IGNORED]
+        self.assertEqual(ignored["status"], "missing")
+        self.assertIn("untracked", ignored["gap"])
+
+    def test_eval_in_strings_regexes_and_prose_is_not_code(self) -> None:
+        self.write(
+            "src/Help.tsx",
+            "const message = 'avoid new Function(x) and eval(y)';\n"
+            "const pattern = /eval\\(/g;\n"
+            "const template = `setTimeout('x') and eval(z)`;\n"
+            "export const Help = () => <p>Never call eval() on input</p>;\n"
+            "export const Warning = () => <p>\n  eval() is dangerous\n</p>;\n",
+        )
+        self.commit()
+        self.assertEqual(self.collect()["checks"][DYNAMIC]["status"], "present")
+
+    def test_a_call_followed_by_a_block_and_a_ternary_call_are_code(self) -> None:
+        self.write("src/run.ts", "export function run(code: string, ok: boolean) {\n  eval(code)\n  {\n    console.log(code);\n  }\n  return ok ? eval(code) : null;\n}\n")
+        self.commit()
+        dynamic = self.collect()["checks"][DYNAMIC]
+        self.assertEqual(dynamic["evidence"], ["src/run.ts:2 — `eval(`", "src/run.ts:6 — `eval(`"])
+
+    def test_pages_and_risky_patterns_are_inventoried(self) -> None:
+        self.write("app/invoices/[id]/page.tsx", "export default async function Page({ params }: { params: Promise<{ id: string }> }) { return null; }\n")
+        self.write("app/search/page.tsx", "export default async function Page({ searchParams }: { searchParams: Promise<{ q?: string }> }) { return null; }\n")
+        self.write("app/about/page.tsx", "export default function Page() { return null; }\n")
+        self.write("app/blog/layout.tsx", "export async function generateMetadata() { return {}; }\nexport default function Layout({ children }: { children: React.ReactNode }) { return children; }\n")
+        self.write("app/invoices/[id]/Delete.tsx", "'use client';\nexport const Delete = ({ id }: { id: string }) => <form action={remove.bind(null, id)} />;\n")
+        self.write("app/api/data/route.ts", "export async function GET() { return new Response('x', { headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' } }); }\n")
+        self.write("app/api/webhooks/stripe/route.ts", "export async function POST(request: Request) { stripe.webhooks.constructEvent(await request.text(), request.headers.get('stripe-signature')!, secret); }\n")
+        self.write("app/api/upload/route.ts", "export async function POST(request: Request) { const file = (await request.formData()).get('file'); if (file instanceof File) return null; }\n")
+        self.write("lib/data.ts", "export const load = unstable_cache(async () => 1, ['k']);\n")
+        self.commit()
+        snapshot = self.collect()["snapshot"]
+        self.assertEqual(
+            snapshot["pageEntryPoints"]["sites"],
+            ["app/blog/layout.tsx (generateMetadata)", "app/invoices/[id]/page.tsx (dynamic segment)", "app/search/page.tsx (searchParams)"],
+        )
+        self.assertEqual(snapshot["boundActionArguments"]["sites"], ["app/invoices/[id]/Delete.tsx:2"])
+        self.assertEqual(snapshot["corsSites"]["sites"], ["app/api/data/route.ts:1"])
+        self.assertEqual(snapshot["webhookSites"]["count"], 2)
+        self.assertEqual(snapshot["uploadSites"]["sites"], ["app/api/upload/route.ts:1"])
+        self.assertEqual(snapshot["cachingSites"]["sites"], ["app/api/data/route.ts:1", "lib/data.ts:1"])
+
+    def test_storage_keys_that_look_like_credentials_are_not_shown(self) -> None:
+        self.write("src/store.ts", f"localStorage.setItem('token_{GENERIC_PASSWORD}', 'x');\nlocalStorage.setItem('authToken', 'x');\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["snapshot"]["browserStorageAuthKeys"]["sites"], ["src/store.ts:1 (key not shown)", "src/store.ts:2 authToken"])
+        self.assert_no_fragments(result, GENERIC_PASSWORD)
+
+    def test_catalog_rates_controls_by_the_defect_they_prevent(self) -> None:
+        catalog = json.loads((ROOT / "security-audit" / "checks.json").read_text(encoding="utf-8"))
+        severities = {check["checkId"]: check["severity"] for check in catalog["checks"]}
+        self.assertEqual(severities[CHECK + "env-files-gitignored"], "critical")
+        self.assertEqual(severities[CHECK + "no-secrets-in-prompts"], "critical")
+        self.assertEqual(severities[CHECK + "no-secrets-in-source"], "critical")
+
+    def test_leak_graders_reject_every_fragment_of_the_fixture_key(self) -> None:
+        case = ROOT / "evals" / "security-audit" / "vulnerable-app"
+        assignment = next(line for line in (case / "fixture.sh").read_text(encoding="utf-8").splitlines() if line.startswith("stripe_key="))
+        key = "".join(re.findall(r'"([^"]*)"', assignment))
+        body = key[len("sk_live_"):]
+        graders = sorted((case / "graders").glob("key-not-in-*.md"))
+        targets = {re.search(r"path: (\S+) \}", grader.read_text(encoding="utf-8")).group(1) for grader in graders}
+        self.assertEqual(
+            targets,
+            {".architect-audits/security-audit/" + name for name in ("findings.md", "findings.json", "snapshot.md")},
+        )
+        clean = "## All checks\nnothing to see <REDACTED>\n"
+        for grader in graders:
+            text = grader.read_text(encoding="utf-8")
+            self.assertNotIn("---", text.split("---\n")[1].split("pattern:")[1])
+            pattern = json.loads(re.search(r'^pattern: (".*")$', text, re.M).group(1))
+            with self.subTest(grader=grader.name):
+                self.assertIsNotNone(re.search(pattern, clean))
+                for start in range(len(body) - 7):
+                    self.assertIsNone(re.search(pattern, clean + body[start:start + 8]), body[start:start + 8])
 
 if __name__ == "__main__":
     unittest.main()
