@@ -161,6 +161,38 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_skills(Path(tmp), findings)
             self.assertFalse(any("argument-hint" in finding.message for finding in findings))
 
+    def write_plugin_repository(self, root: Path, skills: list[str]) -> None:
+        for name in ("example-audit", "install-architect-playbook-globally"):
+            (root / name).mkdir()
+            (root / name / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
+        (root / ".claude-plugin").mkdir()
+        (root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "architect-playbook", "skills": skills}), encoding="utf-8"
+        )
+
+    def test_plugin_manifest_lists_every_skill_but_the_installers(self) -> None:
+        cases = {
+            "complete": (["./example-audit"], []),
+            "missing": ([], ["plugin manifest skills is missing ./example-audit"]),
+            "unknown": (["./example-audit", "./ghost"], ["plugin manifest skills lists ./ghost, which is not a playbook skill"]),
+        }
+        for name, (skills, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_plugin_repository(root, skills)
+                findings: list[Any] = []
+                validate_playbook.validate_plugin_manifest(root, findings)
+                self.assertEqual([finding.message for finding in findings], expected)
+
+    def test_plugin_root_must_not_start_servers_or_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_plugin_repository(root, ["./example-audit"])
+            (root / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            self.assertTrue(any("would run for every plugin user" in finding.message for finding in findings))
+
     def test_valid_minimal_skill_repository_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -980,6 +980,48 @@ def print_findings(root: Path, findings: list[Finding]) -> None:
     print(f"validation completed with {len(errors)} error(s), {len(warnings)} warning(s)")
 
 
+PLUGIN_MANIFEST = Path(".claude-plugin") / "plugin.json"
+INSTALLER_PREFIX = "install-architect-playbook-"
+
+
+def validate_plugin_manifest(root: Path, findings: list[Finding]) -> None:
+    """The plugin lists every playbook skill, and ships nothing that runs on load.
+
+    The installers are left out: a plugin install replaces them. A root
+    `.mcp.json` would start its servers for every user of the plugin.
+    """
+    manifest_path = root / PLUGIN_MANIFEST
+    if not manifest_path.is_file():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        findings.append(Finding("error", manifest_path, f"plugin manifest is not valid JSON: {error.msg}"))
+        return
+    listed = manifest.get("skills") if isinstance(manifest, dict) else None
+    if not isinstance(listed, list) or any(not isinstance(item, str) for item in listed):
+        findings.append(Finding("error", manifest_path, "plugin manifest skills must be a list of ./<skill-folder> paths"))
+        return
+    names = [item[2:].rstrip("/") if item.startswith("./") else item for item in listed]
+    expected = sorted(
+        directory.name for directory in skill_directories(root) if not directory.name.startswith(INSTALLER_PREFIX)
+    )
+    for name in sorted(set(expected) - set(names)):
+        findings.append(Finding("error", manifest_path, f"plugin manifest skills is missing ./{name}"))
+    for name in sorted(set(names) - set(expected)):
+        findings.append(Finding("error", manifest_path, f"plugin manifest skills lists ./{name}, which is not a playbook skill"))
+    if names != sorted(names):
+        findings.append(Finding("error", manifest_path, "plugin manifest skills must be in alphabetical order"))
+    for name in ("hooks", "mcpServers", "lspServers"):
+        if isinstance(manifest, dict) and name in manifest:
+            findings.append(Finding("error", manifest_path, f"plugin manifest must not declare {name}; the playbook runs nothing on load"))
+    for path in (root / ".mcp.json", root / "hooks" / "hooks.json", root / ".lsp.json"):
+        if path.exists():
+            findings.append(
+                Finding("error", path, "the repository root is the plugin root, so this file would run for every plugin user; configure it locally instead")
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Architect Playbook skills and repository contracts.")
     parser.add_argument("root", nargs="?", default=Path(__file__).resolve().parents[1], type=Path)
@@ -995,6 +1037,7 @@ def main() -> int:
     validate_no_standalone_worktree(root, findings)
     validate_readme_index(root, findings)
     validate_bootstrap_contract(root, findings)
+    validate_plugin_manifest(root, findings)
     validate_markdown_links(root, findings)
     validate_trailing_whitespace(root, findings)
     print_findings(root, findings)

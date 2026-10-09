@@ -33,8 +33,9 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
      link.
    - "Idempotency rules", "Failure modes and remediation", "What this skill explicitly does NOT do".
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
-4. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.
-5. **Commit with a Conventional Commits subject:**
+4. **Add the skill to `.claude-plugin/plugin.json`**, in the alphabetical `skills` list (installers excepted). The validator fails a skill folder the plugin does not list.
+5. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.
+6. **Commit with a Conventional Commits subject:**
    ```
    feat: implement <skill-name> skill
    ```
@@ -121,3 +122,11 @@ submit for inclusion in this project shall be licensed under the MIT
 License (see the LICENSE file), without any additional terms or
 conditions, and you confirm that you have the right to submit it under
 that license.
+
+## Maintainer tooling
+
+The repository root is also the plugin root, so anything at the root that Claude Code runs on load, such as `.mcp.json` or `hooks/hooks.json`, would run for every plugin user. The validator rejects those files. Configure developer tools in your own scope instead. For the GitNexus code-intelligence server this repository's agent instructions refer to, run once in your clone:
+
+```bash
+claude mcp add --scope local gitnexus -- npx -y gitnexus mcp
+```

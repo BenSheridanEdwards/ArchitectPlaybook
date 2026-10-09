@@ -1,0 +1,43 @@
+{
+  "name": "architect-playbook",
+  "displayName": "Architect Playbook",
+  "description": "Opinionated, evidence-verified audits of TypeScript and React codebases: architecture, testing, security, dependencies, quality gates, and more, with a Repository Quality Score.",
+  "author": {
+    "name": "Ben Sheridan-Edwards",
+    "url": "https://github.com/BenSheridanEdwards"
+  },
+  "homepage": "https://github.com/BenSheridanEdwards/ArchitectPlaybook",
+  "repository": "https://github.com/BenSheridanEdwards/ArchitectPlaybook",
+  "license": "MIT",
+  "keywords": [
+    "audit",
+    "architecture",
+    "typescript",
+    "react",
+    "code-quality",
+    "testing",
+    "security"
+  ],
+  "skills": [
+    "./accessibility-audit",
+    "./agentic-audit",
+    "./architecture-audit",
+    "./audit-protocol",
+    "./ben-architect-review",
+    "./bundle-build-audit",
+    "./dependency-audit",
+    "./documentation-audit",
+    "./error-handling-audit",
+    "./linting-audit",
+    "./performance-audit",
+    "./pre-audit-setup",
+    "./preflight",
+    "./quality-gates-audit",
+    "./react-audit",
+    "./repository-quality-score",
+    "./security-audit",
+    "./system-self-improve",
+    "./testing-audit",
+    "./typescript-audit"
+  ]
+}
