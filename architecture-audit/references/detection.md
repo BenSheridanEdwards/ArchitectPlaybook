@@ -34,11 +34,17 @@ locality or depth gained.
 
 ## Layer 1: dependency structure
 
-- **No import cycles (tool).** The collector resolves relative imports and
-  `tsconfig` path aliases, ignores type-only imports, and cites each edge. With
-  `--with-run`, confirm with `madge --circular` or `depcruise`. Unresolved
-  imports are counted in the snapshot. If there are many, say the result rests
-  on partial resolution, with `--degraded`.
+- **No import cycles (tool).** The collector resolves relative imports and the
+  path aliases of every `tsconfig*.json` and `jsconfig.json`, and cites each
+  edge. Only static imports count: type-only imports (including
+  `import { type X }`), dynamic `import()`, and commented-out imports cannot
+  form a load-time cycle. With `--with-run`, confirm with `madge --circular` or
+  `depcruise`.
+  - Unresolved relative and alias imports are counted in the snapshot. If there
+    are many, re-record the check with `--degraded` saying the result rests on
+    partial resolution.
+  - Files the collector could not read are listed under `skippedSourceFiles`,
+    and a clean result is then recorded as degraded.
 - **Boundaries enforced by tooling (tool).** "Present" needs a rule that runs.
   It is not enough that a package is installed. The strongest evidence is a
   failing run on a deliberate violation; note it in the remediation as the

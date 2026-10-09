@@ -48,6 +48,10 @@ The vocabulary comes from John Ousterhout's deep modules and from the red flags 
 | Lint rules that enforce boundaries, as configuration | `/linting-audit` |
 | Whether architecture documents and decision records exist and are current | `/documentation-audit` |
 
+`/architecture-audit` owns where server data loads and how global client state is held. The React and performance audits still carry overlapping checks (`react-audit.server-state-in-data-layer`, `react-audit.single-global-state-library`, and `performance-audit.single-data-fetching-strategy`). Under Architecture Decision Record 0004, each retires its copy or points it here with `relatedChecks` when its catalog moves to schema `1.2.0`.
+
+The three tool checks always cover the whole repository, also in a `--since` run, because a cycle or a boundary rule is a property of the whole graph.
+
 ## The baseline
 
 Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violation`. Checks that cannot apply are recorded as not applicable, and checks you could not evaluate as not evaluated. Severity follows Architecture Decision Record 0004. The method column says whether the collector decides the check (`tool`) or you do (`model`).
@@ -68,9 +72,9 @@ Add the framework, the architectural pattern you infer (with your reasoning), an
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| No import cycles | high | tool | Runtime imports form no cycles; type-only imports are excluded. | A cycle among runtime imports, cited by the importing lines that form it. |
+| No import cycles | medium | tool | Runtime imports form no cycles; type-only imports are excluded. | A cycle among runtime imports, cited by the importing lines that form it. |
 | Boundaries enforced by tooling | medium | tool | A boundary tool encodes the dependency rules and runs in a script or continuous integration. | No boundary tool, or one that nothing runs. |
-| Dependencies point the declared way | high | model | Domain and shared code do not import user-interface, framework, or infrastructure code; sibling features meet only at public entry points. | An import against the declared or inferred direction. |
+| Dependencies point the declared way | medium | model | Domain and shared code do not import user-interface, framework, or infrastructure code; sibling features meet only at public entry points. | An import against the declared or inferred direction. |
 | Module internals are unreachable | medium | model | Outside code imports only a module's public entry point, and something makes importing internals fail. | Imports reaching into another feature's or package's internal files. |
 | Workspaces import each other through entry points | medium | tool | Workspaces import each other by package name. Not applicable outside multi-package workspaces. | A relative import into another workspace's files; test-only cases are partial. |
 
@@ -78,19 +82,19 @@ Add the framework, the architectural pattern you infer (with your reasoning), an
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Modules are deep | high | model | Important modules hide substantial behaviour behind a small interface; deleting one would concentrate complexity. | An interface nearly as complex as its implementation, or callers coordinating several calls for one operation. |
+| Modules are deep | medium | model | Important modules hide substantial behaviour behind a small interface; deleting one would concentrate complexity. | An interface nearly as complex as its implementation, or callers coordinating several calls for one operation. |
 | No pass-through layers | medium | model | Every layer adds policy, adaptation, or a distinct abstraction. | A wrapper that forwards the same arguments to another with the same shape. |
 | Each piece of state has one owner | high | model | Each store, cache entry, table, or shared object has one writer. | More than one module writes the same state. |
 | One supported way to do each task | medium | model | Each recurring task has one supported mechanism. | Two mechanisms for the same task in active use. |
 | No hand-synced lists | medium | model | Each list of items has one source the others derive from, or a check that fails when they disagree. | The same items listed in several places with no derivation or check. |
-| Representations stay behind interfaces | high | model | External data is parsed into domain types at the boundary; wire, storage, and framework types stay inside their module. | Wire or storage types used deep inside other layers. |
+| Representations stay behind interfaces | medium | model | External data is parsed into domain types at the boundary; wire, storage, and framework types stay inside their module. | Wire or storage types used deep inside other layers. |
 | Code grouped by what it knows | low | model | Modules are organised around the knowledge they own, not execution order. | Stage-named modules that each re-implement one representation. |
 
 ### Layer 3 — Change risk
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Hotspots are cohesive and tested | high | model | The most frequently changed files are cohesive and tested at their interface. | A top hotspot that is large, mixes responsibilities, or is untested. |
+| Hotspots are cohesive and tested | medium | model | The most frequently changed files are cohesive and tested at their interface. | A top hotspot that is large, mixes responsibilities, or is untested. |
 | Files that change together live together | medium | model | Files that repeatedly change together share a module, or the coupling is explained. | Strong change coupling across features or packages with no structural reason. |
 | Hub modules are stable | medium | model | High fan-in modules import little and change rarely; re-exporting barrels are judged by what they expose. | High fan-in with high fan-out, or with frequent change. |
 | No orphaned modules | low | model | Every source module is reachable from an entry point, route, test, or configuration. | Modules nothing imports that are not entry points, verified before reporting. |
@@ -99,7 +103,7 @@ Add the framework, the architectural pattern you infer (with your reasoning), an
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Server state has one home | high | model | Server data loads in one designated place: a query layer, or the framework's server-side data primitives. | Client components fetching in effects, or several data-fetching strategies. |
+| Server state has one home | medium | model | Server data loads in one designated place: a query layer, or the framework's server-side data primitives. | Client components fetching in effects, or several data-fetching strategies. |
 | One client-state strategy | medium | model | Global client state uses one strategy; context is for dependency injection and stable values. | Two or more global state libraries with no stated migration. |
 | Side effects sit at the edges | medium | model | Components reach storage, cookies, and globals through a hook or service. | Direct storage, cookie, or window access in components. |
 | Decisions are recorded and still hold | medium | model | Hard-to-reverse decisions are recorded, and the code still follows them. | No record of major decisions, or code that contradicts one. |
