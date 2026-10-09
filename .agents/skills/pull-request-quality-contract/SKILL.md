@@ -1,7 +1,6 @@
 ---
 name: pull-request-quality-contract
 description: Use before completing work or opening a pull request in this repository.
-trigger: /pull-request-quality-contract
 ---
 
 # /pull-request-quality-contract

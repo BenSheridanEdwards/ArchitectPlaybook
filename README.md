@@ -213,7 +213,7 @@ For a non-technical explanation with formulas and a worked example, read
 
 ### Setup utilities
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
@@ -277,28 +277,28 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 
 ### Scoring
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/repository-quality-score`](repository-quality-score/SKILL.md) | Aggregate completed audit findings into deterministic per-audit scores, one overall score, coverage, deductions, and an official, provisional, or unavailable status. Optional: `--current-worktree-only`. |
 
 ### Review
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/ben-architect-review`](ben-architect-review/SKILL.md) | Perform a principles-based architectural pull request review using Ben's judgement, then ask whether to post it as pending or submit it on GitHub. |
 
 ### Meta
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/system-self-improve`](system-self-improve/SKILL.md) | Read gap reports and evolve the playbook itself. |
 
 ## Conventions
 
 - **Conventional Commits** for every commit.
-- **No abbreviations** in skill names, triggers, descriptions, headings, identifiers, or prose.
+- **No abbreviations** in skill names, commands, descriptions, headings, identifiers, or prose.
 - **Read-only by default.** Mutating runs require an explicit `--apply` flag and print a dry-run summary first.
-- **Frontmatter shape** is fixed: `name`, `description`, `trigger`. The `trigger` value equals `/<folder-name>`.
+- **Frontmatter shape** is fixed: `name` (the folder name, which is also the slash command), `description`, `disable-model-invocation: true`, and an `argument-hint`.
 - **No hard-coded absolute paths** in skill bodies. Derive from the current working directory or `$HOME`.
 
 The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md).

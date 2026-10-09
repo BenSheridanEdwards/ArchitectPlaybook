@@ -1,7 +1,8 @@
 ---
 name: architecture-audit
 description: Audit a TypeScript codebase's structure — import cycles and boundaries, module depth, change hotspots, and data-flow ownership — with verified evidence, then run a design session on the candidate you choose.
-trigger: /architecture-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-run] [--pattern=<name>] [--learn|--teach]"
 ---
 
 # /architecture-audit

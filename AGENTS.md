@@ -22,7 +22,8 @@ python3 scripts/install-git-hooks.py              # once per clone, and with --f
 ```
 
 The validator enforces the contracts that must hold at every commit: frontmatter
-shape and key order, `trigger` equal to `/<folder-name>`, the required audit
+shape and key order (`name` equal to the folder, `disable-model-invocation: true`,
+an `argument-hint`, no `trigger`), the required audit
 sections, `checks.json` schema and layer alignment, Markdown link integrity, and
 README skill-index sync. Run it constantly — it is the fastest signal that a
 change is sound. The unit tests cover the validator itself; keep them green.

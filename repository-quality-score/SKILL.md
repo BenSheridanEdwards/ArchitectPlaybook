@@ -1,7 +1,8 @@
 ---
 name: repository-quality-score
 description: Calculate an explainable Repository Quality Score from Architect Playbook audit outputs. Use after audits finish, whenever a user asks for a repository score, audit roll-up, quality summary, category comparison, or assessment coverage.
-trigger: /repository-quality-score
+disable-model-invocation: true
+argument-hint: "[--current-worktree-only]"
 ---
 
 # /repository-quality-score

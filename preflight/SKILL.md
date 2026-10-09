@@ -1,7 +1,8 @@
 ---
 name: preflight
 description: Detect optional enrichment tooling for architect-playbook audits and optionally install missing development dependencies and scaffold project configuration. Read-only by default; mutation is gated behind --install and --scaffold-configs and prompts before every change.
-trigger: /preflight
+disable-model-invocation: true
+argument-hint: "[--audit=<name>] [--install] [--scaffold-configs]"
 ---
 
 # /preflight

@@ -1,7 +1,8 @@
 ---
 name: install-architect-playbook-locally
 description: Copy every architect-playbook skill into the current project's .claude/skills/ directory so the slash commands are available inside this project only.
-trigger: /install-architect-playbook-locally
+disable-model-invocation: true
+argument-hint: "[--dry-run] [--force] [--include=<skill>] [--exclude=<skill>]"
 ---
 
 # /install-architect-playbook-locally

@@ -6,13 +6,14 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
 
 ## Adding a new skill
 
-1. **Pick a folder name in full words.** Skill folder names match their slash-command trigger. No abbreviations, anywhere — see CLAUDE.md.
+1. **Pick a folder name in full words.** A skill folder name is its slash command. No abbreviations, anywhere — see CLAUDE.md.
 2. **Create the SKILL.md with the standard frontmatter:**
    ```yaml
    ---
    name: <folder-name>
-   description: <one-line description used by the Claude Code skill matcher>
-   trigger: /<folder-name>
+   description: <one-line description shown in the slash-command menu>
+   disable-model-invocation: true
+   argument-hint: "[--worktree] [--learn]"
    ---
    ```
 3. **Follow the body structure** that every implemented skill uses. The canonical sections are:
@@ -33,8 +34,7 @@ The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md) — read it f
    - "Idempotency rules", "Failure modes and remediation", "What this skill explicitly does NOT do".
    - The two-phase flow (report → ask → optional plan) is non-negotiable. Mutating audits are not part of the playbook.
 4. **Add a row to the appropriate sub-table in the README skill list** (Setup utilities, Audits, or Meta) — same commit as the SKILL.md, not a separate one.
-5. **Add a 2–3 sentence entry to the README "Why each skill exists" section** — same commit. The entry explains *why* the skill is a separate concern, not what it does.
-6. **Commit with a Conventional Commits subject:**
+5. **Commit with a Conventional Commits subject:**
    ```
    feat: implement <skill-name> skill
    ```
@@ -92,7 +92,7 @@ policy merely to make a repository's score improve.
 
 - [ ] SKILL.md follows the canonical body structure.
 - [ ] README skill index has a row for the skill in the right sub-table.
-- [ ] README "Why each skill exists" has a 2–3 sentence entry.
+- [ ] Frontmatter has `disable-model-invocation: true` and an `argument-hint`, and no `trigger`.
 - [ ] `--worktree` is documented as the user-facing worktree control; `--target=<path>` remains internal-only and undocumented in the Usage table.
 - [ ] No abbreviations introduced anywhere.
 - [ ] Conventional Commits subject on every commit in the branch.

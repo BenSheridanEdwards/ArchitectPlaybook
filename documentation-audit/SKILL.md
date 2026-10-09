@@ -1,7 +1,8 @@
 ---
 name: documentation-audit
 description: Audit project documentation against an opinionated baseline spanning onboarding, architectural/decision docs, code-level docs, and operational documentation with drift detection. Static-first with optional --with-link-check. Optionally generates an implementation plan for the gaps.
-trigger: /documentation-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--with-link-check] [--threshold-<name>=<value>] [--learn|--teach]"
 ---
 
 # /documentation-audit

@@ -1,7 +1,8 @@
 ---
 name: security-audit
 description: Audit a TypeScript and React frontend against an opinionated security baseline spanning authentication/sessions, input handling and XSS prevention, transport/headers/cookies, and secrets/data protection/third-party integrations. Frontend-only. Static-first with optional --with-scan enrichment. Optionally generates an implementation plan for the gaps.
-trigger: /security-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--with-scan] [--learn|--teach]"
 ---
 
 # /security-audit

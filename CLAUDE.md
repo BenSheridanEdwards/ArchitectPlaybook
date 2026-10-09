@@ -19,10 +19,24 @@ Every `SKILL.md` in this repository starts with this YAML frontmatter:
 ```yaml
 ---
 name: <folder-name>
-description: <one-line description used by the Claude Code skill matcher>
-trigger: /<folder-name>
+description: <one-line description shown in the slash-command menu>
+disable-model-invocation: true
+argument-hint: "[--worktree] [--learn]"
 ---
 ```
+
+The slash command is the skill name, so there is no `trigger` key; Claude Code
+ignores keys it does not know. `disable-model-invocation: true` keeps every
+playbook skill out of automatic invocation, so an audit runs only when a user
+types its command. `argument-hint` lists the command's flags in the slash menu.
+A skill that users never invoke, such as `audit-protocol`, sets
+`user-invocable: false` and needs no `argument-hint`.
+
+`disable-model-invocation: true` has two further effects. Claude cannot load
+the skill on its own, including by preloading it into a subagent. And a
+scheduled task whose prompt is the skill's slash command does not run it. A
+scheduled audit must instead ask Claude to read and follow that audit's
+`SKILL.md` file.
 
 After the frontmatter, the body must include at minimum:
 

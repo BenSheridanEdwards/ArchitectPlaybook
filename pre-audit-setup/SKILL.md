@@ -1,7 +1,8 @@
 ---
 name: pre-audit-setup
 description: One-time, idempotent preparation that every architect-playbook audit depends on. Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into the project's .claude/settings.json.
-trigger: /pre-audit-setup
+disable-model-invocation: true
+argument-hint: "[--force] [--dry-run]"
 ---
 
 # /pre-audit-setup

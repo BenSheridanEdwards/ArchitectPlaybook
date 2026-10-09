@@ -48,7 +48,8 @@ Follow [the run protocol](../audit-protocol/references/run-protocol.md).
 VALID_SKILL = """---
 name: example-audit
 description: Example audit skill.
-trigger: /example-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--learn]"
 ---
 
 ## Usage
@@ -109,9 +110,56 @@ VALID_CHECKS_JSON = """{
 class ValidatePlaybookTests(unittest.TestCase):
     def test_parse_frontmatter_reads_expected_keys_and_body(self) -> None:
         frontmatter, keys, body = validate_playbook.parse_frontmatter(VALID_SKILL)
-        self.assertEqual(keys[:3], ["name", "description", "trigger"])
+        self.assertEqual(keys[:2], ["name", "description"])
+        self.assertEqual(frontmatter["argument-hint"], "[--worktree] [--learn]")
         self.assertEqual(frontmatter["name"], "example-audit")
         self.assertIn("## Usage", body)
+
+    def test_frontmatter_rejects_trigger_and_model_invocation(self) -> None:
+        cases = {
+            "trigger": (
+                VALID_SKILL.replace("disable-model-invocation: true\n", "disable-model-invocation: true\ntrigger: /example-audit\n"),
+                "must not use trigger",
+            ),
+            "model invocation": (
+                VALID_SKILL.replace("disable-model-invocation: true\n", ""),
+                "must set disable-model-invocation: true",
+            ),
+            "invalid boolean": (
+                VALID_SKILL.replace("disable-model-invocation: true", "disable-model-invocation: yes"),
+                "disable-model-invocation must be true or false",
+            ),
+            "unquoted argument hint": (
+                VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"', "argument-hint: [--worktree] [--learn]"),
+                "argument-hint must be quoted",
+            ),
+            "quoted boolean": (
+                VALID_SKILL.replace("disable-model-invocation: true", 'disable-model-invocation: "true"'),
+                "must be unquoted true or false",
+            ),
+            "argument hint": (
+                VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"\n', ""),
+                "must give an argument-hint",
+            ),
+        }
+        for name, (text, message) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                skill_dir = Path(tmp) / "example-audit"
+                skill_dir.mkdir()
+                (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+                findings: list[Any] = []
+                validate_playbook.validate_skills(Path(tmp), findings)
+                self.assertTrue(any(message in finding.message for finding in findings), [f.message for f in findings])
+
+    def test_skills_that_users_cannot_invoke_need_no_argument_hint(self) -> None:
+        text = VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"\n', "user-invocable: false\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_skills(Path(tmp), findings)
+            self.assertFalse(any("argument-hint" in finding.message for finding in findings))
 
     def test_valid_minimal_skill_repository_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +192,7 @@ class ValidatePlaybookTests(unittest.TestCase):
             root = Path(tmp)
             worktree = root / "worktree"
             worktree.mkdir()
-            (worktree / "SKILL.md").write_text("---\nname: worktree\ndescription: Bad.\ntrigger: /worktree\n---\n", encoding="utf-8")
+            (worktree / "SKILL.md").write_text("---\nname: worktree\ndescription: Bad.\ndisable-model-invocation: true\nargument-hint: \"[--learn]\"\n---\n", encoding="utf-8")
             findings: list[Any] = []
             validate_playbook.validate_no_standalone_worktree(root, findings)
             self.assertTrue(any("not a standalone slash command" in finding.message for finding in findings))
@@ -685,7 +733,7 @@ class ValidatePlaybookTests(unittest.TestCase):
             skill_dir = root / "planned-audit"
             skill_dir.mkdir()
             (skill_dir / "SKILL.md").write_text(
-                "---\nname: planned-audit\ndescription: Planned.\ntrigger: /planned-audit\n---\n\n# /planned-audit\n\n**Status:** stub\n",
+                "---\nname: planned-audit\ndescription: Planned.\ndisable-model-invocation: true\nargument-hint: \"[--worktree]\"\n---\n\n# /planned-audit\n\n**Status:** stub\n",
                 encoding="utf-8",
             )
             findings: list[Any] = []
@@ -881,7 +929,7 @@ class ValidatePlaybookTests(unittest.TestCase):
                 "---\n"
                 "name: install-architect-playbook-globally\n"
                 "description: Installer.\n"
-                "trigger: /install-architect-playbook-globally\n"
+                "disable-model-invocation: true\n"
                 "---\n",
                 encoding="utf-8",
             )
@@ -911,7 +959,7 @@ class ValidatePlaybookTests(unittest.TestCase):
                 "---\n"
                 "name: install-architect-playbook-globally\n"
                 "description: Installer.\n"
-                "trigger: /install-architect-playbook-globally\n"
+                "disable-model-invocation: true\n"
                 "---\n"
             )
             (installer / "SKILL.md").write_text(source_text, encoding="utf-8")
