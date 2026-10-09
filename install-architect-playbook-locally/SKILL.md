@@ -34,79 +34,52 @@ The plugin is the recommended install (`/plugin install architect-playbook@archi
 
 ### Step 1 — Resolve the playbook root
 
-`${CLAUDE_SKILL_DIR}` is this skill's folder. In a clone it is `<playbook-root>/install-architect-playbook-locally`:
-
 ```bash
-PLAYBOOK_ROOT="${FROM:-$(cd "${CLAUDE_SKILL_DIR}/.." && pwd)}"
-if [ ! -f "$PLAYBOOK_ROOT/audit-protocol/SKILL.md" ] || [ ! -d "$PLAYBOOK_ROOT/.git" ]; then
-  echo "Not a playbook clone: $PLAYBOOK_ROOT. Re-run with --from=<path to your architect-playbook clone>."
-  exit 1
+if [ -n "${FROM:-}" ]; then
+  set -- "$FROM"                          # an explicit --from must be valid; never fall back
+else
+  set -- "${CLAUDE_SKILL_DIR:-.}/.." "${CLAUDE_SKILL_DIR:-.}/../../.."
 fi
-```
-
-`FROM` is the value of `--from`. If the skill runs from an installed copy rather than a clone, ask the user for the clone's path.
-
-### Step 2 — Resolve destination
-
-```bash
-DEST="$(pwd)/.claude/skills"
-mkdir -p "$DEST"
-```
-
-### Step 3 — Enumerate skills to install
-
-For each direct sub-folder of `$PLAYBOOK_ROOT` that contains a `SKILL.md`, build a list. Exclude:
-
-- `install-architect-playbook-locally`
-- `install-architect-playbook-globally`
-- Any folder whose name begins with `.`
-
-Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure:
-
-- When any `*-audit` folder is selected, add `audit-protocol`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates each run with the score calculator. Also copy that one file, `repository-quality-score/scripts/calculate_repository_quality_score.py`. When `repository-quality-score` itself is not selected, copy only that file, without the scorer's `SKILL.md`, so the scorer is not offered with missing catalogs. Selecting an audit never adds other audits.
-- When `repository-quality-score` is selected, read `repository-quality-score/score-policy.json` and add every folder named in `audits[].name`.
-
-Show these additions in `--dry-run` output. If `--exclude` names `audit-protocol` while an audit is selected, or names a policy audit while `repository-quality-score` is selected, fail before copying and explain the conflict. Excluding `repository-quality-score` is allowed: audits still get the calculator file. Never install an audit without its protocol and calculator file, or a scorer whose catalogs are missing.
-
-### Step 4 — Plan and confirm
-
-For each selected skill, compare the source folder with the destination folder by content:
-
-```bash
-hash() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
-digest() {
-  (cd "$1" && find . -type f ! -name '.DS_Store' ! -path '*/__pycache__/*' -print0 | sort -z |
-    while IFS= read -r -d '' file; do printf '%s ' "$file"; hash < "$file"; done) | hash
-}
-```
-
-- No destination folder: `installed`.
-- Same digest: `unchanged`; nothing is written.
-- Different digest: `updated`; the folder is replaced as a whole.
-
-Print the plan. With `--dry-run`, stop here. If any folder would be `updated`, list them and ask before continuing, unless `--force` was passed, because a replaced folder loses any local edits.
-
-### Step 5 — Copy
-
-```bash
-for skill in "${CHANGED[@]}"; do
-  rm -rf "$DEST/$skill"
-  cp -R "$PLAYBOOK_ROOT/$skill" "$DEST/$skill"
+PLAYBOOK_ROOT=""
+for candidate in "$@"; do
+  if [ -f "$candidate/scripts/install_playbook.py" ] && git -C "$candidate" rev-parse --show-toplevel >/dev/null 2>&1; then
+    PLAYBOOK_ROOT="$(cd "$candidate" && pwd)"; break
+  fi
 done
+[ -n "$PLAYBOOK_ROOT" ] || { echo "Not a playbook clone: ${FROM:-the folder this skill runs from}. Re-run with --from=<path to your clone>."; exit 1; }
 ```
 
-Copy the calculator file for audits without the scorer, as Step 3 describes. Never remove a destination folder whose name is not a playbook skill.
+`FROM` is the value of `--from`. A Git worktree of the playbook counts as a clone. The script re-checks that the root is a Git checkout of the playbook.
 
-### Step 6 — Print the summary
+If the skill runs from an installed copy rather than a clone, ask the user for the clone's path.
 
+### Step 2 — Plan
+
+```bash
+python3 "$PLAYBOOK_ROOT/scripts/install_playbook.py" --destination "$(pwd)/.claude/skills" [--include <skill>]... [--exclude <skill>]...
 ```
-installed:  architecture-audit
-updated:    audit-protocol
-unchanged:  repository-quality-score
 
-3 skills checked; 2 written into ./.claude/skills/
-Open a new Claude Code chat in this directory to pick up the new slash commands.
+The script selects the skills, closes the selection over dependencies (Step 3 explains the rules), compares each skill with the destination by a digest of file names, contents, and symbolic links, and prints one line per skill: `installed`, `updated`, or `unchanged`. It writes nothing. It fails with a clear message on a dependency conflict or an invalid destination.
+
+### Step 3 — Dependency rules the script applies
+
+- Any audit adds `audit-protocol` and the calculator file `repository-quality-score/scripts/calculate_repository_quality_score.py`. When `repository-quality-score` itself is not selected, only that file is copied, without the scorer's `SKILL.md`, so the scorer is not offered with missing catalogs. Selecting an audit never adds other audits.
+- `repository-quality-score` adds every audit its `score-policy.json` lists.
+- Excluding `audit-protocol` while an audit is selected, or a policy audit while the scorer is selected, is a conflict. Excluding `repository-quality-score` is allowed.
+
+### Step 4 — Confirm and apply
+
+With `--dry-run`, show the plan and stop. Otherwise, if any skill is `updated`, list those skills and ask before continuing, unless `--force` was passed, because a replaced folder loses any local edits. Then apply:
+
+```bash
+python3 "$PLAYBOOK_ROOT/scripts/install_playbook.py" --destination "$(pwd)/.claude/skills" [same filters] --apply
 ```
+
+Each changed skill folder is replaced as a whole, so files renamed or deleted in the playbook do not linger. Folders that are not playbook skills are never touched, and skills the playbook stopped shipping are not removed.
+
+### Step 5 — Report
+
+Show the script's summary, then: "Open a new Claude Code chat in this directory to pick up the new slash commands."
 
 ## Idempotency rules
 
