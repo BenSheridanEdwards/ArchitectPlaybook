@@ -73,6 +73,11 @@ comments do not create edges; calls inside template or JSX expressions still
 do. It resolves literal import specifiers, not computed paths. Regular-expression
 recognition and JSX recognition use lexical context, so unusual or ambiguous
 syntax still needs confirmation with an installed boundary tool or source review.
+JSX is recognized in JavaScript files as well as `.jsx` and `.tsx`, including
+balanced component type arguments. If a literal or markup context remains
+unclosed, or markup depth becomes invalid, the file falls back to comment-only
+import matching. That preserves import recall but can include literal examples
+as candidates again; confirm findings from malformed or ambiguous source.
 
 Add the framework, the architectural pattern you infer (with your reasoning), and whether the repository is a multi-package workspace.
 

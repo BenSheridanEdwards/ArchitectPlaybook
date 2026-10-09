@@ -146,6 +146,73 @@ def source_files(root: Path) -> tuple[list[Path], list[Path]]:
     return files, sorted(skipped)
 
 
+def mask_comments_only(text: str) -> str:
+    """Blank comments with the original filter, without suppressing import matches."""
+    output = list(text)
+    index = 0
+    quote = ""
+    while index < len(text):
+        character = text[index]
+        if quote:
+            if character == "\\":
+                index += 2
+                continue
+            if character == quote or (character == "\n" and quote != "`"):
+                quote = ""
+            index += 1
+            continue
+        if character in "'\"`":
+            quote = character
+            index += 1
+            continue
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            end = len(text) if end == -1 else end
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = len(text) if end == -1 else end + 2
+        else:
+            index += 1
+            continue
+        for position in range(index, end):
+            if output[position] != "\n":
+                output[position] = " "
+        index = end
+    return "".join(output)
+
+
+def type_arguments_end(text: str, index: int) -> int | None:
+    """Skip balanced JSX component type arguments, including nested types."""
+    depth = 0
+    quote = ""
+    while index < len(text):
+        character = text[index]
+        if quote:
+            if character == "\\":
+                index += 2
+                continue
+            if character == quote:
+                quote = ""
+        elif character in "'\"`":
+            quote = character
+        elif text.startswith("//", index):
+            newline = text.find("\n", index)
+            index = len(text) if newline == -1 else newline
+            continue
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end == -1 else end + 2
+            continue
+        elif character == "<":
+            depth += 1
+        elif character == ">" and text[index - 1] != "=":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return None
+
+
 def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray]:
     """Blank comments and mark code positions without changing source offsets.
 
@@ -156,11 +223,14 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
     output = list(text)
     code_positions = bytearray(len(text))
     index = 0
+    invalid_context = False
     contexts: list[dict[str, Any]] = [{"kind": "code", "depth": 0, "operand": True, "token": "", "brackets": [], "statement": True}]
     expression_keywords = {"return", "throw", "case", "await", "yield", "delete", "void", "typeof", "new", "in", "instanceof"}
     control_keywords = {"if", "while", "for", "with", "switch", "catch"}
     markup_start = re.compile(r"<(?:[A-Za-z]|>)")
-    generic_parameters = re.compile(r"<[A-Za-z_$][\w$]*\s*(?:[,=]|\bextends\b)")
+    tag_name = re.compile(r"[A-Za-z_$][\w$-]*(?:[.:][A-Za-z_$][\w$-]*)*")
+    closing_tag = re.compile(r"</(?:[A-Za-z_$][\w$.:-]*\s*)?>")
+    generic_parameters = re.compile(r"<(?:const\s+)?[A-Za-z_$][\w$]*\s*(?:[,=]|\bextends\b)")
     while index < len(text):
         character = text[index]
         frame = contexts[-1]
@@ -193,7 +263,7 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
         if context == "markup":
             if character == "<":
                 closing = text.startswith("</", index)
-                contexts.append({"kind": "tag", "depth": -1 if closing else 1})
+                contexts.append({"kind": "tag", "depth": -1 if closing else 1, "name": True})
                 index += 2 if closing else 1
             elif character == "{":
                 contexts.append({"kind": "expression", "depth": 1, "operand": True, "token": "", "brackets": [], "statement": False})
@@ -202,6 +272,22 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
                 index += 1
             continue
         if context == "tag":
+            if frame["name"]:
+                name = tag_name.match(text, index)
+                frame.update(name=False, type_allowed=depth == 1)
+                if name:
+                    index = name.end()
+                    continue
+            if character == "<" and frame.get("type_allowed"):
+                end = type_arguments_end(text, index)
+                if end is None:
+                    invalid_context = True
+                    break
+                index = end
+                frame["type_allowed"] = False
+                continue
+            if not character.isspace():
+                frame["type_allowed"] = False
             if character in "'\"":
                 contexts.append({"kind": character})
             elif character == "{":
@@ -210,6 +296,9 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
                 contexts.pop()
                 if depth == -1 or text[index - 1] != "/":
                     contexts[-1]["depth"] += depth
+                if contexts[-1]["depth"] < 0:
+                    invalid_context = True
+                    break
                 if contexts[-1]["depth"] == 0:
                     contexts.pop()
                     contexts[-1].update(operand=False, token="markup", statement=False)
@@ -222,13 +311,16 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
             end = text.find("*/", index + 2)
             end = len(text) if end == -1 else end + 2
         else:
+            if allow_markup and closing_tag.match(text, index):
+                invalid_context = True
+                break
             if character in "'\"":
                 contexts.append({"kind": character})
             elif character == "`":
                 contexts.append({"kind": "template"})
             elif allow_markup and character == "<" and frame["operand"] and markup_start.match(text, index) and not generic_parameters.match(text, index):
                 contexts.append({"kind": "markup", "depth": 0})
-                contexts.append({"kind": "tag", "depth": 1})
+                contexts.append({"kind": "tag", "depth": 1, "name": True})
             elif character == "/" and frame["operand"]:
                 # Regex braces and quotes do not alter enclosing expressions.
                 index += 1
@@ -259,25 +351,31 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
                     token = text[index:end]
                     if token == "function" and frame["token"] != ".":
                         frame["function_declaration"] = frame["statement"]
-                    frame["control"] = token in control_keywords and frame["token"] != "."
+                    if token == "class" and frame["token"] != ".":
+                        frame["class_declaration"] = frame["statement"]
+                    for_separator = token == "of" and frame["token"] not in {"const", "let", "var"} and not frame["operand"] and frame["brackets"] and frame["brackets"][-1] == "for-control"
+                    statement_keyword = token in {"else", "do", "try", "finally"} and frame["token"] != "."
+                    frame["control"] = token if token in control_keywords and frame["token"] != "." else ""
                     declaration_prefix = frame["statement"] and token in {"export", "default", "async", "declare"}
-                    frame.update(operand=token in expression_keywords and frame["token"] != ".", token=token, statement=declaration_prefix or token in {"else", "do", "try", "finally"})
+                    frame.update(operand=(token in expression_keywords or statement_keyword or for_separator) and frame["token"] != ".", token=token, statement=declaration_prefix or statement_keyword)
                     index = end
                     continue
                 if character == "(":
                     if "function_declaration" in frame:
                         frame["brackets"].append(("function", frame.pop("function_declaration")))
                     else:
-                        frame["brackets"].append("control" if frame.get("control") else "parentheses")
+                        frame["brackets"].append("for-control" if frame.get("control") == "for" else "control" if frame.get("control") else "parentheses")
                     frame.update(operand=True, statement=False)
                 elif character == ")":
                     bracket = frame["brackets"].pop() if frame["brackets"] else None
                     if isinstance(bracket, tuple):
                         frame["body_declaration"] = bracket[1]
-                    control = bracket == "control"
+                    control = bracket in ("control", "for-control")
                     frame.update(operand=control, statement=control)
                 elif character == "{":
-                    if "body_declaration" in frame:
+                    if "class_declaration" in frame:
+                        frame["brackets"].append("declaration" if frame.pop("class_declaration") else "class-expression")
+                    elif "body_declaration" in frame:
                         frame["brackets"].append("declaration" if frame.pop("body_declaration") else "function-expression")
                     else:
                         frame["brackets"].append("block" if frame["statement"] or frame["token"] == "=>" else "object")
@@ -309,6 +407,10 @@ def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray
             if output[position] != "\n":
                 output[position] = " "
         index = end
+    if invalid_context or len(contexts) != 1:
+        # An uncertain context must not hide all subsequent live imports.
+        # Restore the original comment-only filter for this file.
+        return mask_comments_only(text), bytearray(b"\x01" * len(text))
     return "".join(output), code_positions
 
 
@@ -473,7 +575,7 @@ def build_graph(
     rank = {"static": 2, "lazy": 1, "type": 0}
     for file in files:
         importer = file.resolve()
-        text, code_positions = mask_comments(read_text(file), allow_markup=file.suffix in (".tsx", ".jsx"))
+        text, code_positions = mask_comments(read_text(file), allow_markup=file.suffix not in (".ts", ".mts", ".cts"))
         for match in IMPORT_PATTERN.finditer(text):
             keyword = match.start()
             while text[keyword].isspace():
@@ -631,16 +733,96 @@ TOOL_RUNNERS = {
 }
 
 
-def tooling_runs(root: Path, directories: list[Path], configured: set[str]) -> bool:
-    """Whether a package script or workflow runs one of the configured boundary tools."""
+def runner_text(root: Path, directories: list[Path]) -> str:
+    """Every package script and workflow, where a boundary tool would be run."""
     scripts = " ".join(
         str(value)
         for directory in directories
         for value in (load_jsonc(directory / "package.json").get("scripts") or {}).values()
     )
     workflows = " ".join(read_text(path) for path in sorted((root / ".github" / "workflows").glob("*.y*ml")))
-    combined = scripts + " " + workflows
+    return scripts + " " + workflows
+
+
+def tooling_runs(root: Path, directories: list[Path], configured: set[str]) -> bool:
+    """Whether a package script or workflow runs one of the configured boundary tools."""
+    combined = runner_text(root, directories)
     return any(runner in combined for tool in configured for runner in TOOL_RUNNERS[tool])
+
+
+def cruiser_resolves_aliases(config: Path, seen: frozenset[Path]) -> bool:
+    """Whether a dependency-cruiser configuration, or one it extends, sets an active tsConfig option."""
+    text = mask_comments_only(read_text(config))
+    if re.search(r"""\btsConfig\b["']?\s*:""", text):
+        return True
+    extended = re.search(r"""\bextends\b["']?\s*:\s*["'](\.[^"']+)["']""", text)
+    if extended:
+        base = (config.parent / extended.group(1)).resolve()
+        for candidate in (base, Path(str(base) + ".js"), Path(str(base) + ".cjs"), Path(str(base) + ".json")):
+            if candidate.is_file() and candidate not in seen:
+                return cruiser_resolves_aliases(candidate, seen | {candidate})
+    return False
+
+
+def folder_uses_aliases(directory: Path, root: Path) -> bool:
+    """Whether a tsconfig in this folder or a parent up to the root has path aliases, including inherited ones."""
+    resolver = Resolver(root, [], [])
+    for folder in [directory, *directory.parents]:
+        for config in sorted(folder.glob("tsconfig*.json")) + sorted(folder.glob("jsconfig.json")):
+            aliases, _ = resolver._load_tsconfig(config.resolve(), depth=0)
+            if aliases:
+                return True
+        if folder == root:
+            break
+    return False
+
+
+def runner_commands(root: Path, directories: list[Path]) -> list[tuple[Path, str]]:
+    """Each package script and workflow, with the folder whose package defines it."""
+    commands = [
+        (directory, str(value))
+        for directory in directories
+        for value in (load_jsonc(directory / "package.json").get("scripts") or {}).values()
+    ]
+    commands += [(root, read_text(path)) for path in sorted((root / ".github" / "workflows").glob("*.y*ml"))]
+    return commands
+
+
+def flag_resolves_aliases(root: Path, directory: Path, commands: list[tuple[Path, str]]) -> bool:
+    """Whether a dependency-cruiser command that checks this folder passes --ts-config.
+
+    A package's own scripts check that package. A root script or workflow
+    checks the root, or a package it names by path.
+    """
+    folder = relative(root, directory)
+    for owner, command in commands:
+        if "depcruise" not in command or "--ts-config" not in command:
+            continue
+        if owner == directory or (owner == root and (directory == root or folder in command)):
+            return True
+    return False
+
+
+def alias_blind_cruiser_configs(root: Path, directories: list[Path]) -> list[str]:
+    """dependency-cruiser configurations that cannot resolve their package's path aliases.
+
+    Without a tsConfig option, here, in a configuration it extends, or as the
+    --ts-config command-line flag, dependency-cruiser leaves alias imports
+    unresolved, so no rule ever matches them.
+    """
+    commands = runner_commands(root, directories)
+    blind = []
+    for directory in directories:
+        for name in BOUNDARY_TOOL_FILES:
+            config = directory / name
+            if (
+                config.is_file()
+                and folder_uses_aliases(directory, root)
+                and not cruiser_resolves_aliases(config, frozenset({config}))
+                and not flag_resolves_aliases(root, directory, commands)
+            ):
+                blind.append(f"{relative(root, config)} — no tsConfig option, so path aliases are not resolved")
+    return blind
 
 
 def package_entries(package: Path, resolver_files: set[Path]) -> set[Path]:
@@ -739,6 +921,25 @@ def churn(root: Path, months: int) -> tuple[Counter[str], list[set[str]]]:
     return counts, commits
 
 
+CONTAINER_FOLDERS = {"features", "modules", "packages", "apps", "domains", "services", "libs"}
+
+
+def module_boundary(path: str) -> str:
+    """The folder that owns a file.
+
+    That is the child of the innermost container such as `features/` or
+    `packages/`, so `apps/shop/src/features/cart` and
+    `apps/shop/src/features/checkout` are separate modules. Without a container
+    it is the top two folders. Files in one folder are one module, so coupling
+    between them is not reported.
+    """
+    folders = path.split("/")[:-1]
+    for index in range(len(folders) - 2, -1, -1):
+        if folders[index] in CONTAINER_FOLDERS:
+            return "/".join(folders[: index + 2])
+    return "/".join(folders[:2])
+
+
 def change_coupling(commits: list[set[str]], counts: Counter[str], minimum: int = 4) -> list[dict[str, Any]]:
     pairs: Counter[tuple[str, str]] = Counter()
     for files in commits:
@@ -748,7 +949,7 @@ def change_coupling(commits: list[set[str]], counts: Counter[str], minimum: int 
     for (left, right), together in pairs.items():
         if together < minimum:
             continue
-        if left.split("/")[:2] == right.split("/")[:2]:
+        if module_boundary(left) == module_boundary(right):
             continue
         strength = together / min(counts[left], counts[right])
         if strength >= 0.5:
@@ -814,7 +1015,19 @@ def collect(root: Path, months: int) -> dict[str, Any]:
     key = f"{AUDIT}.boundaries-enforced-by-tooling"
     if tooling:
         evidence = tooling[:3]
-        if tooling_runs(root, directories, configured):
+        blind = alias_blind_cruiser_configs(root, directories)
+        if blind and tooling_runs(root, directories, configured - {"dependency-cruiser"}):
+            blind = []
+        if tooling_runs(root, directories, configured) and blind:
+            checks[key] = {
+                "status": "partial",
+                "evidence": blind[:3],
+                "evidenceTier": "supported",
+                "gap": "dependency-cruiser runs, but its configuration has no tsConfig option, so it cannot resolve the repository's path aliases and its rules never see alias imports.",
+                "remediation": "Add `options: { tsConfig: { fileName: 'tsconfig.json' } }` and a `not-to-unresolvable` rule, then prove the check fails on a deliberate alias import that crosses a boundary.",
+                "judgement": "act-on",
+            }
+        elif tooling_runs(root, directories, configured):
             checks[key] = {"status": "present", "evidence": evidence, "evidenceTier": "supported"}
         else:
             checks[key] = {

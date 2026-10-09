@@ -1,0 +1,17 @@
+schema_version: "1.1"
+name: architecture-tangled-store
+description: A small Next.js storefront with planted structural problems across all four layers.
+tags: [architecture, planted]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run. The collector reports the cart and checkout import cycle and missing boundary
+  tooling; the model finds the two cart-state writers, the two HTTP clients, effect-based fetching beside
+  a query layer, storage access in components, the wire type used in a component, and the untested
+  checkout hotspot.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /architecture-audit
+  max_turns: 120
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill]
