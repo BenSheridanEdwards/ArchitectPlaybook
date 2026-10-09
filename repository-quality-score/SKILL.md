@@ -52,7 +52,9 @@ ignored.
    from separate runs.
 7. Calculates per-audit scores and an equal-category overall score using the
    bundled deterministic calculator.
-8. Separately calculates catalog, audit, and applicable-check coverage.
+8. Separately calculates catalog, audit, and applicable-check coverage. A check
+   weighted by severity counts toward coverage with its severity weight, and
+   `score.json` also reports the plain count of checks evaluated.
 9. Classifies the result as `official`, `provisional`, or `unavailable`.
 10. Writes `score.md`, `score.json`, `snapshot.md`, and `metadata.json`.
 11. Prints a concise chat summary and points to the full report.
@@ -63,8 +65,8 @@ The policy file is authoritative:
 
 | Check type or status | Contribution |
 | --- | ---: |
-| Standard check | Weight 1.0 |
-| Soft check | Weight 0.5 |
+| Critical, high, medium, or low check (catalog schema `1.2.0`) | Weight 8, 4, 2, or 1 |
+| Standard or soft check (catalog schema `1.1.0`) | Weight 1.0 or 0.5 |
 | `present` | 100 percent of its weight |
 | `partial` | 50 percent of its weight |
 | `missing` | 0 percent |
@@ -74,6 +76,12 @@ The policy file is authoritative:
 
 Each audit is normalized to 100 before audit categories are averaged. Missing
 audits reduce coverage; they are not treated as zero scores.
+
+Severity weights act only inside one audit. Under them, an unevaluated
+severity-rated check reduces coverage by its severity weight, so skipping a
+critical check cannot leave a run looking well covered; every other check
+counts once. Each deduction names its check's severity when the catalog rates
+one.
 
 Read `references/score-output-contract.md` when a field-level explanation of
 inputs, score status, or outputs is needed.

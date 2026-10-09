@@ -48,7 +48,9 @@ Stubs are an explicit exception. A stub contains only the frontmatter, a placeho
   - `.architect-audits/<skill-name>/snapshot.md` — diagnostic snapshot.
   - `.architect-audits/<skill-name>/metadata.json` — matching run, catalog, repository, and execution identity.
 - **`checks.json` mirrors the layers.** Every implemented audit ships catalog
-  schema `1.1.0` plus a semantic `catalogVersion`. Every check's `layer` must
+  schema `1.1.0` or `1.2.0` plus a semantic `catalogVersion`; schema `1.2.0`
+  adds per-check severity, method, rationale, and `lastVerified` (Architecture
+  Decision Record 0004). Every check's `layer` must
   match a layer (or lifecycle stage) heading in the body, and the catalog must
   stay aligned whenever a check is added, removed, renamed, moved, reweighted,
   or materially redefined. The validator enforces this.

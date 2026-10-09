@@ -10,7 +10,8 @@ inventory.
 
 Every implemented audit ships `checks.json` with:
 
-- `schemaVersion: "1.1.0"`;
+- `schemaVersion` `"1.1.0"`, or `"1.2.0"` with per-check severity, method,
+  rationale, and `lastVerified` (Architecture Decision Record 0004);
 - a semantic `catalogVersion`;
 - `skillName` equal to the folder name;
 - `humanCanonicalSource: "SKILL.md"`;

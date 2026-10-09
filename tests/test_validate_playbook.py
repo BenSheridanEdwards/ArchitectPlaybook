@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +170,260 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_check_metadata(root, findings)
             self.assertEqual(findings, [])
+
+    def severity_catalog(self, **overrides: Any) -> str:
+        check: dict[str, Any] = {
+            "checkId": "example-audit.single-test-runner",
+            "layer": "test-runner",
+            "title": "Single test runner",
+            "expectation": "Exactly one test runner is configured.",
+            "violationSignal": "Multiple test runners are configured.",
+            "severity": "high",
+            "method": "tool",
+            "rationale": "Two runners split the suite and double maintenance.",
+            "lastVerified": "2026-10-07",
+        }
+        check.update(overrides)
+        catalog = json.loads(VALID_CHECKS_JSON)
+        catalog["schemaVersion"] = "1.2.0"
+        catalog["checks"] = [{key: value for key, value in check.items() if value is not None}]
+        return json.dumps(catalog, indent=2) + "\n"
+
+    def write_severity_audit(self, root: Path, skill_row: str, catalog: str) -> None:
+        skill_dir = root / "example-audit"
+        skill_dir.mkdir()
+        body = (
+            VALID_SKILL_WITH_LAYER
+            + "| Check | Severity | Method | Expectation | Violation signal |\n"
+            + "| --- | --- | --- | --- | --- |\n"
+            + skill_row
+            + "\n"
+        )
+        (skill_dir / "SKILL.md").write_text(body, encoding="utf-8")
+        (skill_dir / "checks.json").write_text(catalog, encoding="utf-8")
+
+    def test_severity_catalog_accepts_rated_checks_shown_in_the_skill_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                self.severity_catalog(),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_severity_catalog_requires_rating_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                self.severity_catalog(severity="urgent", method=None, rationale=None, lastVerified="October 2026"),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("severity must be one of" in message for message in messages))
+            self.assertTrue(any("missing non-empty method" in message for message in messages))
+            self.assertTrue(any("missing non-empty rationale" in message for message in messages))
+            self.assertTrue(any("lastVerified must be a date" in message for message in messages))
+
+    def test_severity_catalog_rejects_impossible_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                self.severity_catalog(lastVerified="2026-99-99"),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("lastVerified must be a date" in finding.message for finding in findings))
+
+    def test_severity_catalog_requires_the_skill_row_to_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | low | model | Exactly one runner. | Two runners. |",
+                self.severity_catalog(),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertTrue(any("must show severity 'high' and method 'tool'" in finding.message for finding in findings))
+
+    def test_related_checks_must_name_existing_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                self.severity_catalog(relatedChecks=["other-audit.missing-check"]),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_related_checks(root, findings)
+            self.assertTrue(any("unknown check: other-audit.missing-check" in finding.message for finding in findings))
+
+    def test_related_checks_must_be_a_list_in_every_catalog_schema(self) -> None:
+        for schema in ("1.1.0", "1.2.0"):
+            for value in (None, 5, True, "other-audit.real-check", {"checkId": "other-audit.real-check"}):
+                with self.subTest(schema=schema, value=value), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    catalog = json.loads(self.severity_catalog())
+                    catalog["schemaVersion"] = schema
+                    # Set the value directly: the helper drops None, and an explicit null must fail.
+                    catalog["checks"][0]["relatedChecks"] = value
+                    self.write_severity_audit(
+                        root,
+                        "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                        json.dumps(catalog),
+                    )
+                    findings: list[Any] = []
+                    validate_playbook.validate_check_metadata(root, findings)
+                    validate_playbook.validate_related_checks(root, findings)
+                    self.assertEqual(
+                        [finding.message for finding in findings],
+                        ["example-audit.single-test-runner relatedChecks must be a list of checkId strings"],
+                    )
+
+    def test_related_checks_must_be_distinct_checks_in_other_audits(self) -> None:
+        cases = {
+            "duplicate": (["other-audit.real-check", "other-audit.real-check"], "lists other-audit.real-check more than once"),
+            "same audit": (["example-audit.single-test-runner"], "must name checks in other audits: example-audit.single-test-runner"),
+            "valid": (["other-audit.real-check"], None),
+        }
+        for name, (related, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_severity_audit(
+                    root,
+                    "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                    self.severity_catalog(relatedChecks=related),
+                )
+                other = root / "other-audit"
+                other.mkdir()
+                (other / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
+                (other / "checks.json").write_text(
+                    json.dumps({"checks": [{"checkId": "other-audit.real-check"}]}), encoding="utf-8"
+                )
+                findings: list[Any] = []
+                validate_playbook.validate_related_checks(root, findings)
+                messages = [finding.message for finding in findings]
+                if expected is None:
+                    self.assertEqual(messages, [])
+                else:
+                    self.assertEqual(len(messages), 1, messages)
+                    self.assertIn(expected, messages[0])
+
+    def test_exact_title_match_wins_over_a_longer_row_it_prefixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = json.loads(self.severity_catalog())
+            catalog["checks"].append(
+                {
+                    "checkId": "example-audit.single-test-runner-in-continuous-integration",
+                    "layer": "test-runner",
+                    "title": "Single test runner in continuous integration",
+                    "expectation": "Continuous integration runs one test runner.",
+                    "violationSignal": "Continuous integration runs two test runners.",
+                    "severity": "low",
+                    "method": "model",
+                    "rationale": "A second runner in continuous integration doubles its maintenance.",
+                    "lastVerified": "2026-10-07",
+                }
+            )
+            self.write_severity_audit(
+                root,
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |\n"
+                "| Single test runner in continuous integration | low | model | One runner there. | Two runners there. |",
+                json.dumps(catalog),
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_check_metadata(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_severity_catalog_distinguishes_missing_and_ambiguous_rows(self) -> None:
+        cases = {
+            "no row": (
+                "| Different check | high | tool | Exactly one runner. | Two runners. |",
+                "has no SKILL.md table row whose first cell matches its title",
+            ),
+            "two rows": (
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |\n\n"
+                "| Check | Severity | Method | Expectation | Violation signal |\n"
+                "| --- | --- | --- | --- | --- |\n"
+                "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                "title matches 2 SKILL.md table rows",
+            ),
+        }
+        for name, (rows, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_severity_audit(root, rows, self.severity_catalog())
+                findings: list[Any] = []
+                validate_playbook.validate_check_metadata(root, findings)
+                self.assertEqual(len(findings), 1, findings)
+                self.assertIn(expected, findings[0].message)
+
+    def test_severity_row_values_must_sit_in_their_columns(self) -> None:
+        cases = {
+            "swapped columns": (
+                "| Check | Severity | Method | Expectation | Violation signal |\n",
+                "| Single test runner | tool | high | Exactly one runner. | Two runners. |",
+                False,
+            ),
+            "value inside a longer cell": (
+                "| Check | Expectation | Rating | Approach |\n",
+                "| Single test runner | Exactly one runner. | high risk | tool |",
+                False,
+            ),
+            "own cells without Severity or Method headers": (
+                "| Check | Expectation | Rating | Approach |\n",
+                "| Single test runner | Exactly one runner. | high | tool |",
+                True,
+            ),
+        }
+        for name, (header, row, accepted) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                skill_dir = Path(tmp) / "example-audit"
+                skill_dir.mkdir()
+                separator = "|" + " --- |" * (header.count("|") - 1) + "\n"
+                (skill_dir / "SKILL.md").write_text(
+                    VALID_SKILL_WITH_LAYER + header + separator + row + "\n", encoding="utf-8"
+                )
+                (skill_dir / "checks.json").write_text(self.severity_catalog(), encoding="utf-8")
+                findings: list[Any] = []
+                validate_playbook.validate_check_metadata(Path(tmp), findings)
+                if accepted:
+                    self.assertEqual(findings, [])
+                else:
+                    self.assertTrue(
+                        any("must show severity 'high' and method 'tool'" in finding.message for finding in findings),
+                        findings,
+                    )
+
+    def test_severity_catalog_rejects_future_last_verified_dates(self) -> None:
+        today = datetime.now(timezone.utc).date()
+        for value, rejected in ((today + timedelta(days=366)).isoformat(), True), (today.isoformat(), False):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_severity_audit(
+                    root,
+                    "| Single test runner | high | tool | Exactly one runner. | Two runners. |",
+                    self.severity_catalog(lastVerified=value),
+                )
+                findings: list[Any] = []
+                validate_playbook.validate_check_metadata(root, findings)
+                messages = [finding.message for finding in findings]
+                if rejected:
+                    self.assertEqual(
+                        messages,
+                        ["example-audit.single-test-runner lastVerified cannot be later than today's UTC date"],
+                    )
+                else:
+                    self.assertEqual(messages, [])
 
     def test_implemented_audit_requires_check_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -542,6 +797,76 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_score_policy(root, findings)
             self.assertTrue(any("policy audit list is out of sync" in finding.message for finding in findings))
+
+    def write_score_bundle(self, root: Path, policy: dict[str, Any]) -> None:
+        audit = root / "example-audit"
+        audit.mkdir()
+        (audit / "SKILL.md").write_text(VALID_SKILL_WITH_LAYER, encoding="utf-8")
+        (audit / "checks.json").write_text(VALID_CHECKS_JSON, encoding="utf-8")
+        score = root / "repository-quality-score"
+        (score / "scripts").mkdir(parents=True)
+        (score / "references").mkdir()
+        (score / "evals").mkdir()
+        for relative_path in validate_playbook.SCORE_BUNDLE_FILES:
+            path = score / relative_path
+            if not path.exists():
+                path.write_text("placeholder\n", encoding="utf-8")
+        (score / "score-policy.json").write_text(json.dumps(policy), encoding="utf-8")
+
+    def severity_policy(self) -> dict[str, Any]:
+        return {
+            "schemaVersion": "1.1.0",
+            "policyVersion": "2.0.0",
+            "scorePrecision": 2,
+            "statusPoints": {"present": "1.0", "partial": "0.5", "missing": "0.0", "violation": "0.0"},
+            "severityWeights": {"critical": "8", "high": "4", "medium": "2", "low": "1"},
+            "checkWeights": {"standard": "1.0", "soft": "0.5"},
+            "audits": [{"name": "example-audit", "weight": "1.0"}],
+            "bands": [{"name": "Strong", "minimum": "90.00"}, {"name": "High risk", "minimum": "0.00"}],
+        }
+
+    def test_severity_policy_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_score_bundle(root, self.severity_policy())
+            findings: list[Any] = []
+            validate_playbook.validate_score_policy(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_severity_policy_must_rate_every_severity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy = self.severity_policy()
+            del policy["severityWeights"]["medium"]
+            self.write_score_bundle(root, policy)
+            findings: list[Any] = []
+            validate_playbook.validate_score_policy(root, findings)
+            self.assertTrue(any("severityWeights must define exactly" in finding.message for finding in findings))
+
+    def test_severity_weights_need_the_severity_policy_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy = self.severity_policy()
+            policy["schemaVersion"] = "1.0.0"
+            self.write_score_bundle(root, policy)
+            findings: list[Any] = []
+            validate_playbook.validate_score_policy(root, findings)
+            self.assertTrue(any("severityWeights requires schemaVersion 1.1.0" in finding.message for finding in findings))
+
+    def test_original_policy_schema_rejects_any_severity_weights_value(self) -> None:
+        for value in (None, [], "8"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                policy = self.severity_policy()
+                policy["schemaVersion"] = "1.0.0"
+                policy["severityWeights"] = value
+                self.write_score_bundle(root, policy)
+                findings: list[Any] = []
+                validate_playbook.validate_score_policy(root, findings)
+                self.assertEqual(
+                    [finding.message for finding in findings],
+                    ["severityWeights requires schemaVersion 1.1.0"],
+                )
 
     def test_bootstrap_contract_rejects_materialized_tracked_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

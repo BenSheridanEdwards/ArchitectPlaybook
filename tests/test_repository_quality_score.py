@@ -110,31 +110,52 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         )
 
     def _write_catalog(
-        self, audit: str, checks: list[tuple[str, str, bool]]
+        self,
+        audit: str,
+        checks: list[tuple[str, str, bool]],
+        severities: list[str] | None = None,
     ) -> None:
+        entries: list[dict[str, Any]] = []
+        for index, (check_id, layer, soft) in enumerate(checks):
+            entry: dict[str, Any] = {
+                "checkId": check_id,
+                "layer": layer,
+                "title": check_id.rsplit(".", 1)[-1].replace("-", " ").title(),
+                "softCheck": soft,
+                "allowedStatuses": [
+                    "present",
+                    "partial",
+                    "missing",
+                    "violation",
+                ],
+            }
+            if severities is not None:
+                entry.update(
+                    {
+                        "severity": severities[index],
+                        "method": "model",
+                        "rationale": "Fixture rationale.",
+                        "lastVerified": "2026-10-07",
+                    }
+                )
+            entries.append(entry)
         self._write_json(
             self.skills / audit / "checks.json",
             {
-                "schemaVersion": "1.1.0",
+                "schemaVersion": "1.2.0" if severities is not None else "1.1.0",
                 "catalogVersion": "1.0.0",
                 "skillName": audit,
-                "checks": [
-                    {
-                        "checkId": check_id,
-                        "layer": layer,
-                        "title": check_id.rsplit(".", 1)[-1].replace("-", " ").title(),
-                        "softCheck": soft,
-                        "allowedStatuses": [
-                            "present",
-                            "partial",
-                            "missing",
-                            "violation",
-                        ],
-                    }
-                    for check_id, layer, soft in checks
-                ],
+                "checks": entries,
             },
         )
+
+    def _use_severity_policy(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["schemaVersion"] = "1.1.0"
+        policy["policyVersion"] = "2.0.0"
+        policy["severityWeights"] = {"critical": "8", "high": "4", "medium": "2", "low": "1"}
+        self._write_json(policy_path, policy)
 
     def _canonical_findings(
         self,
@@ -219,7 +240,7 @@ class RepositoryQualityScoreTests(unittest.TestCase):
             "runIdentifier": run_identifier,
             "skillName": audit,
             "skillVersion": "1.0.0",
-            "checkCatalogSchemaVersion": "1.1.0",
+            "checkCatalogSchemaVersion": catalog["schemaVersion"],
             "checkCatalogVersion": "1.0.0",
             "runStartedAt": "2026-07-13T10:00:00Z",
             "runFinishedAt": "2026-07-13T10:01:00Z",
@@ -297,6 +318,14 @@ class RepositoryQualityScoreTests(unittest.TestCase):
                 / "score.json"
             ).read_text(encoding="utf-8")
         )
+
+    def _score_markdown(self) -> str:
+        return (
+            self.repository
+            / ".architect-audits"
+            / "repository-quality-score"
+            / "score.md"
+        ).read_text(encoding="utf-8")
 
     def test_complete_canonical_evidence_produces_official_weighted_score(self) -> None:
         self._write_findings(
@@ -882,6 +911,288 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         result = self._score_json()
         self.assertEqual(result["overallScore"], 66.67)
         self.assertEqual(result["categories"][0]["possibleWeight"], 1.5)
+
+    def test_severity_rated_catalog_uses_severity_weights(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.critical-check", "layer-one", False),
+                ("audit-one.low-check", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["present", "violation"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["categories"][0]["possibleWeight"], 9)
+        self.assertEqual(result["categories"][0]["score"], 88.89)
+        self.assertEqual(result["categories"][1]["score"], 100)
+        self.assertEqual(result["overallScore"], 94.44)
+        self.assertEqual(result["scorePolicy"]["severityWeights"]["critical"], 8)
+        report = (
+            self.repository
+            / ".architect-audits"
+            / "repository-quality-score"
+            / "score.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("critical=8", report)
+
+    def test_legacy_policy_scores_severity_catalogs_with_standard_weights(self) -> None:
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.critical-check", "layer-one", False),
+                ("audit-one.low-check", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["present", "violation"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._score_json()["categories"][0]["score"], 50)
+
+    def test_severity_policy_must_rate_all_four_severities(self) -> None:
+        self._use_severity_policy()
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        del policy["severityWeights"]["low"]
+        self._write_json(policy_path, policy)
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["present", "present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("severityWeights", completed.stdout + completed.stderr)
+
+    def test_severity_weights_require_the_severity_policy_schema(self) -> None:
+        policy_path = self.skills / "repository-quality-score" / "score-policy.json"
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["present", "present"])
+        )
+        for value in ({"critical": "8", "high": "4", "medium": "2", "low": "1"}, None):
+            with self.subTest(value=value):
+                self._write_policy()
+                policy = json.loads(policy_path.read_text(encoding="utf-8"))
+                policy["severityWeights"] = value
+                self._write_json(policy_path, policy)
+
+                completed = self._run_score()
+
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("severityWeights requires", completed.stdout + completed.stderr)
+
+    def test_severity_catalog_with_an_unknown_severity_is_excluded(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.first", "layer-one", False),
+                ("audit-one.second", "layer-one", False),
+            ],
+            severities=["critical", "urgent"],
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["status"], "provisional")
+        self.assertEqual(result["missingAudits"], ["audit-one"])
+        catalog_reasons = [
+            reason
+            for reason in result["statusReasons"]
+            if reason["code"] == "catalog-unavailable"
+        ]
+        self.assertEqual(len(catalog_reasons), 1)
+        self.assertEqual(catalog_reasons[0]["audit"], "audit-one")
+        self.assertIn("severity must be one of", catalog_reasons[0]["message"])
+
+    def test_severity_policy_keeps_the_soft_weight_in_unrated_catalogs(self) -> None:
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.standard", "layer-one", False),
+                ("audit-one.soft", "layer-one", True),
+            ],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["present", "missing"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["partial"])
+        )
+        original_policy = self._run_score()
+        self.assertEqual(original_policy.returncode, 0, original_policy.stderr)
+        original = self._score_json()
+        self._use_severity_policy()
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["categories"][0]["possibleWeight"], 1.5)
+        self.assertEqual(result["categories"][0]["score"], 66.67)
+        self.assertEqual(result["categories"][1]["possibleWeight"], 0.5)
+        self.assertEqual(result["overallScore"], 58.33)
+        for field in ("overallScore", "categories", "coverage", "highestImpactDeductions"):
+            self.assertEqual(result[field], original[field], field)
+
+    def test_soft_checks_in_severity_catalogs_weigh_their_full_severity(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.soft-critical", "layer-one", True),
+                ("audit-one.low", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["partial", "present"]),
+        )
+        self._write_findings(
+            "audit-two",
+            self._canonical_findings("audit-two", [None], not_applicable={0}),
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        category = self._score_json()["categories"][0]
+        self.assertEqual(category["possibleWeight"], 9)
+        self.assertEqual(category["earnedWeight"], 5)
+        self.assertEqual(category["score"], 55.56)
+
+    def test_severity_weighted_coverage_counts_an_unevaluated_check_by_weight(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [("audit-one.critical", "layer-one", False)]
+            + [(f"audit-one.low-{index}", "layer-one", False) for index in range(9)],
+            severities=["critical", *["low"] * 9],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings(
+                "audit-one", [None, *["present"] * 9], not_evaluated={0}
+            ),
+        )
+        self._write_findings(
+            "audit-two",
+            self._canonical_findings("audit-two", [None], not_applicable={0}),
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["status"], "provisional")
+        self.assertEqual(result["overallScore"], 100)
+        coverage = result["coverage"]
+        self.assertEqual(coverage["coverageWeightEvaluated"], 9)
+        self.assertEqual(coverage["coverageWeightApplicable"], 17)
+        self.assertEqual(coverage["evaluationPercent"], 52.94)
+        self.assertEqual(coverage["checkEvaluationPercent"], 90)
+        self.assertEqual(result["categories"][0]["coverage"], 52.94)
+        self.assertEqual(result["categories"][0]["checkCoverage"], 90)
+        report = self._score_markdown()
+        self.assertIn("| Applicable check weight evaluated | 9/17 (52.94%) |", report)
+        self.assertIn("| Applicable checks evaluated | 9/10 (90.00%) |", report)
+        self.assertIn("| audit-one | 100.00 | 52.94% |", report)
+
+    def test_coverage_counts_checks_when_severity_does_not_weigh_them(self) -> None:
+        cases = {
+            "unrated catalog under the severity policy": (True, None),
+            "rated catalog under the original policy": (False, ["critical", "low"]),
+        }
+        for name, (severity_policy, severities) in cases.items():
+            with self.subTest(name=name):
+                self._write_policy()
+                if severity_policy:
+                    self._use_severity_policy()
+                self._write_catalog(
+                    "audit-one",
+                    [
+                        ("audit-one.first", "layer-one", True),
+                        ("audit-one.second", "layer-one", False),
+                    ],
+                    severities=severities,
+                )
+                self._write_findings(
+                    "audit-one",
+                    self._canonical_findings(
+                        "audit-one", [None, "present"], not_evaluated={0}
+                    ),
+                )
+                self._write_findings(
+                    "audit-two", self._canonical_findings("audit-two", ["present"])
+                )
+
+                completed = self._run_score()
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                result = self._score_json()
+                self.assertEqual(result["categories"][0]["coverage"], 50)
+                self.assertEqual(result["categories"][0]["checkCoverage"], 50)
+                self.assertEqual(result["coverage"]["evaluationPercent"], 66.67)
+                self.assertEqual(result["coverage"]["checkEvaluationPercent"], 66.67)
+                self.assertNotIn("check weight evaluated", self._score_markdown())
+
+    def test_deductions_show_the_severity_their_catalog_rates(self) -> None:
+        self._use_severity_policy()
+        self._write_catalog(
+            "audit-one",
+            [
+                ("audit-one.critical-check", "layer-one", False),
+                ("audit-one.low-check", "layer-one", False),
+            ],
+            severities=["critical", "low"],
+        )
+        self._write_findings(
+            "audit-one",
+            self._canonical_findings("audit-one", ["violation", "present"]),
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["missing"])
+        )
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        deductions = {
+            item["checkId"]: item
+            for item in self._score_json()["highestImpactDeductions"]
+        }
+        self.assertEqual(deductions["audit-one.critical-check"]["severity"], "critical")
+        self.assertNotIn("severity", deductions["audit-two.soft"])
+        report = self._score_markdown()
+        self.assertIn("Critical Check: violation, critical severity;", report)
+        self.assertIn("Soft: missing;", report)
 
     def test_report_describes_the_applied_policy_values(self) -> None:
         policy_path = self.skills / "repository-quality-score" / "score-policy.json"

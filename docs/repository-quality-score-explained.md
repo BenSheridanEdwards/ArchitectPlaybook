@@ -2,7 +2,7 @@
 
 This document explains how Architect Playbook calculates the Repository Quality
 Score (RQS) and how the result should be communicated to managers. It describes
-the current scoring policy, version `1.0.0`.
+the current scoring policy, version `2.0.0`.
 
 ## Executive answer
 
@@ -35,8 +35,9 @@ contributes approximately 7.14 percent of the overall score.
 
 For each audit, the calculator reads three inputs:
 
-- `checks.json` defines the checks, their identities, and whether a check is
-  standard or soft.
+- `checks.json` defines the checks, their identities, and how each check is
+  weighted: by severity in a schema `1.2.0` catalog, or as a standard or soft
+  check in a schema `1.1.0` catalog.
 - `findings.json` records what the audit found for every check.
 - `metadata.json` proves the run, catalog, repository commit, and execution
   options associated with those findings.
@@ -49,7 +50,38 @@ different commits.
 
 Each applicable, evaluated check receives a weight and a status point value.
 
-| Check type | Weight |
+Audits whose catalogs use schema `1.2.0` rate every check's severity, and the
+weight follows the severity:
+
+| Severity | Weight |
+| --- | ---: |
+| Critical | 8 |
+| High | 4 |
+| Medium | 2 |
+| Low | 1 |
+
+Inside one audit, a critical check counts eight times as much as a low one.
+Take an audit with two rated checks: "no high or critical vulnerabilities",
+rated critical, and "`engines` field declared", rated low. A vulnerability
+violation leaves that audit at `1 ÷ 9 × 100 = 11.11`. A missing `engines`
+field leaves it at `8 ÷ 9 × 100 = 88.89`.
+
+Severity weights act only inside one audit. Each audit is normalized to 100
+and the audits are then averaged equally, so a check in one audit is never
+weighed against a check in another. Suppose a run has only two audits:
+`/security-audit` with ten critical checks, and `/dependency-audit` with just
+the two checks above. One exposed secret lowers the overall score by 5.00
+points, while a missing `engines` field lowers it by 5.56 points. Read the
+category scores and the highest-impact deductions, which show each check's
+severity, alongside the overall score.
+
+A check marked soft in a schema `1.2.0` catalog still weighs its full severity
+weight. Softness only means that mixed adherence is graded `partial`.
+
+Audits whose catalogs still use schema `1.1.0` keep the original weights until
+they are rewritten:
+
+| Check type in an older catalog | Weight |
 | --- | ---: |
 | Standard check | 1.0 |
 | Soft check | 0.5 |
@@ -69,6 +101,8 @@ earned points = check weight × status point value
 
 Examples:
 
+- A critical `partial` check earns `8 × 0.5 = 4` points.
+- A low `present` check earns `1 × 1.0 = 1` point.
 - A standard `present` check earns `1.0 × 1.0 = 1.0` point.
 - A standard `partial` check earns `1.0 × 0.5 = 0.5` points.
 - A soft `partial` check earns `0.5 × 0.5 = 0.25` points.
@@ -83,6 +117,10 @@ Not every check is automatically placed in the score denominator.
 | Applicable and evaluated | Included | Counted as evaluated |
 | Applicable but not evaluated | Excluded | Reduces check coverage |
 | Not applicable | Excluded | Does not reduce check coverage |
+
+A check rated by severity counts toward coverage with its severity weight.
+Every other check counts once. An unevaluated critical check therefore reduces
+coverage as much as eight unevaluated low checks.
 
 For example, React-specific checks can be explicitly not applicable in a
 non-React repository. The React audit must still run and prove that condition;
@@ -121,7 +159,7 @@ quality failure.
 
 Assume only three audits have been completed for illustration.
 
-### Architecture audit
+### Architecture audit (catalog schema `1.1.0`)
 
 | Check | Weight | Status | Earned |
 | --- | ---: | --- | ---: |
@@ -164,8 +202,11 @@ RQS reports several coverage measures:
 - **Catalog coverage:** policy audit catalogs loaded out of 14 expected.
 - **Audit coverage:** valid current-commit audit runs selected out of 14
   expected.
-- **Applicable-check coverage:** applicable checks evaluated divided by all
-  known applicable checks in selected runs.
+- **Applicable-check coverage:** the evaluated share of all known applicable
+  checks in selected runs. A check rated by severity counts with its severity
+  weight, so skipping a critical check cannot leave a run looking well covered.
+  Every other check counts once. The report also gives the plain count of
+  checks evaluated.
 - **Scored audits:** selected audits containing at least one applicable,
   evaluated check.
 - **Non-applicable audits:** completed audits that proved their whole domain
@@ -218,7 +259,8 @@ score. A deduction accounts for:
 - the possible weight inside its audit category; and
 - the audit category's share of the included overall score.
 
-The aggregate report points back to the originating audit findings instead of
+Each deduction also shows the check's severity when its catalog rates one. The
+aggregate report points back to the originating audit findings instead of
 copying raw evidence.
 
 ## How to answer common manager questions

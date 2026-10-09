@@ -24,8 +24,14 @@ from pathlib import Path
 from typing import Any
 
 FINDINGS_SCHEMA_VERSION = "2.0.0"
-SUPPORTED_CATALOG_SCHEMA_VERSION = "1.1.0"
-SUPPORTED_POLICY_SCHEMA_VERSION = "1.0.0"
+# score.json schema 1.1.0 adds severity weights, weighted coverage, and deduction
+# severity; every 1.0.0 field keeps its value for the inputs 1.0.0 could score.
+SCORE_SCHEMA_VERSION = "1.1.0"
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = ("1.1.0", "1.2.0")
+SEVERITY_CATALOG_SCHEMA_VERSION = "1.2.0"
+SUPPORTED_POLICY_SCHEMA_VERSIONS = ("1.0.0", "1.1.0")
+SEVERITY_POLICY_SCHEMA_VERSION = "1.1.0"
+VALID_SEVERITIES = ("critical", "high", "medium", "low")
 MAX_JSON_BYTES = 10 * 1024 * 1024
 MAX_JSON_INTEGER_DIGITS = 1_000
 MAX_JSON_NESTING_DEPTH = 100
@@ -59,6 +65,7 @@ class CatalogCheck:
     title: str
     soft: bool
     allowed_statuses: frozenset[str]
+    severity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -383,7 +390,7 @@ def load_policy(
     schema_version = require_string(
         policy.get("schemaVersion"), "score policy schemaVersion"
     )
-    if schema_version != SUPPORTED_POLICY_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_POLICY_SCHEMA_VERSIONS:
         raise ScoreInputError(
             f"unsupported score policy schemaVersion: {schema_version}"
         )
@@ -408,6 +415,22 @@ def load_policy(
     for name, value in weights.items():
         if decimal_value(value, f"checkWeights.{name}") <= 0:
             raise ScoreInputError(f"checkWeights.{name} must be positive")
+
+    if schema_version == SEVERITY_POLICY_SCHEMA_VERSION:
+        severity_weights = require_object(
+            policy.get("severityWeights"), "score policy severityWeights"
+        )
+        if set(severity_weights) != set(VALID_SEVERITIES):
+            raise ScoreInputError(
+                "score policy severityWeights must define critical, high, medium, and low"
+            )
+        for name, value in severity_weights.items():
+            if decimal_value(value, f"severityWeights.{name}") <= 0:
+                raise ScoreInputError(f"severityWeights.{name} must be positive")
+    elif "severityWeights" in policy:
+        raise ScoreInputError(
+            f"severityWeights requires score policy schemaVersion {SEVERITY_POLICY_SCHEMA_VERSION}"
+        )
 
     audits = require_list(policy.get("audits"), "score policy audits")
     seen: set[str] = set()
@@ -443,7 +466,7 @@ def load_catalog(
     path = ensure_within(audit_root / "checks.json", audit_root, f"{audit_name} catalog")
     data = require_object(strict_json_load(path, fingerprints), f"{audit_name} catalog")
     schema_version = require_string(data.get("schemaVersion"), f"{audit_name}.schemaVersion")
-    if schema_version != SUPPORTED_CATALOG_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_CATALOG_SCHEMA_VERSIONS:
         raise ScoreInputError(
             f"{audit_name} uses unsupported check catalog schema {schema_version}"
         )
@@ -474,7 +497,16 @@ def load_catalog(
             or len(allowed) != len(set(allowed))
         ):
             raise ScoreInputError(f"{check_id}.allowedStatuses is invalid")
-        checks.append(CatalogCheck(check_id, layer, title, soft, frozenset(allowed)))
+        severity: str | None = None
+        if schema_version == SEVERITY_CATALOG_SCHEMA_VERSION:
+            severity = check.get("severity")
+            if severity not in VALID_SEVERITIES:
+                raise ScoreInputError(
+                    f"{check_id}.severity must be one of {', '.join(VALID_SEVERITIES)}"
+                )
+        checks.append(
+            CatalogCheck(check_id, layer, title, soft, frozenset(allowed), severity)
+        )
     if not checks:
         raise ScoreInputError(f"{audit_name} catalog contains no checks")
     return AuditCatalog(audit_name, schema_version, catalog_version, path, tuple(checks))
@@ -1089,6 +1121,11 @@ def display_number(value: int | float | None, precision: int = 2) -> str:
     return "unavailable" if value is None else f"{value:.{precision}f}"
 
 
+def percentage(part: Decimal, whole: Decimal, empty: int) -> int | float:
+    """Return part / whole as a two-decimal percentage, or `empty` for no whole."""
+    return empty if whole == 0 else json_number(part / whole * Decimal(100), 2)
+
+
 def calculate(
     repository_root: Path,
     policy: dict[str, Any],
@@ -1113,6 +1150,10 @@ def calculate(
         name: decimal_value(value, f"checkWeights.{name}")
         for name, value in policy["checkWeights"].items()
     }
+    severity_weights = {
+        name: decimal_value(value, f"severityWeights.{name}")
+        for name, value in (policy.get("severityWeights") or {}).items()
+    }
     audit_weights = {
         audit["name"]: decimal_value(audit["weight"], f"{audit['name']}.weight")
         for audit in policy["audits"]
@@ -1124,6 +1165,8 @@ def calculate(
     scored_audit_weight = Decimal(0)
     evaluated_checks = 0
     applicable_checks = 0
+    evaluated_coverage_weight = Decimal(0)
+    applicable_coverage_weight = Decimal(0)
     total_catalog_checks = sum(len(catalog.checks) for catalog in catalogs.values())
     deductions: list[dict[str, Any]] = []
     reasons: list[dict[str, str]] = []
@@ -1156,6 +1199,8 @@ def calculate(
         earned = Decimal(0)
         audit_applicable = 0
         audit_evaluated = 0
+        audit_coverage_applicable = Decimal(0)
+        audit_coverage_evaluated = Decimal(0)
         status_counts = {status: 0 for status in sorted(VALID_STATUSES)}
         not_applicable = 0
         not_evaluated = 0
@@ -1166,15 +1211,28 @@ def calculate(
             if finding.applicability == "not-applicable":
                 not_applicable += 1
                 continue
+            if severity_weights and catalog_check.severity:
+                weight = severity_weights[catalog_check.severity]
+                # Coverage weighs a severity-rated check like its score does,
+                # so a skipped critical check cannot leave a run looking well
+                # covered.
+                coverage_weight = weight
+            else:
+                weight = check_weights["soft" if catalog_check.soft else "standard"]
+                # Every other check counts once, as coverage always has.
+                coverage_weight = Decimal(1)
             audit_applicable += 1
             applicable_checks += 1
+            audit_coverage_applicable += coverage_weight
+            applicable_coverage_weight += coverage_weight
             if finding.evaluation_state != "evaluated" or finding.status is None:
                 not_evaluated += 1
                 continue
-            weight = check_weights["soft" if catalog_check.soft else "standard"]
             possible += weight
             audit_evaluated += 1
             evaluated_checks += 1
+            audit_coverage_evaluated += coverage_weight
+            evaluated_coverage_weight += coverage_weight
             status_counts[finding.status] += 1
             points = status_points[finding.status]
             earned += weight * points
@@ -1185,6 +1243,11 @@ def calculate(
                         "audit": audit,
                         "checkId": finding.check_id,
                         "title": catalog_check.title,
+                        **(
+                            {"severity": catalog_check.severity}
+                            if catalog_check.severity
+                            else {}
+                        ),
                         "status": finding.status,
                         "pointsLost": deduction,
                     }
@@ -1229,15 +1292,11 @@ def calculate(
                 "score": None if category_score is None else json_number(category_score, precision),
                 "earnedWeight": json_number(earned, precision),
                 "possibleWeight": json_number(possible, precision),
-                "coverage": (
-                    100
-                    if audit_applicable == 0
-                    else json_number(
-                        Decimal(audit_evaluated)
-                        / Decimal(audit_applicable)
-                        * Decimal(100),
-                        2,
-                    )
+                "coverage": percentage(
+                    audit_coverage_evaluated, audit_coverage_applicable, 100
+                ),
+                "checkCoverage": percentage(
+                    Decimal(audit_evaluated), Decimal(audit_applicable), 100
                 ),
                 "counts": {
                     **status_counts,
@@ -1318,6 +1377,7 @@ def calculate(
                     "audit": item["audit"],
                     "checkId": item["checkId"],
                     "title": item["title"],
+                    **({"severity": item["severity"]} if "severity" in item else {}),
                     "status": item["status"],
                     "pointsLost": json_number(item["pointsLost"], precision),
                     "overallImpact": json_number(impact, precision),
@@ -1375,7 +1435,7 @@ def calculate(
 
     run_finished_at = utc_now()
     return {
-        "schemaVersion": "1.0.0",
+        "schemaVersion": SCORE_SCHEMA_VERSION,
         "policyVersion": policy["policyVersion"],
         "runIdentifier": str(uuid.uuid4()),
         "runStartedAt": run_started_at,
@@ -1399,16 +1459,14 @@ def calculate(
             "checksEvaluated": evaluated_checks,
             "checksApplicable": applicable_checks,
             "checksInCatalogs": total_catalog_checks,
-            "evaluationPercent": (
-                0
-                if applicable_checks == 0
-                else json_number(
-                    Decimal(evaluated_checks)
-                    / Decimal(applicable_checks)
-                    * Decimal(100),
-                    2,
-                )
+            "evaluationPercent": percentage(
+                evaluated_coverage_weight, applicable_coverage_weight, 0
             ),
+            "checkEvaluationPercent": percentage(
+                Decimal(evaluated_checks), Decimal(applicable_checks), 0
+            ),
+            "coverageWeightEvaluated": json_number(evaluated_coverage_weight, precision),
+            "coverageWeightApplicable": json_number(applicable_coverage_weight, precision),
         },
         "categories": categories,
         "highestImpactDeductions": top_deductions,
@@ -1429,6 +1487,10 @@ def calculate(
             "checkWeights": {
                 name: json_number(value, 6)
                 for name, value in check_weights.items()
+            },
+            "severityWeights": {
+                name: json_number(value, 6)
+                for name, value in severity_weights.items()
             },
             "auditWeights": {
                 name: json_number(value, 6)
@@ -1474,6 +1536,16 @@ def render_markdown(result: dict[str, Any]) -> str:
         lines.append("No scoreable evidence was found.")
 
     coverage = result["coverage"]
+    # The weighted row appears only when severity weights make it differ from
+    # the check count, so reports for unrated catalogs read as before.
+    weighted_coverage_rows = (
+        []
+        if coverage["coverageWeightEvaluated"] == coverage["checksEvaluated"]
+        and coverage["coverageWeightApplicable"] == coverage["checksApplicable"]
+        else [
+            f"| Applicable check weight evaluated | {coverage['coverageWeightEvaluated']}/{coverage['coverageWeightApplicable']} ({display_number(coverage['evaluationPercent'])}%) |"
+        ]
+    )
     lines.extend(
         [
             "",
@@ -1485,7 +1557,8 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"| Audits selected | {coverage['auditsSelected']}/{coverage['auditsExpected']} |",
             f"| Audits scored | {coverage['auditsScored']} |",
             f"| Audits non-applicable | {coverage['auditsNonApplicable']} |",
-            f"| Applicable checks evaluated | {coverage['checksEvaluated']}/{coverage['checksApplicable']} ({display_number(coverage['evaluationPercent'])}%) |",
+            *weighted_coverage_rows,
+            f"| Applicable checks evaluated | {coverage['checksEvaluated']}/{coverage['checksApplicable']} ({display_number(coverage['checkEvaluationPercent'])}%) |",
             "",
             "## Category scores",
             "",
@@ -1509,8 +1582,9 @@ def render_markdown(result: dict[str, Any]) -> str:
     lines.extend(["", "## Highest-impact deductions", ""])
     if result["highestImpactDeductions"]:
         for item in result["highestImpactDeductions"]:
+            severity = f", {item['severity']} severity" if item.get("severity") else ""
             lines.append(
-                f"- `{item['checkId']}` — {item['title']}: {item['status']}; "
+                f"- `{item['checkId']}` — {item['title']}: {item['status']}{severity}; "
                 f"-{display_number(item['overallImpact'])} overall points. "
                 f"Source: `{item['sourceReport']}`"
             )
@@ -1540,6 +1614,15 @@ def render_markdown(result: dict[str, Any]) -> str:
     check_weights = ", ".join(
         f"{name}={value}" for name, value in score_policy["checkWeights"].items()
     )
+    severity_weights = score_policy.get("severityWeights") or {}
+    weight_description = (
+        "Checks in catalogs that rate severity weigh "
+        + ", ".join(f"{name}={value}" for name, value in severity_weights.items())
+        + f"; checks in older catalogs use the standard and soft weights {check_weights}. "
+        "Coverage counts a severity-rated check at its severity weight and every other check once."
+        if severity_weights
+        else f"Check weights are {check_weights}."
+    )
     audit_weights = score_policy["auditWeights"]
     unique_audit_weights = set(audit_weights.values())
     audit_weight_description = (
@@ -1555,7 +1638,7 @@ def render_markdown(result: dict[str, Any]) -> str:
             "## Scoring method",
             "",
             f"Policy version `{result['policyVersion']}` assigns status points: {status_points}. "
-            f"Check weights are {check_weights}. {audit_weight_description} "
+            f"{weight_description} {audit_weight_description} "
             "Each audit is normalized before the configured audit weights are applied. "
             "Missing and unevaluated evidence reduces coverage instead of becoming a guessed pass or failure.",
             "",
