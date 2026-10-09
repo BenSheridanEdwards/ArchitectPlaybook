@@ -6,7 +6,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 
 - **Start:** **[Pre-Audit Setup](pre-audit-setup/SKILL.md)** — map the repo before judging it.
 - **Ship:** **[Quality Gates](quality-gates-audit/SKILL.md)** — pre-hooks and release QA · **[Bundle and Build Health](bundle-build-audit/SKILL.md)** — build output and artifacts.
-- **Risk:** **[Security](security-audit/SKILL.md)** — app and browser security · **[Dependency Health](dependency-audit/SKILL.md)** — package and lockfile risk.
+- **Risk:** **[Security](security-audit/SKILL.md)** — server, browser, and AI-feature security · **[Dependency Health](dependency-audit/SKILL.md)** — package and lockfile risk.
 - **Experience:** **[Accessibility](accessibility-audit/SKILL.md)** — WCAG and usability · **[Performance](performance-audit/SKILL.md)** — speed and rendering cost · **[Error Handling](error-handling-audit/SKILL.md)** — failure states and recovery.
 - **Code:** **[Architecture](architecture-audit/SKILL.md)** — structure and change risk · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
 - **Measure:** **[Repository Quality Score](repository-quality-score/SKILL.md)** — deterministic audit roll-up, category scores, and assessment coverage.
@@ -229,7 +229,7 @@ Every audit accepts the universal `--worktree`, `--learn`, and `--teach` flags. 
 
 #### Risk and dependency health
 
-- **[Security](security-audit/SKILL.md)** (`/security-audit`) — authentication, authorization, Cross-Site Scripting, headers, secrets, and browser security. Optional: `--with-scan`.
+- **[Security](security-audit/SKILL.md)** (`/security-audit`) — server access control, injection and Cross-Site Scripting, secrets and browser hardening, and large-language-model features, each traced from an attacker's entry point. Optional: `--since`, `--with-scan`.
 - **[Dependency Health](dependency-audit/SKILL.md)** (`/dependency-audit`) — package security, dependency maintenance, lockfile hygiene, and update risk. Optional: `--with-network`.
 
 #### Product experience
@@ -259,7 +259,7 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 | --- | --- | --- |
 | [Quality Gates](quality-gates-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
 | [Bundle and Build Health](bundle-build-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-stats`, `--stats-path` |
-| [Security](security-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-scan` |
+| [Security](security-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--since`, `--with-scan` |
 | [Dependency Health](dependency-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-network` |
 | [Accessibility](accessibility-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--severity=error` |
 | [Performance](performance-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-lighthouse-results`, `--lighthouse-results-path` |
