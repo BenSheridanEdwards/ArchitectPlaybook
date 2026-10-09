@@ -50,6 +50,8 @@ Results go to `evals/results/<timestamp>/` in the copy.
 | --- | --- |
 | `architecture-audit/tangled-store` | Recall. A storefront with an import cycle, no boundary tooling, a component importing another feature's internal file, Zustand and Redux both writing cart state, two HTTP clients, effect-based fetching beside a query layer, storage access in components, a wire type rendered in a component, and an untested checkout hotspot. |
 | `architecture-audit/well-kept-store` | Precision. The same storefront built well, so every finding it raises is a false positive. |
+| `testing-audit/hollow-suite` | Recall. A TypeScript invoicing service with a React admin screen: invoice-total tests that compare the code with itself or assert nothing, route tests that mock the service's own refund rules and assert only on mocks, untested refund rules on the busiest file, a committed `it.only`, no coverage threshold, no database tests, a snapshot and utility-class component tests, and no Testing Library or jest-dom lint plugin. |
+| `testing-audit/sound-suite` | Precision. The same service tested well: refund boundaries with literal expectations, PostgreSQL through Testcontainers, the email provider and the admin screen's API faked with Mock Service Worker, role-based component tests, coverage thresholds, and both lint plugins. |
 
 ## Grading
 

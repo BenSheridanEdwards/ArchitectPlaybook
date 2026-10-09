@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: testing-sound-suite
+description: The same invoicing service with tests that would catch real bugs; measures false positives.
+tags: [testing, clean]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run with the runner, focus, coverage, and both lint checks present and the
+  mutation check not evaluated. No model check is a violation: the refund rules are tested at their
+  boundaries, routes and the repository run against PostgreSQL in Testcontainers, the email provider is
+  faked with Mock Service Worker, and component tests query by role. The act-on list is short or empty
+  and invents no problems.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /testing-audit
+  max_turns: 120
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill]
