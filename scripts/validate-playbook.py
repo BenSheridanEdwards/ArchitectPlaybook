@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import urllib.parse
+from typing import Any
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -981,45 +982,101 @@ def print_findings(root: Path, findings: list[Finding]) -> None:
 
 
 PLUGIN_MANIFEST = Path(".claude-plugin") / "plugin.json"
+MARKETPLACE_MANIFEST = Path(".claude-plugin") / "marketplace.json"
 INSTALLER_PREFIX = "install-architect-playbook-"
+PLUGIN_NAME = "architect-playbook"
+ALLOWED_PLUGIN_KEYS = {
+    "$schema", "name", "displayName", "description", "author", "homepage", "repository", "license", "keywords", "skills",
+}
+# Default component locations Claude Code loads from a plugin root. The
+# repository root is the plugin root, so none of these may exist there.
+PLUGIN_COMPONENT_PATHS = (
+    ".mcp.json", ".lsp.json", "settings.json", "bin", "agents", "commands", "hooks", "monitors",
+    "output-styles", "skills", "themes", "workflows",
+)
+
+
+def load_json_object(path: Path, label: str, findings: list[Finding]) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        findings.append(Finding("error", path, f"{label} is not readable JSON: {error}"))
+        return None
+    if not isinstance(value, dict):
+        findings.append(Finding("error", path, f"{label} must be a JSON object"))
+        return None
+    return value
 
 
 def validate_plugin_manifest(root: Path, findings: list[Finding]) -> None:
-    """The plugin lists every playbook skill, and ships nothing that runs on load.
+    """The repository is one plugin and its own marketplace, and ships only skills.
 
-    The installers are left out: a plugin install replaces them. A root
-    `.mcp.json` would start its servers for every user of the plugin.
+    The plugin lists every playbook skill except the installers, which a plugin
+    install replaces. Neither manifest pins a version, so installs follow
+    commits. Because the repository root is the plugin root, any default
+    component location there would load for every plugin user.
     """
     manifest_path = root / PLUGIN_MANIFEST
+    if not skill_directories(root):
+        return
     if not manifest_path.is_file():
+        findings.append(Finding("error", manifest_path, "plugin manifest is missing"))
         return
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        findings.append(Finding("error", manifest_path, f"plugin manifest is not valid JSON: {error.msg}"))
+    manifest = load_json_object(manifest_path, "plugin manifest", findings)
+    if manifest is None:
         return
-    listed = manifest.get("skills") if isinstance(manifest, dict) else None
+    if manifest.get("name") != PLUGIN_NAME:
+        findings.append(Finding("error", manifest_path, f"plugin manifest name must be {PLUGIN_NAME!r}"))
+    for key in sorted(set(manifest) - ALLOWED_PLUGIN_KEYS):
+        findings.append(
+            Finding("error", manifest_path, f"plugin manifest must not declare {key}; the playbook ships only skills and pins no version")
+        )
+    listed = manifest.get("skills")
     if not isinstance(listed, list) or any(not isinstance(item, str) for item in listed):
         findings.append(Finding("error", manifest_path, "plugin manifest skills must be a list of ./<skill-folder> paths"))
-        return
-    names = [item[2:].rstrip("/") if item.startswith("./") else item for item in listed]
-    expected = sorted(
-        directory.name for directory in skill_directories(root) if not directory.name.startswith(INSTALLER_PREFIX)
-    )
-    for name in sorted(set(expected) - set(names)):
-        findings.append(Finding("error", manifest_path, f"plugin manifest skills is missing ./{name}"))
-    for name in sorted(set(names) - set(expected)):
-        findings.append(Finding("error", manifest_path, f"plugin manifest skills lists ./{name}, which is not a playbook skill"))
-    if names != sorted(names):
-        findings.append(Finding("error", manifest_path, "plugin manifest skills must be in alphabetical order"))
-    for name in ("hooks", "mcpServers", "lspServers"):
-        if isinstance(manifest, dict) and name in manifest:
-            findings.append(Finding("error", manifest_path, f"plugin manifest must not declare {name}; the playbook runs nothing on load"))
-    for path in (root / ".mcp.json", root / "hooks" / "hooks.json", root / ".lsp.json"):
-        if path.exists():
-            findings.append(
-                Finding("error", path, "the repository root is the plugin root, so this file would run for every plugin user; configure it locally instead")
+    else:
+        malformed = [item for item in listed if not item.startswith("./") or "/" in item[2:].rstrip("/")]
+        for item in malformed:
+            findings.append(Finding("error", manifest_path, f"plugin manifest skill path must be ./<skill-folder>: {item!r}"))
+        if not malformed:
+            names = [item[2:].rstrip("/") for item in listed]
+            expected = sorted(
+                directory.name for directory in skill_directories(root) if not directory.name.startswith(INSTALLER_PREFIX)
             )
+            for name in sorted({name for name in names if names.count(name) > 1}):
+                findings.append(Finding("error", manifest_path, f"plugin manifest skills lists ./{name} more than once"))
+            for name in sorted(set(expected) - set(names)):
+                findings.append(Finding("error", manifest_path, f"plugin manifest skills is missing ./{name}"))
+            for name in sorted(set(names) - set(expected)):
+                reason = "an installer, which a plugin install replaces" if name.startswith(INSTALLER_PREFIX) else "not a playbook skill"
+                findings.append(Finding("error", manifest_path, f"plugin manifest skills lists ./{name}, which is {reason}"))
+            if names != sorted(names):
+                findings.append(Finding("error", manifest_path, "plugin manifest skills must be in alphabetical order"))
+    for relative in PLUGIN_COMPONENT_PATHS:
+        if (root / relative).exists():
+            findings.append(
+                Finding("error", root / relative, "the repository root is the plugin root, so this would load for every plugin user; configure it locally instead")
+            )
+    marketplace_path = root / MARKETPLACE_MANIFEST
+    if not marketplace_path.is_file():
+        findings.append(Finding("error", marketplace_path, "marketplace manifest is missing"))
+        return
+    marketplace = load_json_object(marketplace_path, "marketplace manifest", findings)
+    if marketplace is None:
+        return
+    plugins = marketplace.get("plugins")
+    if (
+        not isinstance(plugins, list)
+        or len(plugins) != 1
+        or not isinstance(plugins[0], dict)
+        or plugins[0].get("name") != PLUGIN_NAME
+        or plugins[0].get("source") != "./"
+    ):
+        findings.append(
+            Finding("error", marketplace_path, f"marketplace manifest must list one plugin named {PLUGIN_NAME!r} with source './'")
+        )
+    elif "version" in plugins[0] or "version" in marketplace:
+        findings.append(Finding("error", marketplace_path, "marketplace manifest must not pin a version; installs follow commits"))
 
 
 def main() -> int:
