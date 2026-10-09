@@ -252,7 +252,9 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   `eval`, but still reads code inside `${...}` template interpolations and
   after a `>` comparison. Trace each site: if request, storage, or message
   data can reach it, re-record the check with `--judgement act-on` and the
-  trace. Calls in tests and minified vendor files are excluded.
+  trace. Calls in tests and minified vendor files are excluded. A source file
+  too large to read, or unreadable, makes a clean result degraded rather than
+  silently clean.
 - **Message listeners.** `event.origin === 'https://exact.example'` or a `Set`
   of exact origins is present. `includes`, `endsWith`, `indexOf`, or a
   regular expression without anchors is a violation, because
@@ -299,8 +301,9 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   - A tracked `.gitignore` line whose `!` exception can match a local
     environment file, such as `!.env.staging.local` or `!**/.env.local`, is
     itself the finding (partial, citing the line), whether or not a matching
-    file exists yet. An exception for a template such as `!.env.example` is
-    not.
+    file exists yet, unless a later rule re-ignores it: the collector asks Git,
+    which applies the last matching pattern. An exception for a template such
+    as `!.env.example` is not a finding.
   - Only a rule in a `.gitignore` the repository tracks counts. An untracked
     `.gitignore`, `.git/info/exclude`, or a global ignore file protects one
     person, so that coverage is missing or partial.
@@ -408,6 +411,10 @@ The collector never prints a secret it has detected:
   credential (such as a long random or hexadecimal run), is withheld too.
 - File names from Git history are never printed; history is reported by
   counts, rule names, and commit identifiers only.
+- Redaction rewrites only text drawn from the repository: evidence, gaps,
+  reasons, and snapshot values. Check identifiers, dictionary keys, and fixed
+  fields such as status and evidence tier are never rewritten, so a secret
+  that happens to equal `direct` cannot corrupt the result.
 
 The limit: a secret that was never detected as a value cannot be recognised.
 A file name that is itself a password, but is not credential-shaped and

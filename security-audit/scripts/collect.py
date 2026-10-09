@@ -353,6 +353,8 @@ def mask(text: str, strings: bool) -> str:
     index = 0
     length = len(text)
     previous = ""  # the last significant character of code
+    parentheses: list[bool] = []  # for each open `(`, whether it opens an `if`, `while`, `for`, or `with` condition
+    closed_condition = False  # whether the last `)` closed such a condition
 
     def blank(start: int, end: int) -> None:
         for position in range(start, min(end, length)):
@@ -391,7 +393,7 @@ def mask(text: str, strings: bool) -> str:
             index = end + 1
             previous = character
             continue
-        if strings and character == "/" and starts_regular_expression(text, index, previous):
+        if strings and character == "/" and starts_regular_expression(text, index, previous, closed_condition):
             end = index + 1
             in_class = False
             while end < length and text[end] != "\n":
@@ -409,6 +411,11 @@ def mask(text: str, strings: bool) -> str:
             index = end + 1
             previous = "/"
             continue
+        if character == "(":
+            keyword = re.search(r"([A-Za-z_$][\w$]*)\s*$", text[max(0, index - 24):index])
+            parentheses.append(bool(keyword and keyword.group(1) in CONDITION_KEYWORDS))
+        elif character == ")":
+            closed_condition = parentheses.pop() if parentheses else False
         if not character.isspace():
             previous = character
         index += 1
@@ -498,10 +505,19 @@ def closing_brace(text: str, open_index: int) -> int:
     return len(text)
 
 
-def starts_regular_expression(text: str, index: int, previous: str) -> bool:
-    """Whether a `/` begins a regular expression literal rather than a division."""
+CONDITION_KEYWORDS = {"if", "while", "for", "with"}
+
+
+def starts_regular_expression(text: str, index: int, previous: str, closed_condition: bool = False) -> bool:
+    """Whether a `/` begins a regular expression literal rather than a division.
+
+    After `)`, a `/` is division, as in `(a + b) / c`, unless the `)` closed the
+    condition of an `if`, `while`, `for`, or `with`, which a statement follows.
+    """
     if previous == "" or previous in "(,=:[!&|?{};+-*%<>~^":
         return True
+    if previous == ")":
+        return closed_condition
     word = re.search(r"([A-Za-z_$][\w$]*)\s*$", text[:index])
     return bool(word and word.group(1) in EXPRESSION_KEYWORDS)
 
@@ -537,7 +553,9 @@ class SourceFile:
 
     def __init__(self, root: Path, path: str) -> None:
         self.path = path
-        self.text = read_text(root / path) or ""
+        text = read_text(root / path)
+        self.skipped = text is None  # too large to read, or unreadable
+        self.text = text or ""
         self.masked = mask(self.text, strings=False)
         self._code: str | None = None
         self.is_client = bool(USE_CLIENT_PATTERN.match(self.masked))
@@ -1040,26 +1058,39 @@ def env_negations(root: Path, tracked: set[str]) -> list[str]:
     the finding whether or not a matching file exists yet. Exceptions for
     committed templates such as `!.env.example` are not findings.
     """
-    found = []
+    candidates: set[str] = set()
     for ignore_file in sorted(path for path in tracked if path.rsplit("/", 1)[-1] == ".gitignore"):
         folder = ignore_file.rsplit("/", 1)[0] + "/" if "/" in ignore_file else ""
         try:
             lines = (root / ignore_file).read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
-        for number, line in enumerate(lines, start=1):
+        for line in lines:
             entry = line.strip()
             if not entry.startswith("!"):
                 continue
-            component = entry[1:].rstrip("/").rsplit("/", 1)[-1]
+            pattern = re.sub(r"^(?:\*\*/)+", "", entry[1:].lstrip("/").rstrip("/"))
+            directory, _, component = pattern.rpartition("/")
             if not component:
                 continue
-            candidates = [name for name in LOCAL_ENV_NAMES if fnmatch.fnmatchcase(name, component)]
+            base = folder + (directory + "/" if directory else "")
+            names = [name for name in LOCAL_ENV_NAMES if fnmatch.fnmatchcase(name, component)]
             if is_local_env_name(instance_of(component)):
-                candidates.append(instance_of(component))
-            if any(folder + name not in tracked for name in candidates) and path_is_safe(ignore_file):
-                found.append(f"{location(ignore_file)}:{number} — `{safe_fragment(entry)}` un-ignores a local environment file")
-    return found
+                names.append(instance_of(component))
+            candidates.update(instance_of(base) + name for name in names if instance_of(base) + name not in tracked)
+    if not candidates:
+        return []
+    # Git applies the last matching pattern, across every ignore file, so ask it
+    # which rule decides each candidate. Only a winning `!` exception is a finding.
+    output = git(root, "check-ignore", "--no-index", "-v", *sorted(candidates)) or ""
+    found = []
+    for raw in output.splitlines():
+        rule = raw.partition("\t")[0]
+        source, _, rest = rule.partition(":")
+        line, _, pattern = rest.partition(":")
+        if pattern.startswith("!") and source in tracked and line.isdigit() and path_is_safe(source):
+            found.append(f"{location(source)}:{line} — `{safe_fragment(pattern)}` un-ignores a local environment file")
+    return sorted(set(found))
 
 
 def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[str, Any]:
@@ -1244,8 +1275,13 @@ def dynamic_code_check(sources: list[SourceFile], snapshot: dict[str, Any]) -> d
             call = call[: call.index("(") + 1]
             production.append(f"{location(source.path)}:{number} — `{safe_fragment(call)}`")
     snapshot["dynamicCodeExecution"] = {"shippedSites": len(production), "testSites": tests}
+    skipped = [source.path for source in sources if source.skipped and not source.path.endswith(".min.js") and not is_test_path(source.path)]
+    degraded = None
+    if skipped:
+        snapshot["skippedSourceFiles"] = {"count": len(skipped), "examples": skipped[:10]}
+        degraded = f"{len(skipped)} source files were too large or could not be read, so a call in them would be missed"
     if production:
-        return {
+        result: dict[str, Any] = {
             "status": "violation",
             "evidence": production[:MAX_EVIDENCE],
             "evidenceTier": "direct",
@@ -1256,12 +1292,17 @@ def dynamic_code_check(sources: list[SourceFile], snapshot: dict[str, Any]) -> d
             "remediation": "Replace each with a parser, a lookup table, or a function reference. Trace any that remain to prove only constant text reaches them.",
             "judgement": "consider",
         }
-    note = f"; {tests} in tests only" if tests else ""
-    return {
-        "status": "present",
-        "evidence": [f"command: `collect.py dynamic-code scan` → 0 eval, new Function, or string timer calls in {len(sources)} source files{note}"],
-        "evidenceTier": "direct",
-    }
+    else:
+        note = f"; {tests} in tests only" if tests else ""
+        scanned = len(sources) - len(skipped)
+        result = {
+            "status": "present",
+            "evidence": [f"command: `collect.py dynamic-code scan` → 0 eval, new Function, or string timer calls in {scanned} source files{note}"],
+            "evidenceTier": "direct",
+        }
+    if degraded:
+        result["degradedReason"] = degraded
+    return result
 
 
 # --------------------------------------------------------------------------- snapshot
@@ -1450,28 +1491,21 @@ def build_snapshot(root: Path, files: list[str], sources: list[SourceFile], snap
 # --------------------------------------------------------------------------- output safety
 
 
-def scrub(value: Any, detected: Redaction = NO_REDACTION) -> tuple[Any, int]:
-    """Replace any credential-looking string in a value, returning the number replaced."""
+# The free-text fields of a check result. Every other field (status, evidenceTier,
+# judgement, applicability, evaluationState, classification) is a fixed value of
+# the collector contract and is never rewritten, nor are dictionary keys.
+FREE_TEXT_FIELDS = ("gap", "remediation", "reason", "degradedReason", "judgementReason")
+
+
+def scrub(value: Any, detected: Redaction = NO_REDACTION) -> Any:
+    """Replace each credential-looking string value, never a key, in snapshot facts."""
     if isinstance(value, str):
-        return (WITHHELD, 1) if sensitive(value, detected) else (value, 0)
+        return WITHHELD if sensitive(value, detected) else value
     if isinstance(value, list):
-        total = 0
-        items = []
-        for item in value:
-            cleaned, count = scrub(item, detected)
-            items.append(cleaned)
-            total += count
-        return items, total
+        return [scrub(item, detected) for item in value]
     if isinstance(value, dict):
-        total = 0
-        result = {}
-        for key, item in value.items():
-            cleaned_key, key_count = scrub(key, detected)
-            cleaned, count = scrub(item, detected)
-            result[cleaned_key if not key_count else f"{WITHHELD} {total}"] = cleaned
-            total += count + key_count
-        return result, total
-    return value, 0
+        return {key: scrub(item, detected) for key, item in value.items()}
+    return value
 
 
 def make_safe(output: dict[str, Any], detected_values: Iterable[str] = ()) -> dict[str, Any]:
@@ -1486,6 +1520,9 @@ def make_safe(output: dict[str, Any], detected_values: Iterable[str] = ()) -> di
     """
     detected = Redaction(detected_values)
     for result in output["checks"].values():
+        for field in FREE_TEXT_FIELDS:
+            if isinstance(result.get(field), str) and sensitive(result[field], detected):
+                result[field] = WITHHELD
         evidence = result.get("evidence")
         if not isinstance(evidence, list):
             continue
@@ -1495,7 +1532,7 @@ def make_safe(output: dict[str, Any], detected_values: Iterable[str] = ()) -> di
                 f"command: `collect.py output check` → {len(evidence) - len(kept)} evidence entries withheld because they looked like credentials"
             )
         result["evidence"] = kept
-    output, _ = scrub(output, detected)
+    output["snapshot"] = scrub(output["snapshot"], detected)
     return output
 
 

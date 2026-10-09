@@ -919,6 +919,92 @@ class SecurityCollectorTests(unittest.TestCase):
         notes = (ROOT / "security-audit" / "references" / "detection.md").read_text(encoding="utf-8")
         self.assertIn("## Redaction guarantee", notes)
         self.assertIn("Redaction guarantee", collector.__doc__ or "")
+    # ----------------------------------------------------------------- fifth review regressions
+
+    def test_values_equal_to_contract_words_never_corrupt_the_collector_contract(self) -> None:
+        self.write(
+            ".env.production",
+            "PASSWORD=direct\n"
+            "API_SECRET=present\n"
+            "SESSION_SECRET=violation\n"
+            "SIGNING_SECRET=security-audit.no-dynamic-code-execution\n"
+            "TOKEN_SECRET=evidenceTier\n",
+        )
+        self.write("src/run.ts", "export const run = (input: string) => eval(input);\n")
+        self.commit()
+        result = self.collect()
+        for check_id, outcome in result["checks"].items():
+            self.assertTrue(check_id.startswith(CHECK))
+            self.assertIn(outcome["status"], ("present", "partial", "missing", "violation"))
+            self.assertIn(outcome["evidenceTier"], ("direct", "supported", "inferred"))
+        self.assertEqual(result["checks"][SECRETS]["status"], "violation")
+        self.assertIn("secretScan", result["snapshot"])
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "audit-protocol" / "scripts" / "audit_run.py"), "--repository", str(self.root), "begin", "security-audit"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertIn("Collector resolved 3 checks.", completed.stdout)
+        self.assertNotIn("rejected", completed.stdout)
+        self.assertNotIn("Warning", completed.stdout)
+        run = json.loads((self.root / ".architect-audits" / "security-audit" / ".staging" / "run.json").read_text(encoding="utf-8"))
+        recorded = {check["checkId"]: check for check in run["checks"] if check["recordedBy"] == "collector"}
+        self.assertEqual(set(recorded), {SECRETS, IGNORED, DYNAMIC})
+        self.assertEqual(recorded[SECRETS]["evidenceTier"], "direct")
+
+    def test_a_later_pattern_that_re_ignores_an_exception_wins(self) -> None:
+        orderings = {
+            ".env*\n!.env.staging.local\n.env*.local\n": "present",
+            ".env*\n.env*.local\n!.env.staging.local\n": "partial",
+        }
+        for content, expected in orderings.items():
+            with self.subTest(content=content):
+                self.write(".gitignore", content)
+                self.commit(expected)
+                self.assertEqual(self.collect()["checks"][IGNORED]["status"], expected)
+
+    def test_a_deeper_ignore_file_that_re_ignores_an_exception_wins(self) -> None:
+        self.write(".gitignore", ".env*\n!apps/web/.env.local\n")
+        self.write("apps/web/.gitignore", ".env.local\n")
+        self.write("apps/web/package.json", '{"name": "web"}\n')
+        self.commit()
+        self.assertEqual(self.collect()["checks"][IGNORED]["status"], "present")
+
+    def test_skipped_source_files_degrade_a_clean_dynamic_code_result(self) -> None:
+        self.write("src/at-limit.ts", "x" * collector.MAX_FILE_BYTES)
+        self.commit()
+        dynamic = self.collect()["checks"][DYNAMIC]
+        self.assertEqual(dynamic["status"], "present")
+        self.assertNotIn("degradedReason", dynamic)
+        self.write("src/over-limit.ts", "x" * (collector.MAX_FILE_BYTES + 1))
+        self.commit("over")
+        result = self.collect()
+        self.assertEqual(result["checks"][DYNAMIC]["status"], "present")
+        self.assertIn("1 source files were too large or could not be read", result["checks"][DYNAMIC]["degradedReason"])
+        self.assertEqual(result["snapshot"]["skippedSourceFiles"]["examples"], ["src/over-limit.ts"])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can read any file")
+    def test_an_unreadable_source_file_degrades_a_clean_dynamic_code_result(self) -> None:
+        self.write("src/locked.ts", "export const run = (input: string) => eval(input);\n")
+        self.commit()
+        locked = self.root / "src" / "locked.ts"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o644)
+        dynamic = self.collect()["checks"][DYNAMIC]
+        self.assertEqual(dynamic["status"], "present")
+        self.assertIn("could not be read", dynamic["degradedReason"])
+
+    def test_a_regex_after_a_control_condition_is_not_code(self) -> None:
+        self.write(
+            "src/run.ts",
+            "export function run(ok: boolean, x: string, a: number, b: number, c: number, input: string) {\n"
+            "  if (ok) /eval(input)/.test(x);\n"
+            "  while (ok) /new Function(/.exec(x);\n"
+            "  const ratio = (a + b) / c + eval(input) / 2;\n"
+            "  return ratio;\n"
+            "}\n",
+        )
+        self.commit()
+        self.assertEqual(self.collect()["checks"][DYNAMIC]["evidence"], ["src/run.ts:4 — `eval(`"])
 
 if __name__ == "__main__":
     unittest.main()
