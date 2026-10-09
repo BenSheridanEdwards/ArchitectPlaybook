@@ -55,6 +55,7 @@ STATUSES = ("present", "partial", "missing", "violation")
 GRADED_STATUSES = ("partial", "missing", "violation")
 TIERS = ("direct", "supported", "inferred")
 JUDGEMENTS = ("act-on", "consider", "noted", "dismissed")
+MAX_ACT_ON = 5
 DECISION_KINDS = ("accepted-risk", "false-positive", "out-of-scope")
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 MAX_SEARCH_FILES = 50_000
@@ -1163,26 +1164,14 @@ def record_evaluation(
             for decision in run.get("decisions", [])
             if decision_applies(root, decision, check["checkId"], paths)
         ]
-        if judgement is None:
-            judgement = "noted" if applicable_decisions else "act-on"
-        if judgement not in JUDGEMENTS:
-            raise ProtocolError(f"judgement must be one of {', '.join(JUDGEMENTS)}")
         if applicable_decisions:
             decision_id = str(applicable_decisions[0].get("id"))
-            if judgement in {"act-on", "consider"} and not (isinstance(judgement_reason, str) and judgement_reason.strip()):
-                raise ProtocolError(
-                    f"recorded decision {decision_id} covers this finding; keep it noted, or give "
-                    "--reason explaining why the decision no longer holds"
-                )
-            if judgement in {"noted", "dismissed"} and not judgement_reason:
-                judgement_reason = f"Covered by recorded decision {decision_id}."
-        if judgement in {"noted", "dismissed"} and not (isinstance(judgement_reason, str) and judgement_reason.strip()):
-            raise ProtocolError(f"a {judgement} finding needs --reason")
+        judgement, judgement_reason = resolve_judgement(judgement, judgement_reason, decision_id)
     else:
         judgement = None
         judgement_reason = None
 
-    for value in (gap, remediation, judgement_reason, degraded_reason):
+    for value in (gap, remediation, degraded_reason):
         if isinstance(value, str) and contains_secret(value):
             raise ProtocolError(f"text looks like it contains a secret; replace the secret with {REDACTED}")
     check.update(
@@ -1199,11 +1188,37 @@ def record_evaluation(
             "remediation": remediation.strip() if isinstance(remediation, str) and remediation.strip() else None,
             "evidenceTier": tier,
             "judgement": judgement,
-            "judgementReason": judgement_reason.strip() if isinstance(judgement_reason, str) and judgement_reason.strip() else None,
+            "judgementReason": judgement_reason,
             "decisionId": decision_id,
             "recordedBy": recorded_by,
         }
     )
+
+
+def resolve_judgement(judgement: Any, reason: Any, decision_id: str | None) -> tuple[str, str | None]:
+    """Apply the judgement rules that `record` and `judge` share, and return the judgement and its reason.
+
+    With no judgement given, a finding a recorded decision covers is noted and
+    any other finding is act-on.
+    """
+    if judgement is None:
+        judgement = "noted" if decision_id else "act-on"
+    if judgement not in JUDGEMENTS:
+        raise ProtocolError(f"judgement must be one of {', '.join(JUDGEMENTS)}")
+    given = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    if decision_id:
+        if judgement in {"act-on", "consider"} and given is None:
+            raise ProtocolError(
+                f"recorded decision {decision_id} covers this finding; keep it noted, or give "
+                "--reason explaining why the decision no longer holds"
+            )
+        if judgement in {"noted", "dismissed"} and given is None:
+            given = f"Covered by recorded decision {decision_id}."
+    if judgement in {"noted", "dismissed"} and given is None:
+        raise ProtocolError(f"a {judgement} finding needs --reason")
+    if given is not None and contains_secret(given):
+        raise ProtocolError(f"text looks like it contains a secret; replace the secret with {REDACTED}")
+    return judgement, given
 
 
 def command_record(arguments: argparse.Namespace) -> int:
@@ -1227,6 +1242,30 @@ def command_record(arguments: argparse.Namespace) -> int:
         )
         clear_audit_applicability(run)
     print(f"Recorded {check['checkId']}: {check['status']} ({check['evidenceTier']} evidence, judgement {check['judgement'] or 'n/a'}).")
+    return 0
+
+
+def command_judge(arguments: argparse.Namespace) -> int:
+    """Change the judgement of a recorded finding without re-recording its evidence."""
+    root = repository_root(arguments.repository)
+    with staged_run(root, arguments.audit) as run:
+        check = find_check(run, arguments.check)
+        if check.get("status") not in GRADED_STATUSES:
+            if is_pending(check):
+                state = "is still pending; record a result first"
+            elif check["applicability"] == "not-applicable":
+                state = "is recorded as not applicable"
+            elif check["status"] is None:
+                state = "is recorded as not evaluated"
+            else:
+                state = f"is {check['status']}"
+            raise ProtocolError(
+                f"{check['checkId']} {state}; only a partial, missing, or violation result has a judgement"
+            )
+        check["judgement"], check["judgementReason"] = resolve_judgement(
+            arguments.judgement, arguments.reason, check.get("decisionId")
+        )
+    print(f"Judged {check['checkId']}: {check['judgement']} ({check['status']}, recorded by {check['recordedBy']}).")
     return 0
 
 
@@ -1527,6 +1566,19 @@ def finish_run(root: Path, audit: str) -> int:
             f"{len(pending)} checks have no recorded result: {', '.join(pending)}. Record each one as evaluated, "
             "not applicable, or not evaluated with a reason."
         )
+    act_on = ordered(run["checks"], "act-on")
+    if len(act_on) > MAX_ACT_ON:
+        listed = "".join(
+            f"\n  {number}. {check['checkId']} ({check.get('severity') or 'unrated'}, {check['status']}, "
+            f"recorded by {check['recordedBy']})"
+            for number, check in enumerate(act_on, start=1)
+        )
+        errors.append(
+            f"{len(act_on)} checks are act-on, but a run publishes at most {MAX_ACT_ON}, because they become the "
+            f"chat's top recommendations. In report order:{listed}\n  Keep the {MAX_ACT_ON} highest-value ones act-on "
+            f"and demote the rest, for example: python3 \"$PROTOCOL\" judge {audit} <check-id> --judgement consider "
+            '--reason "<why>"'
+        )
     if run["target"]["gitCommit"] != CALCULATOR.current_commit(root) or run["treeFingerprint"] != tree_fingerprint(root):
         errors.append(
             "the repository changed during the run (commit or working tree); begin again with --restart so the "
@@ -1630,10 +1682,8 @@ def print_chat_summary(run: dict[str, Any], findings: dict[str, Any]) -> None:
     act_on = ordered(run["checks"], "act-on")
     if act_on:
         print("Act on, highest severity first:")
-        for number, check in enumerate(act_on[:5], start=1):
+        for number, check in enumerate(act_on, start=1):
             print(f"{number}. {check['title']} [{check.get('severity') or 'unrated'}, {check['status']}] — {check['gap']} Smallest fix: {check['remediation']}")
-        if len(act_on) > 5:
-            print(f"   ({len(act_on) - 5} more act-on items are in findings.md; consider whether they are all act-on.)")
     else:
         print("Nothing to act on.")
     dismissed = summary["judgementCounts"]["dismissed"]
@@ -1749,6 +1799,13 @@ def parser() -> argparse.ArgumentParser:
     record.add_argument("--classification")
     record.add_argument("--degraded", help="reason the evidence is incomplete, such as an enrichment tool failing")
     record.set_defaults(handler=command_record)
+
+    judge = commands.add_parser("judge", help="change the judgement of a recorded partial, missing, or violation result")
+    judge.add_argument("audit")
+    judge.add_argument("check")
+    judge.add_argument("--judgement", required=True, choices=JUDGEMENTS)
+    judge.add_argument("--reason", help="why a finding is noted, dismissed, demoted, or overrides a decision")
+    judge.set_defaults(handler=command_judge)
 
     not_applicable = commands.add_parser("not-applicable", help="record a check that does not apply")
     not_applicable.add_argument("audit")

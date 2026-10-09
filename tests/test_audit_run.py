@@ -76,6 +76,7 @@ COLLECTOR_CATALOG = {
     "checks": [
         {"checkId": f"{COLLECTOR_AUDIT}.tool-check", "layer": "Layer 1 — Tools", "title": "Tool check"},
         {"checkId": f"{COLLECTOR_AUDIT}.bad-check", "layer": "Layer 1 — Tools", "title": "Bad check"},
+        {"checkId": f"{COLLECTOR_AUDIT}.lint-check", "layer": "Layer 1 — Tools", "title": "Lint check"},
         {"checkId": f"{COLLECTOR_AUDIT}.model-check", "layer": "Layer 2 — Model", "title": "Model check"},
     ],
 }
@@ -90,6 +91,10 @@ print(json.dumps({
         "collector-audit.tool-check": {"status": "present", "evidence": ["command: `collect.py scan` → 0 problems"]},
         "collector-audit.bad-check": {
             "status": "violation", "evidence": ["src/missing.ts:1 — `x`"], "gap": "g", "remediation": "r",
+        },
+        "collector-audit.lint-check": {
+            "status": "partial", "evidence": ["command: `collect.py lint` → plugin missing"],
+            "gap": "A lint plugin is missing.", "remediation": "Add the plugin.",
         },
     },
     "snapshot": {
@@ -552,6 +557,85 @@ class SearchTests(AuditRunTestCase):
             expected = sorted(path for path in listed if path in files)
             actual = sorted(path for path in files if audit_run.Scope(self.root, pattern).matches(path))
             self.assertEqual(actual, expected, pattern)
+
+
+class JudgementTests(AuditRunTestCase):
+    GRADED = (FETCH_CHECK, CYCLES_CHECK, IMPORTS_CHECK, f"{AUDIT}.extra-1", f"{AUDIT}.extra-2", f"{AUDIT}.extra-3")
+
+    def judge(self, check: str, *arguments: str, audit: str = AUDIT) -> tuple[int, str]:
+        return self.run_command("judge", audit, check, *arguments)
+
+    def record_partial(self, check: str) -> tuple[int, str]:
+        return self.record(
+            check, "--status", "partial", "--tier", "direct", "--evidence", "src/a.ts:3 — `fetch('/x')`",
+            "--gap", "A gap.", "--remediation", "A fix.",
+        )
+
+    def test_judge_changes_a_collector_finding_without_re_recording_it(self) -> None:
+        self.assert_accepted(self.run_command("begin", COLLECTOR_AUDIT))
+        lint = f"{COLLECTOR_AUDIT}.lint-check"
+        before = self.check(lint, COLLECTOR_AUDIT)
+        self.assertEqual((before["judgement"], before["recordedBy"]), ("act-on", "collector"))
+        self.assert_accepted(self.judge(lint, "--judgement", "consider", "--reason", "Low value here.", audit=COLLECTOR_AUDIT))
+        after = self.check(lint, COLLECTOR_AUDIT)
+        self.assertEqual((after["judgement"], after["judgementReason"]), ("consider", "Low value here."))
+        unchanged = {key: value for key, value in after.items() if key not in {"judgement", "judgementReason"}}
+        self.assertEqual(unchanged, {key: value for key, value in before.items() if key not in {"judgement", "judgementReason"}})
+
+    def test_judge_changes_a_model_finding(self) -> None:
+        self.run_command("begin", AUDIT)
+        self.assert_accepted(self.record_partial(FETCH_CHECK))
+        self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", "consider"))
+        check = self.check(FETCH_CHECK)
+        self.assertEqual((check["judgement"], check["judgementReason"], check["recordedBy"]), ("consider", None, "model"))
+
+    def test_judge_refuses_checks_without_a_graded_result(self) -> None:
+        self.run_command("begin", AUDIT)
+        self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "consider"), "still pending")
+        self.assert_accepted(self.record(CYCLES_CHECK, "--status", "present", "--evidence", "src/a.ts:1"))
+        self.assert_rejected(self.judge(CYCLES_CHECK, "--judgement", "consider"), "is present")
+        self.run_command("not-applicable", AUDIT, IMPORTS_CHECK, "--reason", "No imports.")
+        self.assert_rejected(self.judge(IMPORTS_CHECK, "--judgement", "consider"), "not applicable")
+        self.run_command("not-evaluated", AUDIT, LANGUAGE_CHECK, "--reason", "No time.")
+        self.assert_rejected(self.judge(LANGUAGE_CHECK, "--judgement", "consider"), "not evaluated")
+
+    def test_judge_needs_a_reason_for_noted_and_dismissed(self) -> None:
+        self.run_command("begin", AUDIT)
+        for judgement in ("noted", "dismissed"):
+            self.assert_accepted(self.record_partial(FETCH_CHECK))
+            self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", judgement), "needs --reason")
+            self.assertEqual(self.check(FETCH_CHECK)["judgement"], "act-on")
+            self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", judgement, "--reason", "Prototype route."))
+            self.assertEqual(self.check(FETCH_CHECK)["judgement"], judgement)
+
+    def test_judge_keeps_a_recorded_decision_noted_unless_given_a_reason(self) -> None:
+        self.run_command("decide", FETCH_CHECK, "--decision", "accepted-risk", "--reason", "Legacy.", "--owner", "Owner")
+        self.run_command("begin", AUDIT)
+        self.assert_accepted(self.record_partial(FETCH_CHECK))
+        self.assertEqual(self.check(FETCH_CHECK)["judgement"], "noted")
+        self.assert_rejected(self.judge(FETCH_CHECK, "--judgement", "act-on"), "decision-001")
+        self.assert_accepted(self.judge(FETCH_CHECK, "--judgement", "act-on", "--reason", "The route is live again."))
+
+    def test_finish_refuses_more_than_five_act_on_findings(self) -> None:
+        self.run_command("begin", AUDIT)
+        for check in self.GRADED:
+            self.assert_accepted(self.record_partial(check))
+        self.resolve_remaining()
+        code, output = self.run_command("finish", AUDIT)
+        self.assertEqual(code, 1, output)
+        self.assertIn("6 checks are act-on", output)
+        # Report order: high severity first, then catalog order.
+        positions = [output.index(f"{check} (") for check in self.GRADED]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn(f"judge {AUDIT} <check-id> --judgement consider", output)
+        self.assertFalse((self.root / ".architect-audits" / AUDIT / "findings.json").exists())
+        self.assert_accepted(self.judge(f"{AUDIT}.extra-3", "--judgement", "consider", "--reason", "Lowest value."))
+        code, output = self.run_command("finish", AUDIT)
+        self.assertEqual(code, 0, output)
+        self.assertIn("5. Extra check 2", output)
+        self.assertNotIn("Extra check 3 [", output)
+        markdown = (self.root / ".architect-audits" / AUDIT / "findings.md").read_text(encoding="utf-8")
+        self.assertIn("## Consider", markdown)
 
 
 class DecisionTests(AuditRunTestCase):

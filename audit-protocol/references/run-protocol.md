@@ -98,6 +98,12 @@ their own branch.
      applies but you could not evaluate it. This is honest and lowers coverage.
      It never lowers the score.
 
+   To change only the judgement of a `partial`, `missing`, or `violation`
+   result, whether you or the collector recorded it, use `judge <audit-name>
+   <check-id> --judgement <judgement> [--reason "<why>"]`. It keeps the status
+   and evidence, and applies the same judgement rules as `record`. See
+   [Judgement](#judgement).
+
    Use `audit-not-applicable <audit-name> --reason "<why>"` only after detection
    proves the audited technology is absent. A later per-check record replaces
    that whole-audit decision. `status <audit-name>` lists the checks still
@@ -108,8 +114,8 @@ their own branch.
    updates. Still, a correction only means something after the record it
    corrects.
 4. **Finish.** `python3 "$PROTOCOL" finish <audit-name>` refuses to publish
-   while any check is pending, or if the commit or working tree changed during
-   the run. It then:
+   while any check is pending, while more than five checks are `act-on`, or if
+   the commit or working tree changed during the run. It then:
    - re-verifies every evidence entry;
    - validates the run with the Repository Quality Score calculator's own
      contract code;
@@ -231,13 +237,29 @@ Every `partial`, `missing`, or `violation` result needs a judgement:
 
 | Judgement | Use when |
 | --- | --- |
-| `act-on` | Fixing it is worth the team's time now. These become the chat's recommendations. Keep it to about five. More than that usually means you are not filtering. |
+| `act-on` | Fixing it is worth the team's time now. These become the chat's recommendations. At most five; `finish` refuses more. More than five usually means you are not filtering. |
 | `consider` | Real, but lower value than the act-on items, or dependent on a product decision. |
 | `noted` | Real, but accepted or out of scope for now. Needs `--reason`. |
 | `dismissed` | Not a real problem here, such as a heuristic false positive. Needs `--reason`. Dismissed findings are listed in the report, so readers can audit your filtering. |
 
 Status and judgement are separate. A dismissed or noted finding still reports
 its true status, and the score stays honest.
+
+A result recorded without `--judgement` is `act-on`, or `noted` when a
+recorded decision covers it. Collector results usually carry no judgement, so
+every non-present collector check starts as `act-on`. Review them with the
+rest. To change a judgement without re-recording the evidence, run:
+
+```bash
+python3 "$PROTOCOL" judge <audit-name> <check-id> --judgement consider --reason "<why>"
+```
+
+`judge` works on any `partial`, `missing`, or `violation` result, from the
+model or the collector. It refuses a check that is pending, `present`, not
+applicable, or not evaluated. `noted` and `dismissed` need `--reason`, as they
+do on `record`. When more than five checks are `act-on`, `finish` lists them in
+report order and publishes nothing. Keep the five highest-value ones and demote
+the rest with `judge`.
 
 Before marking anything act-on, apply these filters:
 
@@ -261,8 +283,8 @@ the same rules as a search scope, so `src/legacy` covers everything in that
 folder. When a later run records a non-present result for that check, and every
 cited file falls inside the decision's scope, the script marks the finding
 `noted` and links the decision.
-To act on it anyway, pass `--judgement act-on` with `--reason` explaining why
-the decision no longer holds. Decisions past their `--review-after` date are
+To act on it anyway, pass `--judgement act-on` to `record` or `judge`, with
+`--reason` explaining why the decision no longer holds. Decisions past their `--review-after` date are
 flagged when the run finishes.
 
 ## Prioritising large repositories

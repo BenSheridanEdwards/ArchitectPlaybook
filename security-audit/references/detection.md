@@ -472,7 +472,7 @@ hypothesis so a human can close it.
 
 ## Severity and judgement
 
-Act on at most about five findings. Rank critical before high, then anonymous
+Act on at most five findings; `finish` refuses more. Rank critical before high, then anonymous
 entry points before authenticated ones, then by the number of affected
 entry points. Exposed secrets always come first, because rotation cannot wait
 for the rest of the plan. Mark hardening gaps `consider`. If every candidate
