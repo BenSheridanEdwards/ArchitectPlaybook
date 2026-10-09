@@ -146,23 +146,73 @@ def source_files(root: Path) -> tuple[list[Path], list[Path]]:
     return files, sorted(skipped)
 
 
-def mask_comments(text: str) -> str:
-    """Blank out comments, keeping strings, offsets, and line numbers unchanged."""
+def mask_comments(text: str, allow_markup: bool = False) -> tuple[str, bytearray]:
+    """Blank comments and mark code positions without changing source offsets.
+
+    Quoted specifiers remain readable by IMPORT_PATTERN. Literal text is not
+    code; template and JSX brace expressions are. This is a lexical filter,
+    not a complete JavaScript or TypeScript parser.
+    """
     output = list(text)
+    code_positions = bytearray(len(text))
     index = 0
-    quote = ""
+    contexts: list[dict[str, Any]] = [{"kind": "code", "depth": 0, "operand": True, "token": "", "brackets": [], "statement": True}]
+    expression_keywords = {"return", "throw", "case", "await", "yield", "delete", "void", "typeof", "new", "in", "instanceof"}
+    control_keywords = {"if", "while", "for", "with", "switch", "catch"}
+    markup_start = re.compile(r"<(?:[A-Za-z]|>)")
+    generic_parameters = re.compile(r"<[A-Za-z_$][\w$]*\s*(?:[,=]|\bextends\b)")
     while index < len(text):
         character = text[index]
-        if quote:
+        frame = contexts[-1]
+        context = frame["kind"]
+        depth = frame.get("depth", 0)
+        if context in ("'", '"'):
+            attribute = contexts[-2]["kind"] == "tag"
+            if character == "\\" and not attribute:
+                index += 2
+                continue
+            if character == context or (character == "\n" and not attribute):
+                contexts.pop()
+                if contexts[-1]["kind"] in ("code", "expression"):
+                    contexts[-1].update(operand=False, token="literal", statement=False)
+            index += 1
+            continue
+        if context == "template":
             if character == "\\":
                 index += 2
                 continue
-            if character == quote or (character == "\n" and quote != "`"):
-                quote = ""
+            if character == "`":
+                contexts.pop()
+                contexts[-1].update(operand=False, token="literal", statement=False)
+            elif text.startswith("${", index):
+                contexts.append({"kind": "expression", "depth": 1, "operand": True, "token": "", "brackets": [], "statement": False})
+                index += 2
+                continue
             index += 1
             continue
-        if character in "'\"`":
-            quote = character
+        if context == "markup":
+            if character == "<":
+                closing = text.startswith("</", index)
+                contexts.append({"kind": "tag", "depth": -1 if closing else 1})
+                index += 2 if closing else 1
+            elif character == "{":
+                contexts.append({"kind": "expression", "depth": 1, "operand": True, "token": "", "brackets": [], "statement": False})
+                index += 1
+            else:
+                index += 1
+            continue
+        if context == "tag":
+            if character in "'\"":
+                contexts.append({"kind": character})
+            elif character == "{":
+                contexts.append({"kind": "expression", "depth": 1, "operand": True, "token": "", "brackets": [], "statement": False})
+            elif character == ">":
+                contexts.pop()
+                if depth == -1 or text[index - 1] != "/":
+                    contexts[-1]["depth"] += depth
+                if contexts[-1]["depth"] == 0:
+                    contexts.pop()
+                    contexts[-1].update(operand=False, token="markup", statement=False)
             index += 1
             continue
         if text.startswith("//", index):
@@ -172,13 +222,94 @@ def mask_comments(text: str) -> str:
             end = text.find("*/", index + 2)
             end = len(text) if end == -1 else end + 2
         else:
+            if character in "'\"":
+                contexts.append({"kind": character})
+            elif character == "`":
+                contexts.append({"kind": "template"})
+            elif allow_markup and character == "<" and frame["operand"] and markup_start.match(text, index) and not generic_parameters.match(text, index):
+                contexts.append({"kind": "markup", "depth": 0})
+                contexts.append({"kind": "tag", "depth": 1})
+            elif character == "/" and frame["operand"]:
+                # Regex braces and quotes do not alter enclosing expressions.
+                index += 1
+                character_class = False
+                while index < len(text):
+                    if text[index] == "\\":
+                        index += 2
+                        continue
+                    if text[index] == "[":
+                        character_class = True
+                    elif text[index] == "]":
+                        character_class = False
+                    elif text[index] == "/" and not character_class:
+                        index += 1
+                        break
+                    elif text[index] == "\n":
+                        break
+                    index += 1
+                frame.update(operand=False, token="literal", statement=False)
+                continue
+            else:
+                code_positions[index] = 1
+                if character.isalnum() or character in "_$":
+                    end = index + 1
+                    while end < len(text) and (text[end].isalnum() or text[end] in "_$"):
+                        end += 1
+                    code_positions[index:end] = b"\x01" * (end - index)
+                    token = text[index:end]
+                    if token == "function" and frame["token"] != ".":
+                        frame["function_declaration"] = frame["statement"]
+                    frame["control"] = token in control_keywords and frame["token"] != "."
+                    declaration_prefix = frame["statement"] and token in {"export", "default", "async", "declare"}
+                    frame.update(operand=token in expression_keywords and frame["token"] != ".", token=token, statement=declaration_prefix or token in {"else", "do", "try", "finally"})
+                    index = end
+                    continue
+                if character == "(":
+                    if "function_declaration" in frame:
+                        frame["brackets"].append(("function", frame.pop("function_declaration")))
+                    else:
+                        frame["brackets"].append("control" if frame.get("control") else "parentheses")
+                    frame.update(operand=True, statement=False)
+                elif character == ")":
+                    bracket = frame["brackets"].pop() if frame["brackets"] else None
+                    if isinstance(bracket, tuple):
+                        frame["body_declaration"] = bracket[1]
+                    control = bracket == "control"
+                    frame.update(operand=control, statement=control)
+                elif character == "{":
+                    if "body_declaration" in frame:
+                        frame["brackets"].append("declaration" if frame.pop("body_declaration") else "function-expression")
+                    else:
+                        frame["brackets"].append("block" if frame["statement"] or frame["token"] == "=>" else "object")
+                    frame.update(operand=True, statement=True)
+                    if context == "expression":
+                        frame["depth"] = depth + 1
+                elif character == "}":
+                    if context == "expression":
+                        if depth == 1:
+                            contexts.pop()
+                            index += 1
+                            continue
+                        frame["depth"] = depth - 1
+                    block = bool(frame["brackets"]) and frame["brackets"].pop() in {"block", "declaration"}
+                    frame.update(operand=block, statement=block)
+                elif not character.isspace():
+                    frame.update(operand=character not in "].", statement=character == ";")
+                    if text.startswith(("++", "--", "=>"), index):
+                        code_positions[index + 1] = 1
+                        frame.update(operand=text[index:index + 2] == "=>", token=text[index:index + 2])
+                        index += 2
+                        continue
+                if not character.isspace():
+                    frame["token"] = character
+                    frame["control"] = False
             index += 1
             continue
         for position in range(index, end):
             if output[position] != "\n":
                 output[position] = " "
         index = end
-    return "".join(output)
+    return "".join(output), code_positions
 
 
 def config_files(root: Path) -> list[Path]:
@@ -342,8 +473,13 @@ def build_graph(
     rank = {"static": 2, "lazy": 1, "type": 0}
     for file in files:
         importer = file.resolve()
-        text = mask_comments(read_text(file))
+        text, code_positions = mask_comments(read_text(file), allow_markup=file.suffix in (".tsx", ".jsx"))
         for match in IMPORT_PATTERN.finditer(text):
+            keyword = match.start()
+            while text[keyword].isspace():
+                keyword += 1
+            if not code_positions[keyword]:
+                continue
             group = next((name for name in ("from", "side", "dynamic", "require") if match.group(name)), None)
             if group is None:
                 continue

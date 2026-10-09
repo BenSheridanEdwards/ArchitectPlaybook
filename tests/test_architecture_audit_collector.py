@@ -71,6 +71,117 @@ class ArchitectureCollectorTests(unittest.TestCase):
         cycle = self.collect()["checks"][CHECK + "no-circular-dependencies"]
         self.assertEqual(cycle["status"], "present")
 
+    def test_import_examples_in_strings_do_not_form_edges_or_cycles(self) -> None:
+        examples = [
+            "export const example = 'require(\"./b\")';\n",
+            'export const example = "require(\'./b\')";\n',
+            "export const example = `require('./b')`;\n",
+            "export const example = `example:\nimport { b } from './b';\n`;\n",
+            "export const example = `example:\nexport { b } from './b';\n`;\n",
+            "export const example = `import('./b')`;\n",
+            'export const example = "escaped \\\" require(\'./b\')";\n',
+        ]
+        self.write("src/b.ts", "import { example } from './a';\nexport const b = example;\n")
+        for example in examples:
+            with self.subTest(example=example):
+                self.write("src/a.ts", example)
+                result = self.collect()
+                self.assertEqual(result["checks"][CHECK + "no-circular-dependencies"]["status"], "present")
+                self.assertEqual(result["snapshot"]["importEdges"], 1)
+                self.assertNotIn("importCycles", result["snapshot"])
+
+    def test_template_expressions_keep_real_imports_and_ignore_nested_literal_examples(self) -> None:
+        self.write("src/b.ts", "import { example } from './a';\nexport const b = example;\n")
+        examples = [
+            ("export const example = `${require /* comment */ ('./b')}`;\n", "violation", 2),
+            ("export const example = `${import /* comment */ ('./b')}`;\n", "present", 2),
+            ("export const example = `${{ value: require('./b') }.value}`;\n", "violation", 2),
+            ("export const example = `${`nested ${require('./b')}`}`;\n", "violation", 2),
+            ("export const example = `${`require('./b')`}`;\n", "present", 1),
+            ('export const example = `${"require(\'./b\')"}`;\n', "present", 1),
+            ("export const example = `${1 /* require('./b') */}`;\n", "present", 1),
+            ("export const example = `${/}/.test('}') ? require('./b') : ''}`;\n", "violation", 2),
+            ("export const example = `${/}/.test('}') ? import('./b') : ''}`;\n", "present", 2),
+            ("export const example = `${2 / 1 ? require('./b') : ''}`;\n", "violation", 2),
+            ("if (true) /[\"']/.test('x'); export const example = require('./b');\n", "violation", 2),
+            ("{} /[\"']/.test('x'); export const example = require('./b');\n", "violation", 2),
+            ("const of = 2; export const example = of / require('./b') / 2;\n", "violation", 2),
+            ("export const example = object.return / require('./b') / 2;\n", "violation", 2),
+            ("export const example = object.if(true) / require('./b') / 2;\n", "violation", 2),
+            ("function run() {} /[\"']/.test('x'); export const example = require('./b');\n", "violation", 2),
+            ("export async function run() {} /[\"']/.test('x'); export const example = require('./b');\n", "violation", 2),
+            ("export const example = function() {} / require('./b') / 2;\n", "violation", 2),
+            ("export const example = `${await /}/.test('}') ? import('./b') : ''}`;\n", "present", 2),
+            ("function* run() { return `${yield /}/.test('}') ? require('./b') : ''}`; }\nexport const example = run;\n", "violation", 2),
+        ]
+        for example, status, edges in examples:
+            with self.subTest(example=example):
+                self.write("src/a.ts", example)
+                result = self.collect()
+                self.assertEqual(result["checks"][CHECK + "no-circular-dependencies"]["status"], status)
+                self.assertEqual(result["snapshot"]["importEdges"], edges)
+
+    def test_real_imports_after_literals_keep_comments_types_and_line_citations(self) -> None:
+        self.write(
+            "src/a.ts",
+            "export const example = `require('./absent')`;\n"
+            "/* leading comment */ import /* comment */ { b } /* comment */ from './b';\n",
+        )
+        self.write("src/b.ts", "export /* comment */ { example as b } /* comment */ from './a';\n")
+        result = self.collect()
+        cycle = result["checks"][CHECK + "no-circular-dependencies"]
+        self.assertEqual(cycle["status"], "violation")
+        self.assertIn("src/a.ts:2 — `./b`", cycle["evidence"])
+        self.assertEqual(result["snapshot"]["unresolvedRelativeImports"], 0)
+
+    def test_literal_workspace_imports_do_not_report_a_boundary_violation(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"]}\n')
+        self.write("packages/one/package.json", '{"name": "one"}\n')
+        self.write("packages/two/package.json", '{"name": "two"}\n')
+        self.write("packages/two/src/internal.ts", "export const internal = 1;\n")
+        self.write("packages/one/src/a.ts", "export const example = `require('../../two/src/internal')`;\n")
+        result = self.collect()
+        self.assertEqual(result["checks"][CHECK + "cross-workspace-contracts-respected"]["status"], "present")
+        self.assertEqual(result["snapshot"]["importEdges"], 0)
+
+    def test_jsx_text_punctuation_does_not_hide_real_expression_imports(self) -> None:
+        self.write("src/b.ts", "import { example } from './a';\nexport const b = example;\n")
+        examples = [
+            "export const example = <div>don't {require('./b')}</div>;\n",
+            'export const example = <div>"quote {require(\'./b\')}"</div>;\n',
+            "export const example = <><div>{require('./b')}</div></>;\n",
+            "export const example = <div><span>don't</span>{require('./b')}</div>;\n",
+            "export const example = <T,>(value: T) => require('./b');\n",
+            "export const example = <T extends unknown>(value: T) => require('./b');\n",
+            "const run = <T,>(value: T) => value;\nimport { b } from './b';\nexport const example = b;\n",
+            'export const example = <div data-path="C:\\">{require(\'./b\')}</div>;\n',
+            'export const example = <div label="first\nsecond">{require(\'./b\')}</div>;\n',
+        ]
+        for example in examples:
+            with self.subTest(example=example):
+                self.write("src/a.tsx", example)
+                result = self.collect()
+                self.assertEqual(result["checks"][CHECK + "no-circular-dependencies"]["status"], "violation")
+                self.assertEqual(result["snapshot"]["importEdges"], 2)
+
+    def test_jsx_literal_text_and_attributes_do_not_form_import_edges(self) -> None:
+        self.write("src/b.ts", "import { example } from './a';\nexport const b = example;\n")
+        self.write(
+            "src/a.tsx",
+            'export const example = <div label="require(\'./b\')">require(\'./b\')</div>;\n',
+        )
+        result = self.collect()
+        self.assertEqual(result["checks"][CHECK + "no-circular-dependencies"]["status"], "present")
+        self.assertEqual(result["snapshot"]["importEdges"], 1)
+
+    def test_literal_imports_do_not_hide_orphan_candidates(self) -> None:
+        self.write("package.json", '{"name": "fixture", "main": "src/a.ts"}\n')
+        self.write("src/a.ts", "export const example = `require('./unused')`;\n")
+        self.write("src/unused.ts", "export const unused = 1;\n")
+        result = self.collect()
+        self.assertIn("src/unused.ts", result["snapshot"]["orphanCandidates"]["examples"])
+        self.assertEqual(result["snapshot"]["importEdges"], 0)
+
     def test_inline_type_only_imports_do_not_form_runtime_cycles(self) -> None:
         self.write("src/a.ts", "import { type B } from './b';\nexport type A = { b: B };\n")
         self.write("src/b.ts", "import {\n  type A,\n  type Other,\n} from './a';\nexport type B = { a: A };\n")
