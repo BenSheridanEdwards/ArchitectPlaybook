@@ -752,6 +752,27 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         )
         self.assertEqual(result["categories"][0]["score"], 100)
 
+    def test_graph_availability_never_outranks_qualification(self) -> None:
+        official = self._canonical_findings("audit-one", ["present", "present"], graph_available=False)
+        official["runIdentifier"] = "run-official-without-graph"
+        dirty = self._canonical_findings("audit-one", ["present", "present"], graph_available=True)
+        dirty["runIdentifier"] = "run-dirty-with-graph"
+        dirty["target"]["sourceWorkingTreeClean"] = False
+        dirty["runStartedAt"] = "2026-07-13T11:00:00Z"
+        dirty["runFinishedAt"] = "2026-07-13T11:01:00Z"
+        self._write_findings("audit-one", official, run_directory="older")
+        self._write_findings("audit-one", dirty, run_directory="newer")
+        self._write_findings("audit-two", self._canonical_findings("audit-two", ["present"]))
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(
+            result["categories"][0]["selectedRun"]["runIdentifier"], "run-official-without-graph"
+        )
+        self.assertEqual(result["status"], "official")
+
     def test_json_fingerprint_matches_the_exact_parsed_bytes(self) -> None:
         policy_path = self.skills / "repository-quality-score" / "score-policy.json"
         fingerprints: dict[Path, dict[str, Any]] = {}
@@ -1344,6 +1365,19 @@ class RepositoryQualityScoreTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(self._score_json()["status"], "official")
+
+    def test_only_the_top_level_graph_folder_is_generated_output(self) -> None:
+        for relative in ("src/graphify-out.ts", "packages/web/graphify-out/graph.json", "graphify-out.ts"):
+            with self.subTest(relative=relative):
+                path = self.repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("dirty\n", encoding="utf-8")
+                self.assertFalse(rqs_calculator.is_source_clean(self.repository))
+                path.unlink()
+        graph = self.repository / "graphify-out" / "graph.json"
+        graph.parent.mkdir()
+        graph.write_text("{}\n", encoding="utf-8")
+        self.assertTrue(rqs_calculator.is_source_clean(self.repository))
 
     def test_dirty_source_and_existing_lock_prevent_false_official_output(self) -> None:
         self._write_findings(

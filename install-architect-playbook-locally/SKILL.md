@@ -130,7 +130,7 @@ chore: install architect-playbook skills into .claude/skills/
 
 ## What this skill explicitly does NOT do
 
-- Install graphify (run `/pre-audit-setup` for that).
-- Modify settings.json (run `/pre-audit-setup`).
+- Install graphify, or build its knowledge graph (run `/pre-audit-setup` for the graph).
+- Modify any settings file.
 - Run any audit.
 - Affect any project other than the current working directory.

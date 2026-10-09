@@ -2,7 +2,7 @@
 
 This document explains how Architect Playbook calculates the Repository Quality
 Score (RQS) and how the result should be communicated to managers. It describes
-the current scoring policy, version `2.0.0`.
+the current scoring policy, version `2.1.0`.
 
 ## Executive answer
 

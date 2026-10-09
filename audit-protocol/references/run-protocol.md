@@ -134,6 +134,8 @@ complete run stays in place.
 | `missing` | A structural prerequisite is absent. |
 | `violation` | Concrete code, configuration, or output breaks the invariant. |
 
+A check that falls back to a less precise method because the knowledge graph is missing is recorded with `--degraded "knowledge graph unavailable: <fallback used>"`.
+
 A check you could not evaluate is never `partial`. Record it as `not-evaluated`
 with the reason, for example `requires --with-network` or `test runner failed
 to start: <error>`. When a tool degrades but you still evaluated the check from

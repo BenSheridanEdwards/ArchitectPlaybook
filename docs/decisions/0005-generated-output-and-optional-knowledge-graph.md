@@ -18,11 +18,12 @@ Graphify's own installer (`graphify claude install`) adds the same Glob and Grep
 ## Decision
 
 1. **Generated output is not source.** Source cleanliness and the protocol's tree fingerprint ignore changes inside `.architect-audits/` and `graphify-out/`. The calculator's `GENERATED_OUTPUT_DIRECTORIES` lists them, and the protocol reuses that list.
-2. **The knowledge graph is optional.** A run without the graph is no longer provisional. `execution.graphAvailable` stays in findings, and remains a tie-breaker when the calculator chooses between otherwise equal runs.
-3. **`/pre-audit-setup` changes no settings or tracked files.** It verifies graphify, builds the graph, and creates `.architect-audits/`. Installing graphify's hook and `CLAUDE.md` note is left to the user, through graphify's installer.
+2. **The knowledge graph is optional.** A run without the graph is no longer provisional. A check that falls back to a less precise method because the graph is missing, such as the dependency audit's unused-dependency sweep, is recorded with `--degraded`, so degraded evidence still prevents an official result exactly where precision was lost. This amends the graph-fallback consequence in Architecture Decision Record 0002. `execution.graphAvailable` stays in findings. When the calculator chooses between runs of one audit, it ranks graph availability only after every qualification signal, so a graph never makes it pick a provisional run over an official one.
+3. **`/pre-audit-setup` changes no settings or tracked files without asking.** It verifies graphify, builds the graph, and creates `.architect-audits/`. Installing graphify's hook and `CLAUDE.md` note is left to the user, through graphify's installer.
+4. **Policy version `2.1.0`.** Qualification is policy behaviour, so the score policy moves from `2.0.0` to `2.1.0`. Points, weights, and bands are unchanged.
 
 ## Consequences
 
 - A repository can reach an official score straight after `/pre-audit-setup`, with or without the graph, and from a `--worktree` checkout.
 - Scores computed before this change with `graph-unavailable` as their only provisional reason would now be official. Results are recomputed from findings on each run, so no stored score changes until it is recalculated.
-- A repository that commits `graphify-out/` still has it ignored for cleanliness. Committing it changes nothing for scoring.
+- A repository that commits `graphify-out/` still has it ignored for cleanliness, including edits to its committed files. Only the top-level `graphify-out/` folder is excluded; a file such as `src/graphify-out.ts` or a nested `packages/web/graphify-out/` still counts as source.

@@ -148,7 +148,7 @@ The contract is what makes the multi-chat workflow tractable. A chat opened in a
 
 The scoring policy is versioned separately from audit catalogs. Catalog schema
 `1.1.0` or `1.2.0` defines structure; each audit's semantic `catalogVersion` identifies the
-meaning of its check inventory. Score policy `2.0.0` (schema `1.1.0`) owns status points, severity weights, soft
+meaning of its check inventory. Score policy `2.1.0` (schema `1.1.0`) owns status points, severity weights, soft
 weights, audit weights, rounding precision, and quality bands.
 
 The calculator discovers only the current worktree and worktrees registered by

@@ -319,4 +319,4 @@ The architectural intent behind the playbook's conventions lives in [ARCHITECTUR
 
 ## Related
 
-- [graphify](https://graphify.net/graphify-claude-code-integration.html) — the knowledge-graph skill that `/pre-audit-setup` assumes is installed at `~/.claude/skills/graphify`.
+- [graphify](https://graphify.net/graphify-claude-code-integration.html) — the optional knowledge-graph skill that `/pre-audit-setup` uses to build `graphify-out/`. Install it with `pip install graphifyy` and `graphify install`.

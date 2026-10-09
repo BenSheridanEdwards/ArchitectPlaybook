@@ -86,7 +86,9 @@ an official score.
   versions.
 - A single score never replaces category scores, coverage, or deduction detail.
 - Optional enrichment failures and graph fallbacks remain visible through
-  degraded evidence and prevent an official result.
+  degraded evidence and prevent an official result. A missing knowledge graph
+  alone no longer does (Architecture Decision Record 0005): only a check that
+  fell back to a less precise method is degraded.
 - A future change to points, weights, bands, category membership, or aggregation
   requires a scoring-policy version increase and an architecture-decision
   update.
