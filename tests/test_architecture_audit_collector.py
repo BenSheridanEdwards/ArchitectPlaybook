@@ -112,6 +112,85 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "present")
 
+    def test_dependency_cruiser_without_tsconfig_cannot_see_alias_imports(self) -> None:
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        self.commit()
+        key = CHECK + "boundaries-enforced-by-tooling"
+        result = self.collect()["checks"][key]
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("tsConfig", result["gap"])
+        self.write(".dependency-cruiser.js", "module.exports = { options: { tsConfig: { fileName: 'tsconfig.json' } }, forbidden: [] };\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][key]["status"], "present")
+
+    def test_alias_resolution_is_read_from_options_extends_flags_and_packages(self) -> None:
+        key = CHECK + "boundaries-enforced-by-tooling"
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        cases = {
+            "commented out": ("module.exports = {\n  // options: { tsConfig: { fileName: 'tsconfig.json' } },\n  forbidden: [],\n};\n", None, "partial"),
+            "extended base": ("module.exports = { extends: './.dependency-cruiser.base.js', forbidden: [] };\n",
+                              "module.exports = { options: { tsConfig: { fileName: 'tsconfig.json' } } };\n", "present"),
+        }
+        for name, (config, base, expected) in cases.items():
+            with self.subTest(name=name):
+                self.write(".dependency-cruiser.js", config)
+                if base:
+                    self.write(".dependency-cruiser.base.js", base)
+                self.commit(name)
+                self.assertEqual(self.collect()["checks"][key]["status"], expected)
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src --ts-config tsconfig.json"}}\n')
+        self.commit("flag")
+        self.assertEqual(self.collect()["checks"][key]["status"], "present")
+
+    def test_a_package_without_aliases_does_not_need_ts_config(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"], "scripts": {"lint": "depcruise packages"}}\n')
+        self.write("packages/one/package.json", '{"name": "one"}\n')
+        self.write("packages/two/package.json", '{"name": "two"}\n')
+        self.write("packages/one/.dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("packages/one/tsconfig.json", '{"compilerOptions": {"strict": true}}\n')
+        self.write("packages/one/src/index.ts", "export const one = 1;\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "present")
+
+    def test_a_ts_config_flag_covers_only_the_package_it_checks(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"]}\n')
+        for name, script in (("one", "depcruise src --ts-config tsconfig.json"), ("two", "depcruise src")):
+            self.write(f"packages/{name}/package.json", f'{{"name": "{name}", "scripts": {{"lint": "{script}"}}}}\n')
+            self.write(f"packages/{name}/tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+            self.write(f"packages/{name}/.dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+            self.write(f"packages/{name}/src/index.ts", "export const value = 1;\n")
+        self.commit()
+        result = self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["evidence"], ["packages/two/.dependency-cruiser.js — no tsConfig option, so path aliases are not resolved"])
+
+    def test_inherited_aliases_need_ts_config_too(self) -> None:
+        self.write("config/base.json", '{"compilerOptions": {"paths": {"@/*": ["../src/*"]}}}\n')
+        self.write("tsconfig.json", '{"extends": "./config/base.json"}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        self.commit()
+        self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "partial")
+
+    def test_change_coupling_finds_features_inside_workspaces(self) -> None:
+        files = ("apps/shop/src/features/cart/view.ts", "apps/shop/src/features/checkout/total.ts")
+        for path in files:
+            self.write(path, "export const value = 0;\n")
+        self.commit("initial")
+        for number in range(4):
+            for path in files:
+                self.write(path, f"export const value = {number + 1};\n")
+            self.commit(f"change {number}")
+        pairs = [item["files"] for item in self.collect()["snapshot"]["changeCoupling"]]
+        self.assertIn(list(files), pairs)
+
     def test_boundary_tooling_is_missing_partial_or_present(self) -> None:
         self.write("src/a.ts", "export const a = 1;\n")
         self.write("package.json", '{"name": "fixture"}\n')
@@ -262,6 +341,20 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.write("packages/web/src/kit.ts", "import { kit } from '@acme/kit';\nexport const usesKit = kit;\n")
         self.commit()
         self.assertEqual(self.collect()["checks"][key]["status"], "violation")
+
+    def test_change_coupling_separates_sibling_features(self) -> None:
+        self.write("src/features/cart/view.ts", "export const view = 0;\n")
+        self.write("src/features/checkout/total.ts", "export const total = 0;\n")
+        self.write("src/features/checkout/tax.ts", "export const tax = 0;\n")
+        self.commit("initial")
+        for number in range(4):
+            self.write("src/features/cart/view.ts", f"export const view = {number + 1};\n")
+            self.write("src/features/checkout/total.ts", f"export const total = {number + 1};\n")
+            self.write("src/features/checkout/tax.ts", f"export const tax = {number + 1};\n")
+            self.commit(f"change {number}")
+        pairs = [item["files"] for item in self.collect()["snapshot"]["changeCoupling"]]
+        self.assertIn(["src/features/cart/view.ts", "src/features/checkout/total.ts"], pairs)
+        self.assertNotIn(["src/features/checkout/tax.ts", "src/features/checkout/total.ts"], pairs)
 
     def test_history_keeps_non_ascii_names_and_skips_configuration(self) -> None:
         for number in range(3):
