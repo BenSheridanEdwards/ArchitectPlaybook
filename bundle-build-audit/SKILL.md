@@ -2,7 +2,7 @@
 name: bundle-build-audit
 description: Audit build pipeline and bundle output (static-first with optional --with-stats enrichment). Checks configuration, composition, hygiene, and performance with optional implementation plan.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--with-stats] [--stats-path=<path>] [--threshold-<name>=<value>] [--learn]"
+argument-hint: "[--worktree] [--with-stats] [--stats-path=<path>] [--threshold-<name>=<value>] [--learn|--teach]"
 ---
 
 # /bundle-build-audit

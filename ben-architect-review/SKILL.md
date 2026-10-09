@@ -2,7 +2,7 @@
 name: ben-architect-review
 description: Perform a principles-based architectural pull request review using Ben's judgement, then ask whether to post it as pending or submit it on GitHub.
 disable-model-invocation: true
-argument-hint: "[--decision=approve|request-changes|comment] [--learn]"
+argument-hint: "[--decision=approve|request-changes|comment] [--learn|--teach]"
 ---
 
 # /ben-architect-review

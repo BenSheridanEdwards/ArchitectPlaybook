@@ -2,7 +2,7 @@
 name: react-audit
 description: Audit idiomatic React (hooks correctness, component design, state management, React 18/19 idioms). Static-only by design with optional implementation plan.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--learn]"
+argument-hint: "[--worktree] [--learn|--teach]"
 ---
 
 # /react-audit

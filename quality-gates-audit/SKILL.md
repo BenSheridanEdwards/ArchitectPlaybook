@@ -2,7 +2,7 @@
 name: quality-gates-audit
 description: Audit pre-commit, pre-push, and CI/CD quality gates against an opinionated baseline. Reports present/partial/missing/violation gates and optionally generates an implementation plan.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--learn]"
+argument-hint: "[--worktree] [--learn|--teach]"
 ---
 
 # /quality-gates-audit

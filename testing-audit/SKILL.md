@@ -2,7 +2,7 @@
 name: testing-audit
 description: Audit React tests against Testing Library query priority and well-known React Testing Library pitfalls. Static-first with optional --with-run coverage enrichment and implementation plan.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--with-run] [--threshold-<name>=<value>] [--learn]"
+argument-hint: "[--worktree] [--with-run] [--threshold-<name>=<value>] [--learn|--teach]"
 ---
 
 # /testing-audit

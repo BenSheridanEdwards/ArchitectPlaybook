@@ -129,6 +129,10 @@ class ValidatePlaybookTests(unittest.TestCase):
                 VALID_SKILL.replace("disable-model-invocation: true", "disable-model-invocation: yes"),
                 "disable-model-invocation must be true or false",
             ),
+            "unquoted argument hint": (
+                VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"', "argument-hint: [--worktree] [--learn]"),
+                "argument-hint must be quoted",
+            ),
             "argument hint": (
                 VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"\n', ""),
                 "must give an argument-hint",
@@ -184,7 +188,7 @@ class ValidatePlaybookTests(unittest.TestCase):
             root = Path(tmp)
             worktree = root / "worktree"
             worktree.mkdir()
-            (worktree / "SKILL.md").write_text("---\nname: worktree\ndescription: Bad.\ndisable-model-invocation: true\nargument-hint: [--learn]\n---\n", encoding="utf-8")
+            (worktree / "SKILL.md").write_text("---\nname: worktree\ndescription: Bad.\ndisable-model-invocation: true\nargument-hint: \"[--learn]\"\n---\n", encoding="utf-8")
             findings: list[Any] = []
             validate_playbook.validate_no_standalone_worktree(root, findings)
             self.assertTrue(any("not a standalone slash command" in finding.message for finding in findings))
@@ -725,7 +729,7 @@ class ValidatePlaybookTests(unittest.TestCase):
             skill_dir = root / "planned-audit"
             skill_dir.mkdir()
             (skill_dir / "SKILL.md").write_text(
-                "---\nname: planned-audit\ndescription: Planned.\ndisable-model-invocation: true\nargument-hint: [--worktree]\n---\n\n# /planned-audit\n\n**Status:** stub\n",
+                "---\nname: planned-audit\ndescription: Planned.\ndisable-model-invocation: true\nargument-hint: \"[--worktree]\"\n---\n\n# /planned-audit\n\n**Status:** stub\n",
                 encoding="utf-8",
             )
             findings: list[Any] = []

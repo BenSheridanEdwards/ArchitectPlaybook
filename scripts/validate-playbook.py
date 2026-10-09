@@ -178,6 +178,10 @@ def validate_skills(root: Path, findings: list[Finding]) -> None:
         if frontmatter.get("name") != expected_name:
             findings.append(Finding("error", skill_path, f"frontmatter name must be {expected_name!r}"))
         validate_invocation_frontmatter(skill_path, frontmatter, keys, findings)
+        if re.search(r"^argument-hint:\s*[\[{]", text.split("\n---", 1)[0], flags=re.MULTILINE):
+            findings.append(
+                Finding("error", skill_path, "frontmatter argument-hint must be quoted; YAML reads an unquoted [ or { value as a list or map")
+            )
         if is_stub(body):
             continue
         for section in REQUIRED_SECTIONS:

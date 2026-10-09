@@ -2,7 +2,7 @@
 name: dependency-audit
 description: Audit Node.js dependency tree (security, health, compliance, hygiene). Static-first with optional --with-network enrichment for vulnerabilities, outdated, and abandonment data. Optionally generates an implementation plan.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--with-network] [--security-critical-packages=<list>] [--threshold-<name>=<value>] [--learn]"
+argument-hint: "[--worktree] [--with-network] [--security-critical-packages=<list>] [--threshold-<name>=<value>] [--learn|--teach]"
 ---
 
 # /dependency-audit
