@@ -139,6 +139,16 @@ Audits, fixes, and reviews each run in different chat sessions, so they cannot s
     metadata.json     matching run, catalog, repository, and execution identity
 ```
 
+Audits never write these files by hand. Each audit publishes through the shared [audit protocol](audit-protocol/SKILL.md), which:
+
+- stages every catalog check as pending;
+- verifies cited files, lines, quotes, and search counts against the repository;
+- validates the run with the score calculator's own contract code;
+- renders the Markdown from the JSON;
+- publishes all four files with `findings.json` last as the completion marker, restoring the previous files if a write fails.
+
+See [Architecture Decision Record 0003](docs/decisions/0003-staged-audit-runs-with-verified-evidence.md).
+
 - **Chat output** is human-first and concise: a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks.
 - **Fixing** is a free-form chat conversation in the same chat that produced the audit.
 - **Reviewing** is re-running the originating audit in a fresh chat against the worktree containing the fix.
@@ -208,6 +218,7 @@ For a non-technical explanation with formulas and a worked example, read
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
 | [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify, build the knowledge graph, merge the PreToolUse hook. |
 | [`/preflight`](preflight/SKILL.md) | Detect optional enrichment tooling for `--with-*` flags. |
+| [`audit-protocol`](audit-protocol/SKILL.md) | Shared run script and rules every audit publishes through. Not a slash command; installed with every audit. |
 
 ### Audits
 

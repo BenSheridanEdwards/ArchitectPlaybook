@@ -10,6 +10,20 @@ Audit a TypeScript project's type discipline against an opinionated baseline org
 
 The default mental model is TypeScript and React. Layers 1, 2, 3 apply to any TypeScript codebase; layer 4's IO-boundary checks lean toward frontends and full-stack applications, but most checks apply equally to backend TypeScript.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin typescript-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## How this differs from neighbouring audits
 
 | Concern | Owner |

@@ -10,6 +10,20 @@ Audit a TypeScript project's lint configuration against an opinionated baseline 
 
 The default mental model is TypeScript and React. The skill auto-detects and supports both ESLint (with the modern flat configuration format) and Biome. It audits the linter actually in use; dual-installation is itself a Layer 1 violation.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin linting-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## How this differs from `/quality-gates-audit`
 
 `/quality-gates-audit` checks whether linting *runs* in pre-commit, pre-push, and continuous integration — that's a lifecycle question. `/linting-audit` checks whether the linting *itself* is well-configured — coverage, strictness, suppressions hygiene. They complement; they do not duplicate. A project can pass quality-gates-audit (the linter runs at every stage) and still fail linting-audit (the linter is misconfigured to ignore most things), and vice versa.

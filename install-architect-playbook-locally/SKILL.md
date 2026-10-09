@@ -14,7 +14,7 @@ Copy every skill folder from this architect-playbook repository into `<current-p
 /install-architect-playbook-locally                 # install or update every skill into .claude/skills/
 /install-architect-playbook-locally --dry-run       # print the plan without copying anything
 /install-architect-playbook-locally --force         # overwrite destinations even if they appear newer
-/install-architect-playbook-locally --include=name  # install only one named skill (repeatable)
+/install-architect-playbook-locally --include=name  # install only the named skill and what it needs (repeatable)
 /install-architect-playbook-locally --exclude=name  # skip a named skill (repeatable)
 ```
 
@@ -60,7 +60,12 @@ For each direct sub-folder of `$PLAYBOOK_ROOT` that contains a `SKILL.md`, build
 - `install-architect-playbook-globally`
 - Any folder whose name begins with `.`
 
-Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure. `repository-quality-score` is not standalone: when it is selected, read `repository-quality-score/score-policy.json` and automatically add every folder named in `audits[].name` to the install plan. Show these additions in `--dry-run` output. If `--exclude` names any required audit while `repository-quality-score` is selected, fail before copying and explain the conflict; never install a scorer whose catalogs are missing.
+Apply `--include` and `--exclude` filters from the command line, then resolve dependency closure:
+
+- When any `*-audit` folder is selected, add `audit-protocol`. Every audit publishes through `audit-protocol/scripts/audit_run.py`, which validates each run with the score calculator. Also copy that one file, `repository-quality-score/scripts/calculate_repository_quality_score.py`. When `repository-quality-score` itself is not selected, copy only that file, without the scorer's `SKILL.md`, so the scorer is not offered with missing catalogs. Selecting an audit never adds other audits.
+- When `repository-quality-score` is selected, read `repository-quality-score/score-policy.json` and add every folder named in `audits[].name`.
+
+Show these additions in `--dry-run` output. If `--exclude` names `audit-protocol` while an audit is selected, or names a policy audit while `repository-quality-score` is selected, fail before copying and explain the conflict. Excluding `repository-quality-score` is allowed: audits still get the calculator file. Never install an audit without its protocol and calculator file, or a scorer whose catalogs are missing.
 
 ### Step 4 — Detect stubs
 
@@ -106,7 +111,7 @@ Open a new Claude Code chat in this directory to pick up the new slash commands.
 - Re-running with no flags is safe. Files only change if the source is newer (or `--force` is set).
 - This skill never deletes a destination skill that is not in the source — manual cleanup only.
 - This skill never touches `~/.claude/skills/`. For machine-wide install, use `/install-architect-playbook-globally`.
-- Selecting `repository-quality-score` always installs its policy audit catalogs as one dependency-closed set.
+- Selecting any audit always installs `audit-protocol` and the score calculator file. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
 
 ## Safety
 

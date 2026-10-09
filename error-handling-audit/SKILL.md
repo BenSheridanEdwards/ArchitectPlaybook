@@ -10,6 +10,20 @@ Audit a TypeScript codebase's error-handling discipline against an opinionated b
 
 The default mental model is TypeScript and React. Layers 1, 2, and 4 apply to any TypeScript codebase; when React is not detected, every layer 3 catalog check is emitted explicitly as `not-applicable`/`not-evaluated` with a null status.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin error-handling-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## Posture: static-only, no opt-in modes
 
 Unlike `/bundle-build-audit` (`--with-stats`) and `/dependency-audit` (`--with-network`), this skill has no opt-in enrichment mode. Error handling is a pure code-shape audit and there is no external data source that improves it.
