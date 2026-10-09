@@ -48,7 +48,7 @@ Results go to `evals/results/<timestamp>/` in the copy.
 
 | Case | What it measures |
 | --- | --- |
-| `architecture-audit/tangled-store` | Recall. A storefront with an import cycle, two cart-state writers, two HTTP clients, effect-based fetching beside a query layer, storage access in components, a wire type in a component, and an untested hotspot. |
+| `architecture-audit/tangled-store` | Recall. A storefront with an import cycle, no boundary tooling, a component importing another feature's internal file, Zustand and Redux both writing cart state, two HTTP clients, effect-based fetching beside a query layer, storage access in components, a wire type rendered in a component, and an untested checkout hotspot. |
 | `architecture-audit/well-kept-store` | Precision. The same storefront built well, so every finding it raises is a false positive. |
 
 ## Grading
@@ -70,9 +70,10 @@ over its runs.
 ## Adding a case
 
 1. Write `fixture.sh` so it builds the repository from nothing. Give commits
-   dates relative to today, because audits read recent history.
+   dates relative to today, because audits read recent history. The scripts
+   need bash and a GNU or BSD `date`; BusyBox `date` is not supported.
 2. Keep fixture code plausible. Do not leave comments that point at the planted
    problems.
-3. Write one grader per expected status, and an `llm` grader for the judgement
+3. Write one grader per expected status, anchored to the "All checks" table, and an `llm` grader for the judgement
    the regexes cannot capture.
 4. Run the case at least three times before trusting its result.

@@ -126,6 +126,50 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.collect()["checks"][key]["status"], "present")
 
+    def test_alias_resolution_is_read_from_options_extends_flags_and_packages(self) -> None:
+        key = CHECK + "boundaries-enforced-by-tooling"
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        cases = {
+            "commented out": ("module.exports = {\n  // options: { tsConfig: { fileName: 'tsconfig.json' } },\n  forbidden: [],\n};\n", None, "partial"),
+            "extended base": ("module.exports = { extends: './.dependency-cruiser.base.js', forbidden: [] };\n",
+                              "module.exports = { options: { tsConfig: { fileName: 'tsconfig.json' } } };\n", "present"),
+        }
+        for name, (config, base, expected) in cases.items():
+            with self.subTest(name=name):
+                self.write(".dependency-cruiser.js", config)
+                if base:
+                    self.write(".dependency-cruiser.base.js", base)
+                self.commit(name)
+                self.assertEqual(self.collect()["checks"][key]["status"], expected)
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src --ts-config tsconfig.json"}}\n')
+        self.commit("flag")
+        self.assertEqual(self.collect()["checks"][key]["status"], "present")
+
+    def test_a_package_without_aliases_does_not_need_ts_config(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"], "scripts": {"lint": "depcruise packages"}}\n')
+        self.write("packages/one/package.json", '{"name": "one"}\n')
+        self.write("packages/two/package.json", '{"name": "two"}\n')
+        self.write("packages/one/.dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("packages/one/tsconfig.json", '{"compilerOptions": {"strict": true}}\n')
+        self.write("packages/one/src/index.ts", "export const one = 1;\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "present")
+
+    def test_change_coupling_finds_features_inside_workspaces(self) -> None:
+        files = ("apps/shop/src/features/cart/view.ts", "apps/shop/src/features/checkout/total.ts")
+        for path in files:
+            self.write(path, "export const value = 0;\n")
+        self.commit("initial")
+        for number in range(4):
+            for path in files:
+                self.write(path, f"export const value = {number + 1};\n")
+            self.commit(f"change {number}")
+        pairs = [item["files"] for item in self.collect()["snapshot"]["changeCoupling"]]
+        self.assertIn(list(files), pairs)
+
     def test_boundary_tooling_is_missing_partial_or_present(self) -> None:
         self.write("src/a.ts", "export const a = 1;\n")
         self.write("package.json", '{"name": "fixture"}\n')

@@ -1,5 +1,5 @@
 ---
 type: regex
 target: { source: file, path: .architect-audits/architecture-audit/findings.md }
-pattern: "\\| Server state has one home \\| \\w+ \\| (present|partial) \\|"
+pattern: "## All checks\\n\\n\\| Layer \\| Check \\| Severity \\| Status \\| Judgement \\|\\n(?:\\| -{3} ){5}\\|\\n(?:\\|[^\\n]*\\|\\n)*?\\| [a-z-]+ \\| Server state has one home \\| \\w+ \\| (present|partial) \\|"
 ---

@@ -181,14 +181,63 @@ export function RecentOrders() {
   return <ol>{data.slice(0, 3).map((order) => <li key={order.order_id}>{order.order_id}</li>)}</ol>;
 }
 EOF
+w src/stores/store.ts <<'EOF'
+import { configureStore } from '@reduxjs/toolkit';
+import cart from './cartSlice';
+
+export const store = configureStore({ reducer: { cart } });
+EOF
+w src/app/providers.tsx <<'EOF'
+'use client';
+import { Provider } from 'react-redux';
+import { store } from '@/stores/store';
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return <Provider store={store}>{children}</Provider>;
+}
+EOF
+w src/app/layout.tsx <<'EOF'
+import { Providers } from './providers';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body><Providers>{children}</Providers></body>
+    </html>
+  );
+}
+EOF
+w src/components/AddToCart.tsx <<'EOF'
+'use client';
+import { useCartStore } from '@/stores/cartStore';
+
+export function AddToCart({ sku }: { sku: string }) {
+  const add = useCartStore((state) => state.add);
+  return <button onClick={() => add(sku)}>Add to cart</button>;
+}
+EOF
+w src/components/QuickAdd.tsx <<'EOF'
+'use client';
+import { useDispatch } from 'react-redux';
+import { added } from '@/stores/cartSlice';
+
+export function QuickAdd({ sku }: { sku: string }) {
+  const dispatch = useDispatch();
+  return <button onClick={() => dispatch(added(sku))}>Quick add</button>;
+}
+EOF
 w src/app/page.tsx <<'EOF'
 import { CartView } from '@/features/cart';
+import { AddToCart } from '@/components/AddToCart';
 import { OrderHistory } from '@/components/OrderHistory';
+import { QuickAdd } from '@/components/QuickAdd';
 import { RecentOrders } from '@/components/RecentOrders';
 
 export default function Home() {
   return (
     <main>
+      <AddToCart sku="tea-001" />
+      <QuickAdd sku="mug-002" />
       <CartView />
       <RecentOrders />
       <OrderHistory />

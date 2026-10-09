@@ -13,7 +13,8 @@ w package.json <<'EOF'
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "next lint && depcruise src --config .dependency-cruiser.js",
+    "lint": "depcruise src --config .dependency-cruiser.js",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": { "@tanstack/react-query": "5.40.0", "next": "14.2.4", "react": "18.3.1", "react-dom": "18.3.1", "zod": "3.23.8", "zustand": "4.5.2" },
@@ -42,7 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm ci
+      - run: npm install
+      - run: npm run typecheck
       - run: npm run lint
       - run: npm test
 EOF
@@ -112,17 +114,23 @@ export function useOrders() {
 EOF
 w src/features/cart/index.ts <<'EOF'
 export { CartView } from './CartView';
-export { useCart } from './useCart';
+export { useCart } from './cartStore';
 EOF
 w src/features/cart/cartStore.ts <<'EOF'
 import { create } from 'zustand';
 import type { Line } from '@/domain/order';
 import { loadLines, saveLines } from './cartStorage';
 
-type CartState = { lines: Line[]; add: (line: Line) => void; remove: (sku: string) => void };
+type CartState = {
+  lines: Line[];
+  hydrate: () => void;
+  add: (line: Line) => void;
+  remove: (sku: string) => void;
+};
 
-export const cartStore = create<CartState>((set, get) => ({
-  lines: loadLines(),
+export const useCart = create<CartState>((set, get) => ({
+  lines: [],
+  hydrate: () => set({ lines: loadLines() }),
   add: (line) => { const lines = [...get().lines, line]; saveLines(lines); set({ lines }); },
   remove: (sku) => { const lines = get().lines.filter((line) => line.sku !== sku); saveLines(lines); set({ lines }); },
 }));
@@ -142,31 +150,50 @@ export function saveLines(lines: Line[]): void {
   window.localStorage.setItem(KEY, JSON.stringify(lines));
 }
 EOF
-w src/features/cart/useCart.ts <<'EOF'
-import { cartStore } from './cartStore';
-
-export function useCart() {
-  return cartStore();
-}
-EOF
 w src/features/cart/CartView.tsx <<'EOF'
 'use client';
+import { useEffect } from 'react';
 import { formatMoney, TAX_RATE } from '@/domain/money';
-import { checkoutTotal } from '@/features/checkout';
-import { useCart } from './useCart';
+import { checkoutTotal, deliveryCharge } from '@/features/checkout';
+import { useCart } from './cartStore';
 
 export function CartView() {
-  const { lines, remove } = useCart();
+  const { lines, hydrate, remove } = useCart();
+  useEffect(hydrate, [hydrate]);
+  const total = checkoutTotal(lines, TAX_RATE);
   return (
     <section>
       {lines.map((line) => <button key={line.sku} onClick={() => remove(line.sku)}>{line.sku}</button>)}
-      <p>{formatMoney(checkoutTotal(lines, TAX_RATE))}</p>
+      <p>{formatMoney(total)}</p>
+      <p>Delivery: {formatMoney(deliveryCharge(total))}</p>
     </section>
   );
 }
 EOF
 w src/features/checkout/index.ts <<'EOF'
 export { checkoutTotal } from './checkoutTotal';
+export { deliveryCharge } from './delivery';
+EOF
+w src/features/checkout/delivery.ts <<'EOF'
+import type { Money } from '@/domain/money';
+
+const STANDARD_DELIVERY: Money = { pence: 499 };
+
+export function deliveryCharge(total: Money): Money {
+  return total.pence >= 15000 ? { pence: 0 } : STANDARD_DELIVERY;
+}
+EOF
+w src/features/checkout/delivery.test.ts <<'EOF'
+import { expect, it } from 'vitest';
+import { deliveryCharge } from './delivery';
+
+it('charges standard delivery below £25', () => {
+  expect(deliveryCharge({ pence: 2499 })).toEqual({ pence: 499 });
+});
+
+it('delivers free from £150', () => {
+  expect(deliveryCharge({ pence: 15000 })).toEqual({ pence: 0 });
+});
 EOF
 w src/features/checkout/checkoutTotal.ts <<'EOF'
 import { addTax, type Money } from '@/domain/money';
@@ -178,7 +205,6 @@ export function checkoutTotal(lines: Line[], taxRate: number): Money {
 EOF
 w src/features/checkout/checkoutTotal.test.ts <<'EOF'
 import { describe, expect, it } from 'vitest';
-import * as checkout from './checkoutTotal';
 import { checkoutTotal } from './checkoutTotal';
 
 describe('checkoutTotal', () => {
@@ -209,15 +235,27 @@ export default function Home() {
 EOF
 commit 120 "feat: storefront with cart, checkout, and orders"
 for n in 1 2 3 4; do
-  cat >> src/features/checkout/checkoutTotal.ts <<EOF
+  bands=""
+  for b in $(seq 1 "$n"); do bands="$bands  { from: { pence: $((b * 2500)) }, charge: { pence: $((499 - b * 100)) } },
+"; done
+  w src/features/checkout/delivery.ts <<EOF
+import type { Money } from '@/domain/money';
 
-export const FREE_DELIVERY_THRESHOLD_$n: Money = { pence: $((n * 2500)) };
+const STANDARD_DELIVERY: Money = { pence: 499 };
+const DISCOUNTED_BANDS: { from: Money; charge: Money }[] = [
+$bands];
+
+export function deliveryCharge(total: Money): Money {
+  if (total.pence >= 15000) return { pence: 0 };
+  const band = [...DISCOUNTED_BANDS].reverse().find((entry) => total.pence >= entry.from.pence);
+  return band ? band.charge : STANDARD_DELIVERY;
+}
 EOF
-  cat >> src/features/checkout/checkoutTotal.test.ts <<EOF
+  cat >> src/features/checkout/delivery.test.ts <<EOF
 
-it('sets free delivery threshold $n at £$((n * 25))', () => {
-  expect(checkout.FREE_DELIVERY_THRESHOLD_$n).toEqual({ pence: $((n * 2500)) });
+it('charges band $n delivery from £$((n * 25))', () => {
+  expect(deliveryCharge({ pence: $((n * 2500)) })).toEqual({ pence: $((499 - n * 100)) });
 });
 EOF
-  commit $((100 - n * 10)) "feat: free delivery threshold $n"
+  commit $((100 - n * 10)) "feat: discounted delivery band $n"
 done

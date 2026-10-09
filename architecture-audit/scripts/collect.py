@@ -472,8 +472,6 @@ def detect_boundary_tooling(root: Path, directories: list[Path]) -> tuple[list[s
             if (directory / name).is_file():
                 found.append(f"{relative(root, directory / name)} — dependency-cruiser configuration")
                 configured.add("dependency-cruiser")
-                if "tsConfig" not in read_text(directory / name):
-                    configured.add("dependency-cruiser-without-tsconfig")
         manifest = directory / "package.json"
         package_text = read_text(manifest)
         package = load_jsonc(manifest)
@@ -494,20 +492,67 @@ def detect_boundary_tooling(root: Path, directories: list[Path]) -> tuple[list[s
 TOOL_RUNNERS = {
     "dependency-cruiser": ("depcruise", "dependency-cruiser"),
     "eslint": ("eslint", "next lint", "nx lint", "nx affected", "nx run-many"),
-    "dependency-cruiser-without-tsconfig": (),
 }
 
 
-def tooling_runs(root: Path, directories: list[Path], configured: set[str]) -> bool:
-    """Whether a package script or workflow runs one of the configured boundary tools."""
+def runner_text(root: Path, directories: list[Path]) -> str:
+    """Every package script and workflow, where a boundary tool would be run."""
     scripts = " ".join(
         str(value)
         for directory in directories
         for value in (load_jsonc(directory / "package.json").get("scripts") or {}).values()
     )
     workflows = " ".join(read_text(path) for path in sorted((root / ".github" / "workflows").glob("*.y*ml")))
-    combined = scripts + " " + workflows
+    return scripts + " " + workflows
+
+
+def tooling_runs(root: Path, directories: list[Path], configured: set[str]) -> bool:
+    """Whether a package script or workflow runs one of the configured boundary tools."""
+    combined = runner_text(root, directories)
     return any(runner in combined for tool in configured for runner in TOOL_RUNNERS[tool])
+
+
+def cruiser_resolves_aliases(config: Path, seen: frozenset[Path]) -> bool:
+    """Whether a dependency-cruiser configuration, or one it extends, sets an active tsConfig option."""
+    text = mask_comments(read_text(config))
+    if re.search(r"""\btsConfig\b["']?\s*:""", text):
+        return True
+    extended = re.search(r"""\bextends\b["']?\s*:\s*["'](\.[^"']+)["']""", text)
+    if extended:
+        base = (config.parent / extended.group(1)).resolve()
+        for candidate in (base, Path(str(base) + ".js"), Path(str(base) + ".cjs"), Path(str(base) + ".json")):
+            if candidate.is_file() and candidate not in seen:
+                return cruiser_resolves_aliases(candidate, seen | {candidate})
+    return False
+
+
+def folder_uses_aliases(directory: Path, root: Path) -> bool:
+    """Whether a tsconfig in this folder or a parent up to the root defines path aliases."""
+    for folder in [directory, *directory.parents]:
+        for config in sorted(folder.glob("tsconfig*.json")) + sorted(folder.glob("jsconfig.json")):
+            if isinstance((load_jsonc(config).get("compilerOptions") or {}).get("paths"), dict):
+                return True
+        if folder == root:
+            break
+    return False
+
+
+def alias_blind_cruiser_configs(root: Path, directories: list[Path]) -> list[str]:
+    """dependency-cruiser configurations that cannot resolve their package's path aliases.
+
+    Without a tsConfig option, here, in a configuration it extends, or as the
+    --ts-config command-line flag, dependency-cruiser leaves alias imports
+    unresolved, so no rule ever matches them.
+    """
+    if "--ts-config" in runner_text(root, directories):
+        return []
+    blind = []
+    for directory in directories:
+        for name in BOUNDARY_TOOL_FILES:
+            config = directory / name
+            if config.is_file() and folder_uses_aliases(directory, root) and not cruiser_resolves_aliases(config, frozenset({config})):
+                blind.append(f"{relative(root, config)} — no tsConfig option, so path aliases are not resolved")
+    return blind
 
 
 def package_entries(package: Path, resolver_files: set[Path]) -> set[Path]:
@@ -610,10 +655,17 @@ CONTAINER_FOLDERS = {"features", "modules", "packages", "apps", "domains", "serv
 
 
 def module_boundary(path: str) -> str:
-    """The folder that owns a file: each child of a container such as `features/`, else the top two folders."""
+    """The folder that owns a file.
+
+    That is the child of the innermost container such as `features/` or
+    `packages/`, so `apps/shop/src/features/cart` and
+    `apps/shop/src/features/checkout` are separate modules. Without a container
+    it is the top two folders. Files in one folder are one module, so coupling
+    between them is not reported.
+    """
     folders = path.split("/")[:-1]
-    for index, folder in enumerate(folders[:-1]):
-        if folder in CONTAINER_FOLDERS:
+    for index in range(len(folders) - 2, -1, -1):
+        if folders[index] in CONTAINER_FOLDERS:
             return "/".join(folders[: index + 2])
     return "/".join(folders[:2])
 
@@ -693,18 +745,13 @@ def collect(root: Path, months: int) -> dict[str, Any]:
     key = f"{AUDIT}.boundaries-enforced-by-tooling"
     if tooling:
         evidence = tooling[:3]
-        uses_aliases = any(
-            isinstance((load_jsonc(config).get("compilerOptions") or {}).get("paths"), dict) for config in config_files(root)
-        )
-        blind = (
-            uses_aliases
-            and "dependency-cruiser-without-tsconfig" in configured
-            and not tooling_runs(root, directories, configured - {"dependency-cruiser"})
-        )
+        blind = alias_blind_cruiser_configs(root, directories)
+        if blind and tooling_runs(root, directories, configured - {"dependency-cruiser"}):
+            blind = []
         if tooling_runs(root, directories, configured) and blind:
             checks[key] = {
                 "status": "partial",
-                "evidence": evidence,
+                "evidence": blind[:3],
                 "evidenceTier": "supported",
                 "gap": "dependency-cruiser runs, but its configuration has no tsConfig option, so it cannot resolve the repository's path aliases and its rules never see alias imports.",
                 "remediation": "Add `options: { tsConfig: { fileName: 'tsconfig.json' } }` and a `not-to-unresolvable` rule, then prove the check fails on a deliberate alias import that crosses a boundary.",
