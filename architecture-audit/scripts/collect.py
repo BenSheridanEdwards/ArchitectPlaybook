@@ -49,6 +49,7 @@ ASSET_SUFFIXES = (
     ".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp",
     ".avif", ".ico", ".json", ".md", ".mdx", ".txt", ".woff", ".woff2", ".wasm",
 )
+BUILD_DIRECTORIES = {"dist", "build", "lib", "out", "esm", "cjs"}
 CONFIG_FILE_PATTERN = re.compile(r"^(?:tsconfig(?:\.[\w.-]+)?|jsconfig)\.json$")
 HOTSPOT_EXCLUDED_PATTERN = re.compile(r"(^|/)[^/]*\.config\.[cm]?[jt]s$")
 BOUNDARY_TOOL_FILES = (
@@ -523,8 +524,18 @@ def package_entries(package: Path, resolver_files: set[Path]) -> set[Path]:
 
     for field in ("main", "module", "types", "typings", "source", "exports"):
         gather(manifest.get(field))
-    bases = [package / target for target in targets if not target.startswith("#")]
-    bases += [package / "index", package / "src" / "index"]
+    bases: list[Path] = []
+    for target in targets:
+        if target.startswith("#"):
+            continue
+        bases.append(package / target)
+        # A published build file's source twin, for example dist/index.js and src/index.ts.
+        parts = Path(target).parts
+        trimmed = parts[1:] if parts and parts[0] == "." else parts
+        if trimmed and trimmed[0] in BUILD_DIRECTORIES:
+            bases.append(package.joinpath("src", *trimmed[1:]))
+    if not targets:
+        bases += [package / "index", package / "src" / "index"]
     entries: set[Path] = set()
     for base in bases:
         stem = base.with_suffix("") if base.suffix in SOURCE_SUFFIXES else base
@@ -693,7 +704,7 @@ def collect(root: Path, months: int) -> dict[str, Any]:
         checks[key] = {"applicability": "not-applicable", "reason": "The repository is not a multi-package workspace."}
     else:
         def owner(path: Path) -> Path | None:
-            for package in packages:
+            for package in sorted(packages, key=lambda package: -len(package.parts)):
                 if package in path.parents:
                     return package
             return None

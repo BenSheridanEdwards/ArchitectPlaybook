@@ -236,6 +236,33 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.assertEqual(result["status"], "violation")
         self.assertIn("packages/web/src/deep.ts:1 — `@acme/ui/button`", result["evidence"])
 
+    def test_nested_workspaces_own_their_files(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*", "packages/app/plugins/*"]}\n')
+        self.write("packages/app/package.json", '{"name": "app"}\n')
+        self.write("packages/app/src/internal.ts", "export const internal = 1;\n")
+        self.write("packages/app/plugins/widget/package.json", '{"name": "widget"}\n')
+        self.write("packages/app/plugins/widget/src/index.ts", "import { internal } from '../../../src/internal';\nexport const widget = internal;\n")
+        self.commit()
+        result = self.collect()["checks"][CHECK + "cross-workspace-contracts-respected"]
+        self.assertEqual(result["status"], "violation")
+
+    def test_published_entries_and_their_source_twins_define_the_public_surface(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"]}\n')
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@acme/ui": ["./packages/ui/src/index.ts"], "@acme/kit": ["./packages/kit/src/index.ts"]}}}\n')
+        self.write("packages/ui/package.json", '{"name": "@acme/ui", "exports": {".": "./dist/index.js"}}\n')
+        self.write("packages/ui/src/index.ts", "export const ui = 1;\n")
+        self.write("packages/kit/package.json", '{"name": "@acme/kit", "exports": {"./button": "./dist/button.js"}}\n')
+        self.write("packages/kit/src/index.ts", "export const kit = 1;\n")
+        self.write("packages/kit/src/button.ts", "export const button = 1;\n")
+        self.write("packages/web/package.json", '{"name": "web"}\n')
+        self.write("packages/web/src/page.ts", "import { ui } from '@acme/ui';\nexport const page = ui;\n")
+        self.commit()
+        key = CHECK + "cross-workspace-contracts-respected"
+        self.assertEqual(self.collect()["checks"][key]["status"], "present")
+        self.write("packages/web/src/kit.ts", "import { kit } from '@acme/kit';\nexport const usesKit = kit;\n")
+        self.commit()
+        self.assertEqual(self.collect()["checks"][key]["status"], "violation")
+
     def test_history_keeps_non_ascii_names_and_skips_configuration(self) -> None:
         for number in range(3):
             self.write("src/café.ts", f"export const café = {number};\n")
