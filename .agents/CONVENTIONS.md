@@ -32,6 +32,10 @@ change that breaks one of them fails the gate.
 - An audit's `## Usage` documents `--worktree` as a flag on the audit command
   and never documents the internal `--target` flag. The body references the four
   findings files: `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`.
+- An implemented audit publishes only through the shared protocol (Architecture
+  Decision Record 0003). Its body begins the run with
+  `audit-protocol/scripts/audit_run.py" begin <audit-name>`, using its own
+  name, and links `audit-protocol/references/run-protocol.md`.
 - A stub is the only exception: frontmatter, a placeholder heading, and a
   `**Status:** stub` notice.
 

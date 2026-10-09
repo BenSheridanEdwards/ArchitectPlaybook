@@ -85,7 +85,7 @@ Every audit has these universal user-facing flags:
 - `--learn` → Mid-level engineer teaching mode
 - `--teach` → Alias for `--learn`
 
-`--worktree` is the only user-facing worktree control. It creates or reuses `../wt-<audit-slug>` on branch `wt-<audit-slug>`, then reruns the same audit against that checkout. `--target=<path>` exists but is internal — audit skills use it when `--worktree` is passed and never document it in their Usage tables. The old universal flags (`--report-only`, `--plan`, `--layer`, `--include`, `--exclude`) have been removed as redundant with the new default behavior. Audit-specific flags (`--with-*`, `--threshold-*`, `--pattern`, `--severity`, `--stats-path`, `--lighthouse-results-path`, `--security-critical-packages`) remain only where they add value.
+`--worktree` is the only user-facing worktree control. It creates or reuses `.worktrees/<audit-name>` on branch `audit/<audit-name>`, adds `.worktrees/` to the repository's local exclude file, then reruns the same audit against that checkout. `--target=<path>` exists but is internal — audit skills use it when `--worktree` is passed and never document it in their Usage tables. The old universal flags (`--report-only`, `--plan`, `--layer`, `--include`, `--exclude`) have been removed as redundant with the new default behavior. Audit-specific flags (`--with-*`, `--threshold-*`, `--pattern`, `--severity`, `--stats-path`, `--lighthouse-results-path`, `--security-critical-packages`) remain only where they add value.
 
 ### Static-first with optional enrichment
 
@@ -135,6 +135,12 @@ meaning. `misconfigured` is a classification; quality-gate results still use
 the four canonical statuses.
 
 **Chat output is human-first and concise.** Every audit prints a short header, the Top 5 Highest-Leverage Recommendations (title, why it matters, consequences, smallest fix, lettered sub-actions), and a one-line pointer to the full report on disk. The full layered findings are never printed in the chat unless the user explicitly asks. This keeps the chat scannable while the on-disk files carry the complete diagnostic.
+
+### Publishing through the audit protocol
+
+Audits do not write these files by hand. Every audit publishes through the shared `audit-protocol` skill's `scripts/audit_run.py` ([Architecture Decision Record 0003](docs/decisions/0003-staged-audit-runs-with-verified-evidence.md)). `begin` stages every catalog check as pending and records the run identity. `record` accepts one check at a time and verifies its evidence immediately: cited files and lines must exist, quoted text must match, and search and file counts are re-run. Every result needs at least one such verified entry. `finish` refuses to publish while any check is pending, if the repository changed during the run, or if the score calculator's own contract code rejects the run. It then renders `findings.md` and `snapshot.md` from the JSON, and writes the four files with `findings.json` last as the completion marker, restoring the previous files if a write fails.
+
+The protocol also carries judgement as data: every non-present finding is marked act on, consider, noted, or dismissed. The chat's top recommendations come only from act-on findings. Accepted risks are recorded in `.architect-audits/decisions.json`; covered findings keep their honest status but stop asking for action.
 
 The contract is what makes the multi-chat workflow tractable. A chat opened in a worktree to fix issues reads `findings.json`. A chat opened in another worktree to review the fix re-runs the originating audit and produces a new `findings.md` plus an optional `review-gap-report.md` if it found something the original audit missed.
 

@@ -10,6 +10,20 @@ Audit a TypeScript and React project against an opinionated baseline of **idioma
 
 This skill is scoped to React-correctness independent of cost, accessibility, or architecture. Many React concerns live in adjacent audits; the boundary table below is the canonical map.
 
+## Publishing results
+
+Record every result through the shared audit protocol. Never write the four findings files by hand.
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin react-audit
+```
+
+Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
+
+A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
+
 ## How this differs from neighbouring audits
 
 The architect-playbook deliberately keeps audit boundaries tight so a single concern lives in a single skill. Every audit in the playbook touches React in some way; this is where the lines fall:

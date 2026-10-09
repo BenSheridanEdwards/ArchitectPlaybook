@@ -35,6 +35,16 @@ sys.modules[spec.name] = validate_playbook
 spec.loader.exec_module(validate_playbook)
 
 
+PUBLISHING_SECTION = """
+## Publishing results
+
+```bash
+python3 "${{CLAUDE_SKILL_DIR}}/../audit-protocol/scripts/audit_run.py" begin {audit}
+```
+
+Follow [the run protocol](../audit-protocol/references/run-protocol.md).
+"""
+
 VALID_SKILL = """---
 name: example-audit
 description: Example audit skill.
@@ -618,6 +628,68 @@ class ValidatePlaybookTests(unittest.TestCase):
             readme.write_text("```md\n[Missing](missing.md)\n```\n", encoding="utf-8")
             findings: list[Any] = []
             validate_playbook.validate_markdown_links(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_audits_must_publish_through_the_shared_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("audit protocol bundle missing: scripts/audit_run.py" in message for message in messages))
+            self.assertTrue(any("must begin its run through the shared protocol script" in message for message in messages))
+            self.assertTrue(any("must link the run protocol" in message for message in messages))
+
+    def test_audit_protocol_rule_passes_with_bundle_and_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = root / "audit-protocol"
+            (protocol / "scripts").mkdir(parents=True)
+            (protocol / "references").mkdir()
+            for relative in ("SKILL.md", "scripts/audit_run.py", "references/run-protocol.md"):
+                (protocol / relative).write_text("placeholder\n", encoding="utf-8")
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(VALID_SKILL + PUBLISHING_SECTION.format(audit="example-audit"), encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
+            self.assertEqual(findings, [])
+
+    def test_audit_protocol_rule_requires_the_audits_own_begin_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "example-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                VALID_SKILL
+                + PUBLISHING_SECTION.format(audit="example-audit-two")
+                + "\nDo not use audit-protocol/scripts/audit_run.py.\n",
+                encoding="utf-8",
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("begin example-audit" in message for message in messages), messages)
+
+    def test_audit_protocol_rule_skips_stubs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = root / "audit-protocol"
+            (protocol / "scripts").mkdir(parents=True)
+            (protocol / "references").mkdir()
+            for relative in ("SKILL.md", "scripts/audit_run.py", "references/run-protocol.md"):
+                (protocol / relative).write_text("placeholder\n", encoding="utf-8")
+            skill_dir = root / "planned-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: planned-audit\ndescription: Planned.\ntrigger: /planned-audit\n---\n\n# /planned-audit\n\n**Status:** stub\n",
+                encoding="utf-8",
+            )
+            findings: list[Any] = []
+            validate_playbook.validate_audit_protocol(root, findings)
             self.assertEqual(findings, [])
 
     def test_validation_skips_git_ignored_worktree_directories(self) -> None:

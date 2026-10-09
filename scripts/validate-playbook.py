@@ -741,6 +741,48 @@ def validate_score_policy(root: Path, findings: list[Finding]) -> None:
             findings.append(Finding("error", policy_path, "final quality band must start at 0"))
 
 
+AUDIT_PROTOCOL_BUNDLE_FILES = (
+    "SKILL.md",
+    "scripts/audit_run.py",
+    "references/run-protocol.md",
+)
+AUDIT_PROTOCOL_SCRIPT_REFERENCE = "audit-protocol/scripts/audit_run.py"
+AUDIT_PROTOCOL_GUIDE_REFERENCE = "audit-protocol/references/run-protocol.md"
+
+
+def validate_audit_protocol(root: Path, findings: list[Finding]) -> None:
+    """Every audit must publish through the shared audit protocol (ADR 0003)."""
+    audits = audit_directories(root)
+    if not audits:
+        return
+    protocol = root / "audit-protocol"
+    for relative_path in AUDIT_PROTOCOL_BUNDLE_FILES:
+        path = protocol / relative_path
+        if not path.is_file():
+            findings.append(Finding("error", path, f"audit protocol bundle missing: {relative_path}"))
+    for directory in audits:
+        skill_path = directory / "SKILL.md"
+        _, _, body = parse_frontmatter(skill_path.read_text(encoding="utf-8"))
+        if is_stub(body):
+            continue
+        begin_command = re.compile(
+            re.escape(AUDIT_PROTOCOL_SCRIPT_REFERENCE) + r'"?\s+begin\s+' + re.escape(directory.name) + r"(?![A-Za-z0-9-])"
+        )
+        if not begin_command.search(body):
+            findings.append(
+                Finding(
+                    "error",
+                    skill_path,
+                    "audit must begin its run through the shared protocol script: "
+                    f'python3 "${{CLAUDE_SKILL_DIR}}/../{AUDIT_PROTOCOL_SCRIPT_REFERENCE}" begin {directory.name}',
+                )
+            )
+        if AUDIT_PROTOCOL_GUIDE_REFERENCE not in body:
+            findings.append(
+                Finding("error", skill_path, f"audit must link the run protocol ({AUDIT_PROTOCOL_GUIDE_REFERENCE})")
+            )
+
+
 def validate_no_standalone_worktree(root: Path, findings: list[Finding]) -> None:
     worktree_skill = root / "worktree" / "SKILL.md"
     if worktree_skill.exists():
@@ -922,6 +964,7 @@ def main() -> int:
     validate_related_checks(root, findings)
     validate_audit_findings_contract(root, findings)
     validate_score_policy(root, findings)
+    validate_audit_protocol(root, findings)
     validate_no_standalone_worktree(root, findings)
     validate_readme_index(root, findings)
     validate_bootstrap_contract(root, findings)
