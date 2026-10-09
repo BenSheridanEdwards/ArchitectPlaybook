@@ -215,6 +215,13 @@ export async function deleteOwnedInvoice(id: string): Promise<boolean> {
   return count === 1;
 }
 EOF
+w vercel.json <<'EOF'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["lhr1"]
+}
+EOF
 w lib/rateLimit.ts <<'EOF'
 import 'server-only';
 import { Ratelimit } from '@upstash/ratelimit';
@@ -224,6 +231,7 @@ const redis = Redis.fromEnv();
 
 export const signInByAddress = new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(30, '15 m'), prefix: 'sign-in-address' });
 export const signInByAccount = new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(10, '15 m'), prefix: 'sign-in-account' });
+export const signInPerAccount = new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(100, '1 h'), prefix: 'sign-in-account-total' });
 export const assistantLimiter = new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(20, '1 h'), prefix: 'assistant' });
 EOF
 w lib/safeRedirect.ts <<'EOF'
@@ -345,7 +353,7 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { signInByAccount, signInByAddress } from '@/lib/rateLimit';
+import { signInByAccount, signInByAddress, signInPerAccount } from '@/lib/rateLimit';
 import { safeRedirectPath } from '@/lib/safeRedirect';
 import { createSessionToken, SESSION_COOKIE, SESSION_SECONDS } from '@/lib/token';
 
@@ -366,12 +374,17 @@ export async function login(_state: { error?: string }, formData: FormData): Pro
   });
   if (!parsed.success) return { error: 'Enter your email and password.' };
   const requestHeaders = await headers();
-  const address = requestHeaders.get('x-real-ip') ?? requestHeaders.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
-  const [byAddress, byAccount] = await Promise.all([
+  // Vercel sets x-real-ip itself and overwrites any value a client sends (see vercel.json).
+  const address = requestHeaders.get('x-real-ip');
+  if (!address) return { error: 'Sign-in is unavailable. Try again later.' };
+  const [byAddress, byAccount, perAccount] = await Promise.all([
     signInByAddress.limit(address),
     signInByAccount.limit(`${address}:${parsed.data.email}`),
+    signInPerAccount.limit(parsed.data.email),
   ]);
-  if (!byAddress.success || !byAccount.success) return { error: 'Too many attempts. Try again in a few minutes.' };
+  if (!byAddress.success || !byAccount.success || !perAccount.success) {
+    return { error: 'Too many attempts. Try again in a few minutes.' };
+  }
   const user = await db.user.findUnique({ where: { email: parsed.data.email } });
   const valid = await bcrypt.compare(parsed.data.password, user?.passwordHash ?? UNKNOWN_ACCOUNT_HASH);
   if (!user || !valid) return { error: 'Invalid email or password.' };
@@ -655,6 +668,10 @@ const body = z.object({
 });
 
 export async function POST(request: Request) {
+  // Only this application's own pages may call the assistant: no cross-site or form posts.
+  if (request.headers.get('sec-fetch-site') !== 'same-origin' || !request.headers.get('content-type')?.startsWith('application/json')) {
+    return new Response('Forbidden', { status: 403 });
+  }
   const session = await getSession();
   if (!session) return new Response('Unauthorized', { status: 401 });
   const { success } = await assistantLimiter.limit(session.userId);
