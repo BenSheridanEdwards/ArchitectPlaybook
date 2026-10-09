@@ -137,7 +137,7 @@ Add the framework, the architectural pattern you infer (with your reasoning), an
    - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
    - Use `hypothesis` for suspicions you cannot verify.
    - Use `not-evaluated` with a reason when the repository gives you no basis, for example no recorded decisions to compare against.
-5. **Judge.** Keep at most about five findings `act-on`, ranked by severity and then by how often the code changes. Dismiss with a reason anything that is consistent with a recorded decision or a deliberate convention.
+5. **Judge.** Keep at most five findings `act-on` (`finish` refuses more; demote the rest with `judge`), ranked by severity and then by how often the code changes. Dismiss with a reason anything that is consistent with a recorded decision or a deliberate convention.
 6. **Finish.** Run `audit_run.py finish architecture-audit`, fix anything it rejects, and present the chat summary the protocol defines.
 7. **Offer the design session.** Ask: "Want to explore one of these? Pick a number, or say no."
 

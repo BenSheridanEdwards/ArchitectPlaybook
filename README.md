@@ -141,6 +141,7 @@ Audits never write these files by hand. Each audit publishes through the shared 
 - stages every catalog check as pending;
 - verifies cited files, lines, quotes, and search counts against the repository;
 - validates the run with the score calculator's own contract code;
+- refuses to publish more than five act-on findings, so the chat's Top 5 is the whole list;
 - renders the Markdown from the JSON;
 - publishes all four files with `findings.json` last as the completion marker, restoring the previous files if a write fails.
 

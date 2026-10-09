@@ -160,7 +160,7 @@ When the collector finds no AI SDK, model host, or chat-completions path, it say
    - Use `hypothesis` for a path you suspect but cannot complete from the code.
    - Use `not-applicable` when the code has no such surface, such as no hand-written OAuth flow.
 6. **Challenge before recording.** For each critical or high candidate, try to refute it: look for the protective control in middleware, the data-access layer, framework defaults, React's escaping, or cookie defaults. When a subagent tool is available, give a fresh subagent the candidate and the trace and ask it to refute the failure scenario. Record a refuted candidate as present, citing the control that stops it.
-7. **Judge.** Keep at most about five findings `act-on`, ranked by severity, then by how reachable the entry point is (anonymous before authenticated). Dismiss with a reason anything a recorded decision covers.
+7. **Judge.** Keep at most five findings `act-on` (`finish` refuses more; demote the rest with `judge`), ranked by severity, then by how reachable the entry point is (anonymous before authenticated). Dismiss with a reason anything a recorded decision covers.
 8. **Finish.** Run `audit_run.py finish security-audit`, fix anything it rejects, and present the chat summary the protocol defines.
 
 ## Phase 2: the implementation plan
