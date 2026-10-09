@@ -381,7 +381,7 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         reason_codes = {reason["code"] for reason in result["statusReasons"]}
         self.assertIn("filtered-run", reason_codes)
         self.assertIn("checks-not-evaluated", reason_codes)
-        self.assertIn("graph-unavailable", reason_codes)
+        self.assertNotIn("graph-unavailable", reason_codes)
         self.assertLess(float(result["coverage"]["evaluationPercent"]), 100)
         self.assertEqual(result["categories"][0]["score"], 100)
 
@@ -1328,6 +1328,22 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertIn("resolves outside", completed.stderr)
         self.assertFalse((outside / "repository-quality-score" / "score.json").exists())
+
+    def test_generated_knowledge_graph_and_missing_graph_keep_a_score_official(self) -> None:
+        self._write_findings(
+            "audit-one", self._canonical_findings("audit-one", ["present", "present"], graph_available=False)
+        )
+        self._write_findings(
+            "audit-two", self._canonical_findings("audit-two", ["present"], graph_available=False)
+        )
+        graph = self.repository / "graphify-out"
+        graph.mkdir()
+        (graph / "graph.json").write_text("{}\n", encoding="utf-8")
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._score_json()["status"], "official")
 
     def test_dirty_source_and_existing_lock_prevent_false_official_output(self) -> None:
         self._write_findings(

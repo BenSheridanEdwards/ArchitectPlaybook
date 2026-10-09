@@ -6,3 +6,4 @@ This directory records foundational architecture decisions for Architect Playboo
 - [0002 — Repository Quality Score and audit-result contract](0002-repository-quality-score-and-audit-result-contract.md)
 - [0003 — Staged audit runs with verified evidence](0003-staged-audit-runs-with-verified-evidence.md)
 - [0004 — Severity-rated checks and weighted scoring](0004-severity-rated-checks-and-weighted-scoring.md)
+- [0005 — Generated output and an optional knowledge graph](0005-generated-output-and-optional-knowledge-graph.md)

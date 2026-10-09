@@ -326,17 +326,20 @@ def current_commit(root: Path) -> str | None:
     return value.lower() if value and COMMIT_PATTERN.fullmatch(value) else None
 
 
+# Generated output that is not source: audit results and the knowledge graph.
+# Their presence or changes never make the source tree dirty (Architecture
+# Decision Record 0005).
+GENERATED_OUTPUT_DIRECTORIES = (".architect-audits", "graphify-out")
+
+
+def generated_output_exclusions() -> list[str]:
+    return [f":(exclude){directory}/**" for directory in GENERATED_OUTPUT_DIRECTORIES]
+
+
 def is_source_clean(root: Path) -> bool | None:
     output = git_output(
         root,
-        [
-            "status",
-            "--porcelain",
-            "--untracked-files=all",
-            "--",
-            ".",
-            ":(exclude).architect-audits/**",
-        ],
+        ["status", "--porcelain", "--untracked-files=all", "--", ".", *generated_output_exclusions()],
     )
     return None if output is None else not bool(output)
 
@@ -772,8 +775,6 @@ def parse_canonical_candidate(
         reasons.append("threshold-overrides")
     if policy_overrides:
         reasons.append("policy-overrides")
-    if not graph_available:
-        reasons.append("graph-unavailable")
     if not source_clean:
         reasons.append("source-worktree-dirty-at-audit-time")
     if any(

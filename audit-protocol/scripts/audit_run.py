@@ -244,13 +244,13 @@ def repository_name(root: Path) -> str:
 
 
 def tree_fingerprint(root: Path) -> str:
-    exclude = f":(exclude){AUDITS_DIRECTORY}/**"
-    status = git(root, "status", "--porcelain", "--untracked-files=all", "--", ".", exclude)
+    exclude = CALCULATOR.generated_output_exclusions()
+    status = git(root, "status", "--porcelain", "--untracked-files=all", "--", ".", *exclude)
     head = git(root, "rev-parse", "HEAD") or "no-head"
     digest = hashlib.sha256(f"{head}\n{status or ''}".encode("utf-8"))
     if status:
         # A dirty tree can change without changing its status lines, so hash the content too.
-        diff = git(root, "diff", "HEAD", "--no-ext-diff", "--no-color", "--binary", "--", ".", exclude)
+        diff = git(root, "diff", "HEAD", "--no-ext-diff", "--no-color", "--binary", "--", ".", *exclude)
         digest.update((diff or "").encode("utf-8"))
         for line in status.splitlines():
             if line.startswith("?? "):

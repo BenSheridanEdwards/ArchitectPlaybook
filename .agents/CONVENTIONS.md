@@ -92,7 +92,8 @@ Every audit documents and emits findings schema `2.0.0` according to
 - `findings.json` and `metadata.json` share the run, skill, catalog, timestamps,
   target, and execution identity exactly.
 - The target includes an exact Git commit and source-tree cleanliness measured
-  before output files are written, ignoring only `.architect-audits/`.
+  before output files are written, ignoring only `.architect-audits/` and
+  `graphify-out/` (Architecture Decision Record 0005).
 - Every catalog check appears exactly once with full `checkId`, matching layer,
   applicability, evaluation state, evidence quality, classification, status,
   and redacted evidence.

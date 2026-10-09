@@ -56,8 +56,9 @@ their own branch.
    fi
    ```
 
-   Otherwise run `/pre-audit-setup` in the worktree, or accept that the run is
-   provisional because no graph was available.
+   Otherwise run `/pre-audit-setup` in the worktree, or run without the graph.
+   The graph only guides where to read first; a run without it is still
+   official (Architecture Decision Record 0005).
 
 4. Pass `--repository .worktrees/<audit-name>` before every protocol command,
    and read files from the worktree.

@@ -232,7 +232,8 @@ received a complete assessment.
 An official score requires all policy audits to provide compatible canonical
 evidence for the current clean source commit. The runs must be unfiltered, use
 no threshold or policy overrides, contain no applicable unevaluated checks, and
-contain no degraded evidence. Required graph evidence must also be available.
+contain no degraded evidence. The knowledge graph is optional and does not
+affect qualification (Architecture Decision Record 0005).
 
 An official score can still be low. A completely evaluated `violation` lowers
 quality but does not make the calculation provisional.

@@ -236,6 +236,14 @@ class LifecycleTests(AuditRunTestCase):
         self.write("src/b.ts", "export const b = 2;\n")
         self.assert_rejected(self.run_command("finish", AUDIT), "changed during the run")
 
+    def test_a_generated_knowledge_graph_keeps_the_tree_clean(self) -> None:
+        self.write("graphify-out/graph.json", "{}\n")
+        self.assert_accepted(self.run_command("begin", AUDIT))
+        self.assertTrue(self.staged()["target"]["sourceWorkingTreeClean"])
+        self.resolve_remaining()
+        self.write("graphify-out/GRAPH_REPORT.md", "# Report\n")
+        self.assert_accepted(self.run_command("finish", AUDIT))
+
     def test_finish_notices_same_size_edits_to_untracked_files(self) -> None:
         notes = self.write("notes.txt", "alpha\n")
         self.run_command("begin", AUDIT)
