@@ -256,6 +256,10 @@ class InstallPlaybookTests(unittest.TestCase):
         self.assertEqual(statuses["graphify"], "preserved")
         installer.apply(self.clone, self.destination, steps)
         self.assertEqual(calculator.read_text(encoding="utf-8"), "edited\n")
+        calculator.unlink()
+        steps = installer.plan(self.clone, self.destination, *installer.select(self.clone, ["one-audit"], []))
+        installer.apply(self.clone, self.destination, steps)
+        self.assertEqual(calculator.read_text(encoding="utf-8"), "calculator\n")
         with self.assertRaises(installer.InstallError):
             installer.select(self.clone, ["one-audit"], ["one-audit"])
 

@@ -177,7 +177,9 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
         scorer = destination / SCORER
         if scorer.exists():
             require_owned(scorer, SCORER)
-        if (scorer / "SKILL.md").exists():
+        if not target.exists():
+            status = "installed"
+        elif (scorer / "SKILL.md").exists():
             # A full scorer is installed; its calculator belongs to it and is left alone.
             status = "unchanged"
         elif not target.exists():
