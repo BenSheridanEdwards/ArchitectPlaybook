@@ -2,7 +2,7 @@
 name: install-architect-playbook-globally
 description: Copy every architect-playbook skill into ~/.claude/skills/ so the slash commands are available in every Claude Code session on this machine.
 disable-model-invocation: true
-argument-hint: "[--dry-run] [--force] [--include=<skill>] [--exclude=<skill>]"
+argument-hint: "[--dry-run] [--force] [--from=<path>] [--include=<skill>] [--exclude=<skill>]"
 ---
 
 # /install-architect-playbook-globally
@@ -11,12 +11,15 @@ Copy every skill folder from this architect-playbook repository into `~/.claude/
 
 This skill is the machine-wide counterpart to `/install-architect-playbook-locally`. The mechanics are the same; only the destination differs.
 
+The plugin is the recommended install (`/plugin install architect-playbook@architect-playbook`; see the README). It updates with the repository and leaves `~/.claude/skills/` alone. If you install the plugin later, remove these copies: a copied skill owns the bare command name.
+
 ## Usage
 
 ```
 /install-architect-playbook-globally                 # install or update every skill into ~/.claude/skills/
 /install-architect-playbook-globally --dry-run       # print the plan without copying anything
-/install-architect-playbook-globally --force         # overwrite destinations even if they appear newer
+/install-architect-playbook-globally --force         # replace changed skills without asking first
+/install-architect-playbook-globally --from=<path>   # install from this playbook clone
 /install-architect-playbook-globally --include=name  # install only the named skill and what it needs (repeatable)
 /install-architect-playbook-globally --exclude=name  # skip a named skill (repeatable)
 ```
@@ -37,16 +40,23 @@ Prefer `/install-architect-playbook-locally` when:
 
 1. **Resolves the playbook root** the same way `/install-architect-playbook-locally` does.
 2. **Resolves the destination** as `$HOME/.claude/skills/`. Creates it if missing.
-3. **Asks for confirmation** before overwriting any existing skill of the same name in `~/.claude/skills/`. Global installs affect every Claude Code session on the machine, so the bar for overwriting must be higher than for a project-local install.
-4. **Enumerates source skills** (every sub-folder with a `SKILL.md` except `install-architect-playbook-locally` and `install-architect-playbook-globally`).
-5. **Copies each skill folder** with `cp -R`. The destination becomes a complete, self-contained copy.
+3. **Enumerates source skills** (every sub-folder with a `SKILL.md` except the two installers), filtered and closed over dependencies.
+4. **Asks for confirmation** before replacing any existing skill in `~/.claude/skills/`, unless `--force` is passed. Global installs affect every Claude Code session on the machine.
+5. **Replaces each changed skill folder as a whole**, exactly as the local installer does, and leaves identical folders and folders it does not own alone.
 6. **Reports the result** with the same format as the local installer.
 
 ## Implementation steps
 
 ### Step 1 — Resolve the playbook root
 
-Same logic as `/install-architect-playbook-locally`. The skill file's parent of parent is the playbook root.
+Use `--from=<path>` if given. Otherwise derive it from `${CLAUDE_SKILL_DIR}`, this skill's folder. In a clone that is `<playbook-root>/install-architect-playbook-globally`, or, for the bootstrap copy, `<playbook-root>/.claude/skills/install-architect-playbook-globally`:
+
+```bash
+for candidate in "${FROM:-}" "${CLAUDE_SKILL_DIR}/.." "${CLAUDE_SKILL_DIR}/../../.."; do
+  [ -n "$candidate" ] && [ -f "$candidate/audit-protocol/SKILL.md" ] && [ -d "$candidate/.git" ] && PLAYBOOK_ROOT="$(cd "$candidate" && pwd)" && break
+done
+[ -n "${PLAYBOOK_ROOT:-}" ] || { echo "Not a playbook clone; re-run with --from=<path>."; exit 1; }
+```
 
 ### Step 2 — Resolve destination
 
@@ -72,35 +82,35 @@ After applying `--include` and `--exclude`, resolve dependency closure:
 
 Show the expanded set during `--dry-run`. If the user excludes `audit-protocol` while an audit is selected, or a policy audit while `repository-quality-score` is selected, fail before copying with a clear conflict message. Excluding `repository-quality-score` is allowed: audits still get the calculator file. Never install an audit without its protocol and calculator file, or an incomplete scorer.
 
-### Step 4 — Confirmation gate for overwrites
+### Step 4 — Plan and confirm
 
-Before copying, list every destination that already exists:
+Compare each selected skill with its destination by content digest, as the local installer's Step 4 does: `installed`, `updated`, or `unchanged`. List every skill that would be `updated`, and every existing destination folder the playbook does not own:
 
 ```
-The following skills already exist in ~/.claude/skills/ and will be overwritten:
+These skills already exist in ~/.claude/skills/ and differ from the playbook; they will be replaced:
   - security-audit
-  - performance-audit
-  - graphify   (NOT MANAGED BY THIS PLAYBOOK — will not be touched)
+  - audit-protocol
+Not managed by architect-playbook, left untouched:
+  - graphify
 
 Continue? [y/N]
 ```
 
-If the user does not answer `y`, abort. Do not overwrite skills the playbook does not own — for the architect-playbook this is everything except `graphify`. Detect ownership by checking whether the destination's `SKILL.md` `name` field matches a skill in the playbook source. Anything whose name is not in the source list is left alone.
+With `--dry-run`, stop after printing. Without `--force`, abort unless the user answers `y`. Ownership is by folder name: a folder whose name is not a playbook skill is never touched.
 
 ### Step 5 — Copy each skill
 
-Same loop as the local installer, but writing to `$HOME/.claude/skills/`.
+Use the local installer's loop, writing to `$HOME/.claude/skills/`: remove each changed playbook-owned folder, then copy it again.
 
 ### Step 6 — Print the summary
 
 ```
-installed:        pre-audit-setup
-updated:          security-audit
-installed (stub): performance-audit
-...
-preserved:        graphify   (not managed by architect-playbook)
+installed:  pre-audit-setup
+updated:    security-audit
+unchanged:  audit-protocol
+preserved:  graphify   (not managed by architect-playbook)
 
-<installed-count> skills installed into ~/.claude/skills/
+3 skills checked; 2 written into ~/.claude/skills/
 Open a new Claude Code chat (any project) to pick up the new slash commands.
 ```
 
@@ -109,7 +119,7 @@ Open a new Claude Code chat (any project) to pick up the new slash commands.
 - Never overwrite skills the playbook does not own. `graphify` is the canonical example.
 - Re-running with no flags is safe.
 - Refuses to write outside `$HOME/.claude/skills/`.
-- Refuses to delete any directory in the destination — only `cp -R` over the top of it.
+- Replaces a changed playbook-owned skill folder as a whole, so stale files do not linger. Never deletes any other directory.
 - `--dry-run` is honored.
 - Selecting any audit always installs `audit-protocol` and the score calculator file. Selecting `repository-quality-score` always installs its policy audit catalogs. Both are dependency-closed sets.
 
