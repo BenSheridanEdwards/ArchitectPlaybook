@@ -1374,9 +1374,21 @@ class RepositoryQualityScoreTests(unittest.TestCase):
                 path.write_text("dirty\n", encoding="utf-8")
                 self.assertFalse(rqs_calculator.is_source_clean(self.repository))
                 path.unlink()
+        root_file = self.repository / "graphify-out"
+        root_file.write_text("not a folder\n", encoding="utf-8")
+        self.assertFalse(rqs_calculator.is_source_clean(self.repository))
+        root_file.unlink()
         graph = self.repository / "graphify-out" / "graph.json"
         graph.parent.mkdir()
         graph.write_text("{}\n", encoding="utf-8")
+        self.assertTrue(rqs_calculator.is_source_clean(self.repository))
+        subprocess.run(["git", "-C", str(self.repository), "add", "-f", "graphify-out"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repository), "-c", "user.email=t@e.st", "-c", "user.name=T", "commit", "-qm", "graph"],
+            check=True,
+            capture_output=True,
+        )
+        graph.write_text('{"edited": true}\n', encoding="utf-8")
         self.assertTrue(rqs_calculator.is_source_clean(self.repository))
 
     def test_dirty_source_and_existing_lock_prevent_false_official_output(self) -> None:

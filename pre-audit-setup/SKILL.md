@@ -34,8 +34,9 @@ Follow these steps in order. Stop at the first hard failure and report it.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-mkdir -p .architect-audits
 ```
+
+Create `.architect-audits/` with `mkdir -p .architect-audits`, except with `--dry-run`, which only reports that it would.
 
 Run every later step from the root. A graph built in a subfolder would be a stray, uncommitted `graphify-out/` that counts as source.
 
