@@ -128,6 +128,8 @@ PLACEHOLDER_VALUE_PATTERN = re.compile(
     r"undefined|secret|password|passw(?:or)?d|pass|test|testing|root|admin|xxx+|\*+|\.{3,}|<[^<>]*>|\$\{[^}]*\}|"
     r"\{\{[^}]*\}\}|%s|your[-_ ][\w -]*|[\w-]*[-_]here)$"
 )
+# A whole password that is a template expression rather than a value: ${DB_PASSWORD}, $DB_PASSWORD, <password>, ****.
+PASSWORD_PLACEHOLDER_PATTERN = re.compile(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|<[^<>]+>|\*+|\{\{[^}]+\}\}|%\(?\w*\)?s")
 ENV_LINE_PATTERN = re.compile(r"^\s*(?:export\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<separator>\s*=\s*)(?P<value>.*)$")
 SECRET_NAME_PATTERN = re.compile(
     r"(?i)(?:SECRET|PASSWORD|PASSWD|PRIVATE|TOKEN|CREDENTIAL|API_?KEY|ACCESS_?KEY|SIGNING_?KEY|"
@@ -141,7 +143,10 @@ PUBLIC_SECRET_WORDS = re.compile(r"SECRET|PRIVATE|PASSWORD|PASSWD|TOKEN|CREDENTI
 ENV_TEMPLATE_PATTERN = re.compile(r"(?i)\.(?:example|sample|template|dist)(?:\.|$)")
 # `.env.any-mode.local` stands for every other mode: only a general `.env*.local`
 # or `.env*` rule covers it, so it shows whether a pattern protects variants not listed here.
-ENV_PROBES = (".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.any-mode.local")
+ENV_PROBES = (
+    ".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.staging.local",
+    ".env.any-mode.local",
+)
 
 DYNAMIC_CODE_PATTERN = re.compile(
     r"(?<![\w$.])(?:(?:window|globalThis|self)\.)?eval\s*\("
@@ -435,17 +440,46 @@ def template_end(text: str, start: int, strings: bool, output: list[str], blank:
 
 
 def closing_brace(text: str, open_index: int) -> int:
-    """The index of the `}` that closes the `{` at `open_index`, skipping strings."""
+    """The index of the `}` that closes the `{` at `open_index`, skipping strings, comments, and regular expressions."""
     depth = 0
     index = open_index
+    previous = ""
     while index < len(text):
         character = text[index]
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            index = len(text) if end == -1 else end
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end == -1 else end + 2
+            continue
+        if character == "/" and starts_regular_expression(text, index, previous):
+            end = index + 1
+            in_class = False
+            while end < len(text) and text[end] != "\n":
+                if text[end] == "\\":
+                    end += 2
+                    continue
+                if text[end] == "[":
+                    in_class = True
+                elif text[end] == "]":
+                    in_class = False
+                elif text[end] == "/" and not in_class:
+                    break
+                end += 1
+            index = end + 1
+            previous = "/"
+            continue
         if character in "'\"`":
             end = index + 1
             while end < len(text) and text[end] != character:
                 end += 2 if text[end] == "\\" else 1
             index = end + 1
+            previous = character
             continue
+        if not character.isspace():
+            previous = character
         if character == "{":
             depth += 1
         elif character == "}":
@@ -540,7 +574,7 @@ def is_placeholder(match: re.Match[str]) -> bool:
             host in LOCAL_HOSTS
             or host.endswith((".local", ".test", ".example", ".invalid", ".localhost", "example.com", "example.org"))
             or is_placeholder_value(password)
-            or any(character in password for character in "${<*")
+            or bool(PASSWORD_PLACEHOLDER_PATTERN.fullmatch(password))
         )
     return is_placeholder_value(match.group("secret")) or is_placeholder_value(match.group(0))
 
@@ -553,11 +587,21 @@ def character_class(character: str) -> str:
     return "lower" if character.islower() else "other"
 
 
+HEX_RUN = re.compile(r"(?<![0-9A-Za-z])(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{24,}(?![0-9A-Za-z])")
+
+
 def credential_like(text: str) -> bool:
-    """Whether text holds a run shaped like a generated credential, such as a random password."""
+    """Whether text holds a run shaped like a generated credential, such as a random password.
+
+    A long hexadecimal run, or a run that mixes letters and digits and switches
+    between them often, in either case. Ordinary identifiers switch rarely.
+    """
+    if HEX_RUN.search(text):
+        return True
     for run in TOKEN_RUN.findall(text):
         classes = [character_class(character) for character in run]
-        if classes.count("digit") < 2 or classes.count("upper") < 2 or classes.count("lower") < 2:
+        letters = classes.count("upper") + classes.count("lower")
+        if classes.count("digit") < 3 or letters < 3:
             continue
         transitions = sum(1 for left, right in zip(classes, classes[1:]) if left != right)
         if transitions >= 0.4 * (len(run) - 1):
@@ -565,9 +609,27 @@ def credential_like(text: str) -> bool:
     return False
 
 
-def sensitive(text: str) -> bool:
-    """The one test every printed string passes: no credential format and no credential-shaped run."""
-    return any_secret(text) or credential_like(text)
+FRAGMENT_LENGTH = 8
+
+
+def fragments(values: Iterable[str]) -> frozenset[str]:
+    """Every value, and every eight-character piece of it, that the final pass must never print."""
+    pieces: set[str] = set()
+    for value in values:
+        if len(value) < 6:
+            continue
+        pieces.add(value)
+        pieces.update(value[start:start + FRAGMENT_LENGTH] for start in range(len(value) - FRAGMENT_LENGTH + 1))
+    return frozenset(pieces)
+
+
+def sensitive(text: str, detected: frozenset[str] = frozenset()) -> bool:
+    """The one test every printed string passes.
+
+    No piece of a value the scan detected, no credential format, and no
+    credential-shaped run.
+    """
+    return any(piece in text for piece in detected) or any_secret(text) or credential_like(text)
 
 
 def path_is_safe(path: str) -> bool:
@@ -683,6 +745,7 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
     hidden_paths = 0
     unreadable: list[str] = []
     env_files: list[str] = []
+    values: set[str] = set()
     scanned = 0
     for path in tracked:
         full = root / path
@@ -711,8 +774,12 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
             env_files.append(path)
         for number, line, following in with_lookahead(lines):
             hits = line_secrets(line, following)
-            for rule, _ in hits:
+            for rule, match in hits:
                 rules[rule] += 1
+                if rule == "connection-string-password":
+                    values.add(match.group("password"))
+                elif rule != "private-key":
+                    values.add(match.group("secret"))
             if hits:
                 files_with_findings.add(path)
                 first = hits[0][1]
@@ -723,7 +790,9 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
                     hidden_paths += 1
             if environment:
                 match = ENV_LINE_PATTERN.match(line)
-                if match and is_secret_name(match.group("name")) and env_secret_value(match.group("value")) is not None:
+                value = env_secret_value(match.group("value")) if match and is_secret_name(match.group("name")) else None
+                if match and value is not None:
+                    values.add(value)
                     rules["secret-named-environment-variable"] += 1
                     files_with_findings.add(path)
                     name_variable = match.group("name")
@@ -742,6 +811,7 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
         "unreadable": unreadable,
         "envFiles": env_files,
         "scanned": scanned,
+        "values": values,
     }
 
 
@@ -790,10 +860,14 @@ def summarise_history(findings: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def secrets_check(root: Path, tracked: list[str] | None, with_scan: bool, snapshot: dict[str, Any]) -> dict[str, Any]:
+def secrets_check(
+    root: Path, tracked: list[str] | None, with_scan: bool, snapshot: dict[str, Any], detected: set[str]
+) -> dict[str, Any]:
+    """Decide the secret check, adding every detected value to `detected` for the final redaction pass."""
     if tracked is None:
         return {"evaluationState": "not-evaluated", "reason": "The target is not a Git repository, so there are no tracked files to scan."}
     scan = scan_secrets(root, tracked)
+    detected.update(scan["values"])
     evidence: list[str] = scan["evidence"]
     rules: Counter[str] = scan["rules"]
     local_env = [path for path in scan["envFiles"] if path.endswith(".local") and path_is_safe(path)]
@@ -891,10 +965,35 @@ def app_roots(files: list[str]) -> list[str]:
     return sorted(roots)
 
 
+def negated_env_names(root: Path, tracked: set[str]) -> list[str]:
+    """Environment-file names that a tracked `.gitignore` explicitly un-ignores with `!`.
+
+    Wildcards are filled in (`*` as `any-mode`), so a pattern such as
+    `!.env.*.local` becomes a probe too. Committed templates are left out.
+    """
+    names = []
+    for ignore_file in sorted(path for path in tracked if path.rsplit("/", 1)[-1] == ".gitignore"):
+        folder = ignore_file.rsplit("/", 1)[0] + "/" if "/" in ignore_file else ""
+        try:
+            lines = (root / ignore_file).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            pattern = line.strip()
+            if not pattern.startswith("!"):
+                continue
+            pattern = pattern[1:].lstrip("/").rstrip("/")
+            name = pattern.rsplit("/", 1)[-1]
+            if not name.startswith(".env") or ENV_TEMPLATE_PATTERN.search(name) or "**" in pattern:
+                continue
+            filled = re.sub(r"\[[^\]]*\]", "x", pattern).replace("*", "any-mode").replace("?", "x")
+            names.append(folder + filled)
+    return names
+
+
 def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[str, Any]:
     committed_local = sorted(
-        path for path in tracked
-        if path.rsplit("/", 1)[-1].startswith(".env") and path.endswith(".local") and path_is_safe(path)
+        path for path in tracked if path.rsplit("/", 1)[-1].startswith(".env") and path.endswith(".local")
     )
     probes = []
     for folder in app_roots(files + sorted(tracked)):
@@ -908,6 +1007,9 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
         name = path.rsplit("/", 1)[-1]
         if name.startswith(".env") and not ENV_TEMPLATE_PATTERN.search(name) and path not in tracked and path not in probes:
             probes.append(path)  # An environment file on disk that Git would add.
+    for path in negated_env_names(root, tracked):
+        if path not in tracked and path not in probes:
+            probes.append(path)  # An explicit exception, reported before the file exists.
     output = (git(root, "check-ignore", "--no-index", "-v", "-n", *probes) or "") if probes else ""
     covered: list[str] = []
     local_only: list[str] = []
@@ -926,9 +1028,16 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
         uncovered = probes
     covered = sorted(set(covered))
     if committed_local:
+        printable = [path for path in committed_local if path_is_safe(path)]
+        evidence = [f"{location(path)} — committed local environment file" for path in printable[:MAX_EVIDENCE]]
+        if len(printable) < len(committed_local):
+            evidence.append(
+                f"command: `git ls-files` → {len(committed_local) - len(printable)} committed local environment file(s) "
+                "whose paths look like credentials; the paths are withheld"
+            )
         return {
             "status": "violation",
-            "evidence": [f"{location(path)} — committed local environment file" for path in committed_local[:MAX_EVIDENCE]],
+            "evidence": evidence,
             "evidenceTier": "direct",
             "gap": (
                 f"{len(committed_local)} local environment file(s) are committed. An ignore rule does not untrack a "
@@ -1260,15 +1369,15 @@ def build_snapshot(root: Path, files: list[str], sources: list[SourceFile], snap
 # --------------------------------------------------------------------------- output safety
 
 
-def scrub(value: Any) -> tuple[Any, int]:
+def scrub(value: Any, detected: frozenset[str] = frozenset()) -> tuple[Any, int]:
     """Replace any credential-looking string in a value, returning the number replaced."""
     if isinstance(value, str):
-        return (WITHHELD, 1) if sensitive(value) else (value, 0)
+        return (WITHHELD, 1) if sensitive(value, detected) else (value, 0)
     if isinstance(value, list):
         total = 0
         items = []
         for item in value:
-            cleaned, count = scrub(item)
+            cleaned, count = scrub(item, detected)
             items.append(cleaned)
             total += count
         return items, total
@@ -1276,33 +1385,36 @@ def scrub(value: Any) -> tuple[Any, int]:
         total = 0
         result = {}
         for key, item in value.items():
-            cleaned_key, key_count = scrub(key)
-            cleaned, count = scrub(item)
+            cleaned_key, key_count = scrub(key, detected)
+            cleaned, count = scrub(item, detected)
             result[cleaned_key if not key_count else f"{WITHHELD} {total}"] = cleaned
             total += count + key_count
         return result, total
     return value, 0
 
 
-def make_safe(output: dict[str, Any]) -> dict[str, Any]:
+def make_safe(output: dict[str, Any], detected_values: Iterable[str] = ()) -> dict[str, Any]:
     """Check the complete output, so no credential-looking text is ever printed.
 
     Every evidence entry and snapshot string, whichever check or fact produced
     it, passes the same test, so a credential-shaped file or folder name is
-    withheld everywhere. Evidence entries that fail are dropped, because a
-    replaced entry would no longer verify; other text is replaced with a marker.
+    withheld everywhere. Every value the secret scan detected is redacted the
+    same way, with every eight-character piece of it, wherever it reappears.
+    Evidence entries that fail are dropped, because a replaced entry would no
+    longer verify; other text is replaced with a marker.
     """
+    detected = fragments(detected_values)
     for result in output["checks"].values():
         evidence = result.get("evidence")
         if not isinstance(evidence, list):
             continue
-        kept = [entry for entry in evidence if not sensitive(entry)]
+        kept = [entry for entry in evidence if not sensitive(entry, detected)]
         if len(kept) < len(evidence):
             kept.append(
                 f"command: `collect.py output check` → {len(evidence) - len(kept)} evidence entries withheld because they looked like credentials"
             )
         result["evidence"] = kept
-    output, _ = scrub(output)
+    output, _ = scrub(output, detected)
     return output
 
 
@@ -1318,11 +1430,12 @@ def collect(root: Path, enrichment: list[str] | None = None) -> dict[str, Any]:
     checks: dict[str, Any] = {}
     snapshot: dict[str, Any] = {"sourceFiles": len(sources), "trackedFiles": len(tracked or [])}
 
-    checks[f"{AUDIT}.no-secrets-in-source"] = secrets_check(root, tracked, with_scan, snapshot)
+    detected: set[str] = set()
+    checks[f"{AUDIT}.no-secrets-in-source"] = secrets_check(root, tracked, with_scan, snapshot, detected)
     checks[f"{AUDIT}.env-files-gitignored"] = env_ignore_check(root, files, set(tracked or []))
     checks[f"{AUDIT}.no-dynamic-code-execution"] = dynamic_code_check(sources, snapshot)
     build_snapshot(root, files, sources, snapshot)
-    return make_safe({"checks": checks, "snapshot": snapshot})
+    return make_safe({"checks": checks, "snapshot": snapshot}, detected)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -54,6 +54,9 @@ PRIVATE_KEY_HEADER = "-----BEGIN RSA " + "PRIVATE KEY-----"
 PRIVATE_KEY_BODY = "".join(("MIIEow", "IBAAKC", "AQEAu1", "SU1L7V", "LPHCgc", "BIjSnT", "3fHxD2", "pNk8qY", "0r1Wv5", "Lz9QmB", "7cT4sX", "e6Ja"))
 GENERIC_PASSWORD = "".join(("q8Zt3L", "w9Rv2X", "n5Kp7Y", "d4Mh"))
 LONG_PASSWORD = "".join(("Hq4Tz8", "Wm2Yk6", "Nb9Pr3", "Xc7Lf5", "Jd1"))
+HEX_PASSWORD = "".join(("9f3a1c", "7e5b2d", "8f4a6c", "0e9b1d", "3f5a7c", "2e"))
+WORD_PASSWORD = "".join(("correct", "horse", "battery", "staple"))
+PUNCTUATED_PASSWORD = "".join(("Kx7", "$mQ2", "{vL9", "<pR4", "*tW"))
 ENV_SECRET = "s3cr3t" + "ValueForTheFixture99"
 
 
@@ -774,6 +777,76 @@ class SecurityCollectorTests(unittest.TestCase):
         self.assertEqual(flagged, ["DB_PASSWORD", "SESSION_SECRET", "SIGNING_KEY"])
         self.assert_verifies(result)
         self.assert_no_fragments(result, GENERIC_PASSWORD)
+    # ----------------------------------------------------------------- third review regressions
+
+    def test_a_detected_value_is_redacted_wherever_it_reappears(self) -> None:
+        for value in (HEX_PASSWORD, WORD_PASSWORD):
+            with self.subTest(value=value[:4]):
+                self.write(".env", f"DB_PASSWORD={value}\n")
+                self.write(f"src/{value}.ts", "export const run = (input: string) => eval(input);\n")
+                self.write(f"lib/{value}/page.tsx", "export const html = (x: string) => <div dangerouslySetInnerHTML={{ __html: x }} />;\n")
+                self.commit(value[:4])
+                result = self.collect()
+                self.assertEqual(result["checks"][SECRETS]["status"], "violation")
+                self.assertTrue(any("withheld" in entry for entry in result["checks"][DYNAMIC]["evidence"]))
+                self.assert_verifies(result)
+                self.assert_no_fragments(result, value)
+                self.git("rm", "-q", "-r", "--cached", ".")
+                for path in list(self.root.iterdir()):
+                    if path.name != ".git":
+                        shutil.rmtree(path) if path.is_dir() else path.unlink()
+        self.assertFalse(collector.credential_like(WORD_PASSWORD))
+        self.assertTrue(collector.credential_like(HEX_PASSWORD))
+
+    def test_braces_in_comments_and_regexes_do_not_end_an_interpolation(self) -> None:
+        self.write(
+            "src/run.ts",
+            "export function run(input: string) {\n"
+            "  const a = `${1 /* } */ + eval(input)}`;\n"
+            "  const b = `${ /}/.test(input) ? eval(input) : 0 }`;\n"
+            "  return [a, b];\n"
+            "}\n",
+        )
+        self.commit()
+        self.assertEqual(self.collect()["checks"][DYNAMIC]["evidence"], ["src/run.ts:2 — `eval(`", "src/run.ts:3 — `eval(`"])
+
+    def test_a_committed_local_file_with_an_unprintable_path_is_still_a_violation(self) -> None:
+        self.write(".gitignore", ".env*\n")
+        self.write(f"apps/{LONG_PASSWORD}/.env.local", "FEATURE=on\n")
+        self.git("add", "-f", f"apps/{LONG_PASSWORD}/.env.local")
+        self.commit()
+        result = self.collect()
+        ignored = result["checks"][IGNORED]
+        self.assertEqual(ignored["status"], "violation")
+        self.assertIn("paths are withheld", ignored["evidence"][-1])
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, LONG_PASSWORD)
+
+    def test_punctuation_in_a_password_does_not_make_it_a_placeholder(self) -> None:
+        self.write(
+            "config/database.ts",
+            f"export const primary = 'postgres://app:{PUNCTUATED_PASSWORD}@prod.internal/app';\n"
+            "export const templated = 'postgres://app:${DB_PASSWORD}@prod.internal/app';\n"
+            "export const shell = 'postgres://app:$DB_PASSWORD@prod.internal/app';\n"
+            "export const documented = 'postgres://app:<password>@prod.internal/app';\n"
+            "export const masked = 'postgres://app:********@prod.internal/app';\n",
+        )
+        self.commit()
+        result = self.collect()
+        evidence = result["checks"][SECRETS]["evidence"]
+        self.assertEqual([entry.split(" — ")[0] for entry in evidence], ["config/database.ts:1"])
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, PUNCTUATED_PASSWORD)
+
+    def test_explicit_negations_of_local_env_files_are_probed(self) -> None:
+        for negation in ("!.env.staging.local", "!.env.qa.local", "!/apps/web/.env.*.local"):
+            with self.subTest(negation=negation):
+                self.write(".gitignore", f".env\n.env*.local\n{negation}\n")
+                self.commit(negation)
+                ignored = self.collect()["checks"][IGNORED]
+                self.assertEqual(ignored["status"], "partial")
+                expected = negation.lstrip("!/").replace("*", "any-mode")
+                self.assertIn(expected, ignored["evidence"][0])
 
 if __name__ == "__main__":
     unittest.main()

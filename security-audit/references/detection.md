@@ -266,7 +266,9 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     variables (including `*_KEY` and `*_PAT`) with real values in committed
     environment files. Values are parsed as dotenv does: a quoted value ends at
     its closing quote, an unquoted one at ` #`. Only a connection URL whose host
-    is local is exempt.
+    is local is exempt. A connection password is a placeholder only when the
+    whole password is a template expression such as `${DB_PASSWORD}`,
+    `<password>`, or `****`.
   - It skips whole-value placeholders (`changeme`, `your-key-here`, `<token>`,
     `${VAR}`, filler such as `xxxx`), the documented AWS example keys, local
     database URLs, and private-key headers with no key body after them, as in
@@ -274,9 +276,10 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     `Example` is still a secret.
   - Citations quote only a fixed prefix such as `sk_live_` or a variable name
     before `<REDACTED>`. Every string the collector prints, from any check or
-    snapshot fact, is tested for credential formats and for credential-shaped
-    runs, so a file or folder whose name looks like a credential is counted
-    but never named. When every hit is under a test path, the result is
+    snapshot fact, is tested against every value the scan detected (and every
+    eight-character piece of it), against credential formats, and against
+    credential-shaped runs such as long hexadecimal strings. A file or folder
+    whose name holds or looks like a credential is counted but never named. When every hit is under a test path, the result is
     judged `consider`.
   - A test-only private key or a revoked credential may be dismissed with a
     reason, but the key is still exposed: say whether it was ever live.
@@ -287,16 +290,18 @@ Read a file before citing it. Quote only the fragment that carries the signal.
 - **Local environment files are ignored by Git (tool).** Critical, because a
   missing control is rated like the defect it prevents.
   - The collector asks Git which rule ignores `.env`, `.env.local`, the
-    development, test, and production `.local` variants, a made-up
-    `.env.any-mode.local` that only a general pattern covers, and every
-    untracked environment file it finds on disk. It asks in the root, every
+    development, test, production, and staging `.local` variants, a made-up
+    `.env.any-mode.local` that only a general pattern covers, every untracked
+    environment file it finds on disk, and every environment file a tracked
+    `.gitignore` explicitly un-ignores with `!`. It asks in the root, every
     folder with a `package.json` or a Next.js or Vite configuration, and
     every folder that holds an environment file.
   - Only a rule in a `.gitignore` the repository tracks counts. An untracked
     `.gitignore`, `.git/info/exclude`, or a global ignore file protects one
     person, so that coverage is missing or partial.
   - A committed `.env*.local` file is a violation whatever the ignore rules
-    say, because an ignore rule does not untrack a file.
+    say, because an ignore rule does not untrack a file. One whose path cannot
+    be printed is still counted.
   - Committed defaults such as `.env` or `.env.production` are allowed (Next.js
     documents them); "No secrets in source" checks their values.
 - **Public environment variables hold no secrets.** Start from
