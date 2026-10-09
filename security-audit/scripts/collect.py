@@ -159,7 +159,7 @@ ENV_PROBES = (
 DYNAMIC_CODE_PATTERN = re.compile(
     r"(?<![\w$.])(?:(?:window|globalThis|self)\.)?eval\s*\("
     r"|(?<![\w$.])new\s+Function\s*\("
-    r"|(?<![\w$.])Function\s*\(\s*['\"`]"
+    r"|(?<![\w$.])Function\s*\("
     r"|(?<![\w$.])(?:(?:window|globalThis|self)\.)?set(?:Timeout|Interval)\s*\(\s*['\"`]"
 )
 # Words after which an expression, and so a call, may begin.
@@ -581,12 +581,24 @@ def any_secret(text: str) -> bool:
     )
 
 
+# Documentation domains (RFC 2606) and reserved top-level names. A host is exempt
+# only when it is one of them or a dot-delimited subdomain, so `db.notexample.com` is not.
+EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net", "local", "test", "example", "invalid", "localhost")
+
+
+def is_example_host(host: str) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in EXAMPLE_DOMAINS)
+
+
 def is_placeholder_value(value: str) -> bool:
-    """Whole-value placeholders, documentation examples, and filler such as `xxxx` or `0000`."""
+    """Whole-value placeholders, documentation examples, and one character repeated, such as `xxxx` or `0000`.
+
+    A value made of a few characters, such as `abababab`, is not a placeholder.
+    """
     return (
         bool(PLACEHOLDER_VALUE_PATTERN.match(value))
         or value in DOCUMENTATION_EXAMPLES
-        or len(set(value)) < 4
+        or len(set(value)) == 1
     )
 
 
@@ -598,7 +610,7 @@ def is_placeholder(match: re.Match[str]) -> bool:
         password = match.group("password")
         return (
             host in LOCAL_HOSTS
-            or host.endswith((".local", ".test", ".example", ".invalid", ".localhost", "example.com", "example.org"))
+            or is_example_host(host)
             or is_placeholder_value(password)
             or bool(PASSWORD_PLACEHOLDER_PATTERN.fullmatch(password))
         )
@@ -787,11 +799,25 @@ def is_local_connection(value: str) -> bool:
 def env_secret_value(raw: str) -> str | None:
     """The value of an environment assignment, unless it is empty, a placeholder, or a local connection."""
     value, quote = parse_env_value(raw)
+    value = value.strip() if "\n" in value else value  # a multiline value's surrounding line breaks are not part of it
     if quote != "'" and ENV_REFERENCE_PATTERN.fullmatch(value):
         return None  # Expanded from another variable; single quotes keep `$` literal.
     if is_placeholder_value(value) or is_local_connection(value):
         return None
     return value
+
+
+def closes_quote(text: str, quote: str) -> bool:
+    """Whether text holds the closing quote of a dotenv value, skipping escaped double quotes."""
+    index = 0
+    while index < len(text):
+        if quote == '"' and text[index] == "\\":
+            index += 2
+            continue
+        if text[index] == quote:
+            return True
+        index += 1
+    return False
 
 
 def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
@@ -830,6 +856,7 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
         if environment:
             env_files.append(path)
         in_key_body = False
+        pending: dict[str, Any] | None = None  # a quoted environment value still open on an earlier line
         for number, line, following in with_lookahead(lines):
             if in_key_body:
                 if "-----END" in line:
@@ -857,11 +884,26 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
                     evidence.append(citation(path, number, label, quoted(first.group("keep") or "", SAFE_PREFIX_PATTERN)))
                 else:
                     hidden_paths += 1
-            if environment:
+            if environment and pending is not None:
+                pending["raw"] += "\n" + line
+                if closes_quote(line, pending["raw"][0]):
+                    match, number_started = pending["match"], pending["number"]
+                    raw_value, pending = pending["raw"], None
+                else:
+                    continue
+            elif environment:
                 match = ENV_LINE_PATTERN.match(line)
-                value = env_secret_value(match.group("value")) if match and is_secret_name(match.group("name")) else None
+                number_started = number
+                raw_value = match.group("value") if match else ""
+                opening = raw_value.strip()[:1]
+                if match and opening in ("'", '"') and not closes_quote(raw_value.strip()[1:], opening):
+                    pending = {"match": match, "number": number, "raw": raw_value.strip()}
+                    continue
+            if environment:
+                value = env_secret_value(raw_value) if match and is_secret_name(match.group("name")) else None
                 if match and value is not None:
                     values.add(value)
+                    values.update(part for part in value.splitlines() if part.strip())
                     rules["secret-named-environment-variable"] += 1
                     files_with_findings.add(path)
                     name_variable = match.group("name")
@@ -869,7 +911,7 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
                     separator = " ".join(match.group("separator").split()) or "="
                     prefix = name_variable + separator if SAFE_NAME_PATTERN.match(name_variable) else ""
                     if printable:
-                        evidence.append(citation(path, number, label, quoted(prefix, re.compile(r"^[A-Za-z0-9_]{1,80} ?= ?$"))))
+                        evidence.append(citation(path, number_started, label, quoted(prefix, re.compile(r"^[A-Za-z0-9_]{1,80} ?= ?$"))))
                     else:
                         hidden_paths += 1
     return {

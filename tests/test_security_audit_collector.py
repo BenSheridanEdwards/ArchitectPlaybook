@@ -1005,6 +1005,67 @@ class SecurityCollectorTests(unittest.TestCase):
         )
         self.commit()
         self.assertEqual(self.collect()["checks"][DYNAMIC]["evidence"], ["src/run.ts:4 — `eval(`"])
+    # ----------------------------------------------------------------- sixth review regressions
+
+    def test_multiline_quoted_environment_values_are_found(self) -> None:
+        middle = "".join(("Correct", "Horse", "Battery", "Staple42!"))
+        self.write(
+            ".env.production",
+            f'SESSION_SECRET="\n{middle}\n"\n'
+            "LOG_LEVEL=info\n"
+            "API_SECRET='\nchangeme\n'\n"
+            f"SIGNING_SECRET={GENERIC_PASSWORD}\n",
+        )
+        self.commit()
+        result = self.collect()
+        evidence = result["checks"][SECRETS]["evidence"]
+        self.assertEqual(
+            evidence,
+            [
+                ".env.production:1 — secret-named variable SESSION_SECRET: `SESSION_SECRET=<REDACTED>`",
+                ".env.production:8 — secret-named variable SIGNING_SECRET: `SIGNING_SECRET=<REDACTED>`",
+            ],
+        )
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, middle, GENERIC_PASSWORD)
+
+    def test_function_constructor_calls_are_found_with_or_without_new(self) -> None:
+        self.write(
+            "src/run.ts",
+            "export function run(request: { body: { code: string } }, cb: Function) {\n"
+            "  const direct = Function(request.body.code);\n"
+            "  const built = new Function(request.body.code);\n"
+            "  const helper = registry.Function(request.body.code);\n"
+            "  return [direct, built, helper, cb];\n"
+            "}\n"
+            "function Function(code: string) { return code; }\n"
+            "interface Factory { Function(): void }\n",
+        )
+        self.commit()
+        evidence = self.collect()["checks"][DYNAMIC]["evidence"]
+        self.assertEqual(evidence, ["src/run.ts:2 — `Function(`", "src/run.ts:3 — `new Function(`"])
+
+    def test_only_exact_example_domains_are_exempt(self) -> None:
+        self.write(
+            "config/database.ts",
+            f"export const a = 'postgres://app:{GENERIC_PASSWORD}@db.notexample.com/app';\n"
+            f"export const b = 'postgres://app:{GENERIC_PASSWORD}@myexample.org/app';\n"
+            f"export const c = 'postgres://app:{GENERIC_PASSWORD}@api.nottest/app';\n"
+            f"export const d = 'postgres://app:{GENERIC_PASSWORD}@db.example.com/app';\n"
+            f"export const e = 'postgres://app:{GENERIC_PASSWORD}@example.org/app';\n"
+            f"export const f = 'postgres://app:{GENERIC_PASSWORD}@api.staging.test/app';\n",
+        )
+        self.commit()
+        evidence = self.collect()["checks"][SECRETS]["evidence"]
+        self.assertEqual([entry.split(" — ")[0] for entry in evidence], ["config/database.ts:1", "config/database.ts:2", "config/database.ts:3"])
+
+    def test_low_diversity_values_are_secrets_unless_one_character_repeats(self) -> None:
+        self.write(".env.production", "DB_PASSWORD=abababababab\nAPI_SECRET=xxxxxxxxxxxx\nSIGNING_KEY=000000000000\n")
+        self.commit()
+        result = self.collect()
+        flagged = [entry.split("variable ")[1].split(":")[0] for entry in result["checks"][SECRETS]["evidence"]]
+        self.assertEqual(flagged, ["DB_PASSWORD"])
+        self.assertNotIn("abababab", json.dumps(result))
 
 if __name__ == "__main__":
     unittest.main()

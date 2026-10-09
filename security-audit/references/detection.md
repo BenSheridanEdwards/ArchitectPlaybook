@@ -273,9 +273,10 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     `$NAME` outside single quotes. Only a connection URL whose host is local
     is exempt, and a connection password is a placeholder only when the whole
     password is a template expression such as `${DB_PASSWORD}`, `<password>`,
-    or `****`.
+    or `****`. A double- or single-quoted value can span lines; it is cited
+    at its first line.
   - It skips whole-value placeholders (`changeme`, `your-key-here`, `<token>`,
-    `${VAR}`, filler such as `xxxx`), the documented AWS example keys, local
+    `${VAR}`, one character repeated such as `xxxx` or `0000`), the documented AWS example keys, local
     database URLs, and private-key headers with no key body after them, as in
     documentation templates. A value that merely contains a word such as
     `Example` is still a secret.
@@ -419,6 +420,17 @@ The collector never prints a secret it has detected:
 The limit: a secret that was never detected as a value cannot be recognised.
 A file name that is itself a password, but is not credential-shaped and
 matches no detected value, is shown as it is.
+
+## Known limits
+
+The collector is a deterministic first pass over common shapes: known
+credential formats, secret-named variables, ignore rules, and the usual
+spellings of `eval` and `new Function`. It does not parse JavaScript or every
+dotenv dialect, so some secrets and some dynamic code will not match.
+Recording `present` for a tool check means the collector found nothing, not
+that nothing exists. While reading entry points and sinks, you still review
+secrets and dynamic code, and re-record a tool check with your own citation
+when you find a shape the collector missed.
 
 ## Citing secrets safely
 
