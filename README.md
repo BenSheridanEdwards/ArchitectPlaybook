@@ -94,7 +94,7 @@ worktree each (`--worktree`).
 
 | Phase | Audits | Why here |
 | --- | --- | --- |
-| 0 — Prepare | `/install-architect-playbook-globally`, `/pre-audit-setup` | Install the skills and build the knowledge graph that everything downstream reads. |
+| 0 — Prepare | `/install-architect-playbook-globally`, `/pre-audit-setup` | Install the skills and, optionally, build the knowledge graph that audits use to choose where to read first. |
 | 1 — Base plate | `/agentic-audit`, `/quality-gates-audit` | Establish whether the context layer is truthful and the gates are real before trusting anything else. |
 | 2 — Behaviour floor | `/testing-audit` | The safety net. Nothing else is safe to change until you know what the tests actually cover. |
 | 3 — Structure | `/architecture-audit` | Fix boundaries and coupling before polishing the code that sits inside them. |
@@ -217,7 +217,7 @@ For a non-technical explanation with formulas and a worked example, read
 | --- | --- |
 | [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
-| [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify, build the knowledge graph, merge the PreToolUse hook. |
+| [`/pre-audit-setup`](pre-audit-setup/SKILL.md) | Verify graphify and build the optional knowledge graph, without changing settings or tracked files. |
 | [`/preflight`](preflight/SKILL.md) | Detect optional enrichment tooling for `--with-*` flags. |
 | [`audit-protocol`](audit-protocol/SKILL.md) | Shared run script and rules every audit publishes through. Not a slash command; installed with every audit. |
 
@@ -319,4 +319,4 @@ The architectural intent behind the playbook's conventions lives in [ARCHITECTUR
 
 ## Related
 
-- [graphify](https://graphify.net/graphify-claude-code-integration.html) — the knowledge-graph skill that `/pre-audit-setup` assumes is installed at `~/.claude/skills/graphify`.
+- [graphify](https://graphify.net/graphify-claude-code-integration.html) — the optional knowledge-graph skill that `/pre-audit-setup` uses to build `graphify-out/`. Install it with `pip install graphifyy` and `graphify install`.

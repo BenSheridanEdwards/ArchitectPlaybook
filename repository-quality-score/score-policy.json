@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.1.0",
-  "policyVersion": "2.0.0",
+  "policyVersion": "2.1.0",
   "scorePrecision": 2,
   "statusPoints": {
     "present": "1.0",

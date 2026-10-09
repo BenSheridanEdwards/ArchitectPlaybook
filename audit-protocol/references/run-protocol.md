@@ -56,8 +56,9 @@ their own branch.
    fi
    ```
 
-   Otherwise run `/pre-audit-setup` in the worktree, or accept that the run is
-   provisional because no graph was available.
+   Otherwise run `/pre-audit-setup` in the worktree, or run without the graph.
+   The graph only guides where to read first; a run without it is still
+   official (Architecture Decision Record 0005).
 
 4. Pass `--repository .worktrees/<audit-name>` before every protocol command,
    and read files from the worktree.
@@ -132,6 +133,8 @@ complete run stays in place.
 | `partial` | The invariant mostly holds, with exceptions, or a soft check shows mixed adherence. |
 | `missing` | A structural prerequisite is absent. |
 | `violation` | Concrete code, configuration, or output breaks the invariant. |
+
+A check that falls back to a less precise method because the knowledge graph is missing is recorded with `--degraded "knowledge graph unavailable: <fallback used>"`.
 
 A check you could not evaluate is never `partial`. Record it as `not-evaluated`
 with the reason, for example `requires --with-network` or `test runner failed

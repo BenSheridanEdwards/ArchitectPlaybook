@@ -2,7 +2,7 @@
 
 This document explains how Architect Playbook calculates the Repository Quality
 Score (RQS) and how the result should be communicated to managers. It describes
-the current scoring policy, version `2.0.0`.
+the current scoring policy, version `2.1.0`.
 
 ## Executive answer
 
@@ -232,7 +232,8 @@ received a complete assessment.
 An official score requires all policy audits to provide compatible canonical
 evidence for the current clean source commit. The runs must be unfiltered, use
 no threshold or policy overrides, contain no applicable unevaluated checks, and
-contain no degraded evidence. Required graph evidence must also be available.
+contain no degraded evidence. The knowledge graph is optional and does not
+affect qualification (Architecture Decision Record 0005).
 
 An official score can still be low. A completely evaluated `violation` lowers
 quality but does not make the calculation provisional.
