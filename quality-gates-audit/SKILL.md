@@ -83,7 +83,7 @@ defeats its intended enforcement. Use `classification: "misconfigured"` on a
 
 ## What this skill does
 
-1. **Reads the knowledge graph first.** If `graphify-out/graph.json` exists, read `graphify-out/GRAPH_REPORT.md` to orient before searching raw files. The PreToolUse hook installed by `/pre-audit-setup` reminds you of this on every Glob and Grep — respect it.
+1. **Reads the knowledge graph first.** If `graphify-out/graph.json` exists, read `graphify-out/GRAPH_REPORT.md` to orient before searching raw files.
 2. **Detects ecosystem.** Checks `package.json` for Node.js projects. If absent, switches to documentation-or-skill-repository mode instead of stopping, then audits repository-native gates such as validators, Markdown link checks, local Git hooks, Conventional Commit enforcement, bootstrap install truth, and continuous integration workflows.
 3. **Enumerates gates.** Walks the baseline above, applying any `--stage`, `--include`, or `--exclude` filters.
 4. **Resolves each gate's status** by inspecting the project for the signals listed in the baseline tables. Never executes any gate — this is a static audit.

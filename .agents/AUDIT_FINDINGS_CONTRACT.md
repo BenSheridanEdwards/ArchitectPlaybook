@@ -54,8 +54,10 @@ with identical values:
 ```
 
 Determine source-tree cleanliness before writing the current run. Ignore status
-entries entirely inside `.architect-audits/`, because those are generated audit
-artifacts; do not ignore any other uncommitted path.
+entries entirely inside `.architect-audits/` and `graphify-out/`, because those
+are generated output (Architecture Decision Record 0005); do not ignore any
+other uncommitted path. `graphAvailable` is reported but never makes a run
+provisional.
 
 Timestamps are timezone-aware RFC 3339 values and finish must not precede start.
 The repository value must not contain credentials or an absolute local path.

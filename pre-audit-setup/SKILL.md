@@ -1,139 +1,117 @@
 ---
 name: pre-audit-setup
-description: One-time, idempotent preparation that every architect-playbook audit depends on. Verifies graphify is installed, builds the project knowledge graph, and merges the graphify-aware PreToolUse hook into the project's .claude/settings.json.
+description: One-time, idempotent preparation before audits. Verifies graphify is installed and builds the project knowledge graph that audits read for orientation, without changing settings or tracked files.
 disable-model-invocation: true
 argument-hint: "[--force] [--dry-run]"
 ---
 
 # /pre-audit-setup
 
-Idempotent preparation that every audit in the architect-playbook expects to have been run at least once in the target project. Run this immediately after installing the skills.
+Optional, idempotent preparation before running audits. It builds the graphify knowledge graph, which audits read to orient themselves: god nodes, communities, and the files worth reading first. No audit requires the graph. Without it, a run is still official; only a check that falls back to a less precise method is recorded as degraded.
+
+The setup leaves the working tree clean for scoring. `graphify-out/` is generated tooling output, so the audit protocol and the score calculator leave it out of source cleanliness, as they do `.architect-audits/` (Architecture Decision Record 0005). The setup changes no settings file and no `CLAUDE.md`, and changes committed files only when you confirm a rebuild of a committed `graphify-out/`.
 
 ## Usage
 
 ```
-/pre-audit-setup                 # do everything that has not been done yet
-/pre-audit-setup --force         # rebuild the knowledge graph and rewrite the hook even if both already exist
+/pre-audit-setup                 # build the knowledge graph if it is missing
+/pre-audit-setup --force         # rebuild the knowledge graph even if it exists
 /pre-audit-setup --dry-run       # describe what would change without modifying anything
 ```
 
 ## What this skill does
 
-1. **Verifies graphify is installed at `~/.claude/skills/graphify`.** This skill does not install graphify. If it is missing, stop and tell the user where to install it (see [https://graphify.net/graphify-claude-code-integration.html](https://graphify.net/graphify-claude-code-integration.html)). Do not invent a clone URL.
-2. **Builds the project knowledge graph** by invoking `/graphify .` from the current working directory. Subsequent audits read `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` as their map of the codebase.
-3. **Merges the graphify-aware PreToolUse hook** into the project-local `.claude/settings.json` (creating the file if needed). The hook attaches a hint to every Glob and Grep call: when the knowledge graph exists, Claude is reminded to read the report before searching raw files.
-4. **Creates the `.architect-audits/` directory** that downstream audits will write findings into. Adds a single `.gitkeep` so it survives `git clean`.
-5. **Prints a checklist** describing what was done, what was already in place, and what the user should verify before launching audits.
+1. **Creates the `.architect-audits/` directory** that audits publish into, at the repository root.
+2. **Verifies the graphify skill is installed**, because the graph is built with its `/graphify` slash command. The `graphify` command-line tool alone is not enough; `graphify install` adds the skill. This skill does not install anything. If graphify is missing, it points the user to [https://graphify.net/graphify-claude-code-integration.html](https://graphify.net/graphify-claude-code-integration.html).
+3. **Builds the project knowledge graph** by invoking `/graphify .` from the repository root. Audits read `graphify-out/GRAPH_REPORT.md` and `graphify-out/graph.json`. If `graphify-out/` is committed or is a symbolic link, it asks before rebuilding.
+4. **Prints a checklist** of what was done, what was already in place, and what to do next.
 
 ## Implementation steps
 
-Follow these steps in order. Stop at the first hard failure and report.
+Follow these steps in order. Stop at the first hard failure and report it.
 
-### Step 1 — Verify graphify
+### Step 1 — Work from the repository root and create the output folder
 
 ```bash
-test -f "$HOME/.claude/skills/graphify/SKILL.md" \
-  && echo "graphify: present" \
-  || { echo "graphify: missing — install it first (see https://graphify.net/graphify-claude-code-integration.html)"; exit 1; }
+cd "$(git rev-parse --show-toplevel)"
 ```
 
-If graphify is missing, stop and surface the message above. Do not attempt to download anything.
+Create `.architect-audits/` with `mkdir -p .architect-audits`, except with `--dry-run`, which only reports that it would.
 
-### Step 2 — Detect prior runs
+Run every later step from the root. A graph built in a subfolder would be a stray, uncommitted `graphify-out/` that counts as source.
+
+### Step 2 — Verify the graphify skill
+
+```bash
+if test -f "$HOME/.claude/skills/graphify/SKILL.md" || test -f .claude/skills/graphify/SKILL.md; then
+  echo "graphify: present"
+elif command -v graphify >/dev/null 2>&1; then
+  echo "graphify: command-line tool found, but not its Claude Code skill; run: graphify install"
+  exit 1
+else
+  echo "graphify: missing — see https://graphify.net/graphify-claude-code-integration.html"
+  exit 1
+fi
+```
+
+If graphify is missing, stop and show the message. Do not install anything. Audits still run without the graph.
+
+### Step 3 — Decide whether to build
 
 ```bash
 test -f graphify-out/graph.json && echo "knowledge graph: present" || echo "knowledge graph: missing"
-test -f .claude/settings.json   && echo "settings.json: present"  || echo "settings.json: missing"
+test -L graphify-out && echo "graphify-out: symbolic link"
+git ls-files --error-unmatch graphify-out >/dev/null 2>&1 && echo "graphify-out: committed"
 ```
 
-If both the knowledge graph and the hook are already present, and `--force` was not passed, print the checklist and exit cleanly. The skill is idempotent.
+- If the graph is present and `--force` was not passed, print the checklist and stop.
+- With `--dry-run`, print what Step 4 would do and stop.
+- If `graphify-out/` is committed or is a symbolic link, say that rebuilding would change committed files or write through the link, and continue only if the user confirms.
 
-### Step 3 — Build the knowledge graph
+### Step 4 — Build the knowledge graph
 
-If `graphify-out/graph.json` is missing or `--force` was passed, run:
+Invoke the graphify slash command from the repository root, and wait for it to finish:
 
 ```
 /graphify .
 ```
 
-(Invoke the graphify slash command — do not call it as a shell command.) Wait for it to finish before moving on.
+Do not run graphify's own installer (`graphify claude install`) from this skill. That command edits `CLAUDE.md` and `.claude/settings.json`, which are the user's to decide.
 
-### Step 4 — Merge the PreToolUse hook into `.claude/settings.json`
+### Step 5 — Print the checklist
 
-The hook to merge is exactly:
-
-```json
-{
-  "matcher": "Glob|Grep",
-  "hooks": [
-    {
-      "type": "command",
-      "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
-    }
-  ]
-}
-```
-
-Merge rules (in order):
-
-1. If `.claude/settings.json` does not exist, create it with the structure:
-   ```json
-   { "hooks": { "PreToolUse": [ <the hook above> ] } }
-   ```
-2. If it exists but has no `hooks` key, add `hooks: { PreToolUse: [<the hook above>] }`.
-3. If it has `hooks.PreToolUse`, append the hook **only if** no existing entry has both the same `matcher` and an identical `command` string. Never duplicate.
-4. Preserve every other field in `.claude/settings.json` exactly as it was.
-5. Use `jq` if it is on PATH; otherwise read the file with the Read tool, transform it in memory, and write it back with the Write tool.
-
-After merging, print the final hook block so the user can confirm.
-
-### Step 5 — Ensure the `.architect-audits/` directory exists
-
-```bash
-mkdir -p .architect-audits
-[ -f .architect-audits/.gitkeep ] || touch .architect-audits/.gitkeep
-```
-
-### Step 6 — Print the checklist
-
-Output a short report with one line per item, each prefixed with `[done]`, `[skipped]`, or `[already]`:
+One line per item, each prefixed with `[done]`, `[already]`, or `[hint]`:
 
 ```
 [done]    graphify presence verified
-[done]    graphify-out/graph.json built (53 files indexed)
-[done]    PreToolUse hook merged into .claude/settings.json
+[done]    graphify-out/graph.json built
 [done]    .architect-audits/ directory created
-[hint]    next: open one chat per audit slash command and run them in parallel
+[hint]    next: run an audit, for example /architecture-audit; add --worktree to run several at once
 ```
 
 ## Idempotency rules
 
-- Never duplicate the hook entry. The check is `matcher` plus exact `command` string match.
-- Never overwrite the existing knowledge graph unless `--force` was passed.
-- Never modify any setting other than `hooks.PreToolUse`.
-- Never touch `~/.claude/settings.json`. This skill is project-local only.
+- Never overwrite an existing knowledge graph unless `--force` was passed.
+- Never write to `.claude/settings.json`, `.claude/settings.local.json`, `~/.claude/settings.json`, or `CLAUDE.md`.
+- Never change committed files without the user's confirmation.
+- Never stage, commit, or ignore anything in Git.
 
 ## Failure modes and remediation
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `graphify: missing` | graphify is not installed at `~/.claude/skills/graphify` | Install graphify first; see the integration page above. |
-| `/graphify .` fails | graphify-side problem | Read graphify's own error output. This skill does not retry. |
-| Settings file is invalid JSON | Pre-existing corruption in `.claude/settings.json` | Stop and ask the user to fix or move the file. Never silently overwrite. |
+| `graphify: missing` | graphify is not installed | Install it from the integration page above, or run audits without the graph. |
+| `command-line tool found, but not its Claude Code skill` | Only the Python package is installed | Run `graphify install`, then run this skill again. |
+| `/graphify .` fails | A graphify-side problem | Read graphify's own error output. This skill does not retry. |
+| A `--worktree` audit has no graph | `graphify-out/` is not copied into new worktrees | The run protocol copies the graph when the worktree is at the same commit; otherwise run `/pre-audit-setup` inside the worktree. |
 
 ## When to run again
 
-Re-run `/pre-audit-setup` after:
-
-- A major refactor (the knowledge graph has gone stale).
-- Pulling a branch that significantly changes file layout.
-- Adding new top-level packages or workspaces.
-
-Use `--force` when re-running to rebuild the graph and re-merge the hook.
+Re-run `/pre-audit-setup --force` after a major refactor, after pulling a branch that changes the file layout significantly, or after adding packages or workspaces.
 
 ## What this skill explicitly does NOT do
 
-- Install graphify itself.
-- Modify global Claude Code settings.
-- Run any audit. Audits are separate skills and are intended to run in their own chat sessions.
-- Commit anything to git. Commit changes manually, with a Conventional Commits message such as `chore: add graphify pre-tool-use hook to settings.json`.
+- Install graphify, or run its installer.
+- Modify any settings file, `CLAUDE.md`, or tracked file.
+- Run any audit.
+- Commit anything to Git.

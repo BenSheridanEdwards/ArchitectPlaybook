@@ -7,7 +7,7 @@ argument-hint: "[--gap=<description>] [--gap-report=<path>] [--from-audit-histor
 
 # /system-self-improve
 
-The meta-improvement layer of the architect-playbook. When a review surfaces a gap that one of the audits missed — or when running an audit reveals a weakness in the audit itself — `/system-self-improve` reads the gap, locates the affected SKILL.md (and any adjacent files: README, CLAUDE.md, `pre-audit-setup` hook, MEMORY.md), proposes a minimal reversible edit, asks for confirmation, and on approval mutates the playbook so the same gap is more likely to be caught next time.
+The meta-improvement layer of the architect-playbook. When a review surfaces a gap that one of the audits missed — or when running an audit reveals a weakness in the audit itself — `/system-self-improve` reads the gap, locates the affected SKILL.md (and any adjacent files: README, CLAUDE.md, MEMORY.md), proposes a minimal reversible edit, asks for confirmation, and on approval mutates the playbook so the same gap is more likely to be caught next time.
 
 This is the only skill in the playbook that writes to files outside its own `.architect-audits/` directory. That power is gated behind a deliberate two-stage flow.
 
@@ -98,7 +98,7 @@ Find the affected files and assess ripple effects.
 | --- | --- | --- |
 | `SKILL.md` location | The originating skill's `SKILL.md` is found in the playbook clone. | Skill missing. The skill stops and asks the user whether the playbook path is correct. |
 | Affected sections identified | The specific layer table, detection-logic step, threshold list, or implementation-plan block to modify is located, with line numbers. | The proposed change touches more than three sections in one `SKILL.md`. The skill flags this as a refactor scope rather than a self-improve scope and asks the user to confirm. |
-| Ripple-effect map | Adjacent files that may need changes are identified: README skill index row, README per-skill summary, CLAUDE.md rules, `pre-audit-setup/SKILL.md` hook, other audits' boundary tables that mention the originating skill, MEMORY.md if a project-wide preference is implied. | None — ripple effects are surfaced as items in the plan, not as blockers. |
+| Ripple-effect map | Adjacent files that may need changes are identified: README skill index row, README per-skill summary, CLAUDE.md rules, other audits' boundary tables that mention the originating skill, MEMORY.md if a project-wide preference is implied. | None — ripple effects are surfaced as items in the plan, not as blockers. |
 | Graphify centrality assessed | When the playbook's own knowledge graph is present (built by running `/pre-audit-setup` from inside the playbook clone), the originating skill's centrality is recorded. God-node skills (high inbound boundary-table references) get a "high blast radius" tag, which raises the bar for the proposed edit. | None — the centrality assessment informs how cautious the proposed edit should be, not whether to proceed. |
 | Recursive-self-edit detected | When the originating skill is `/system-self-improve` itself, the skill flags this and the confirmation prompt downstream becomes the stronger recursive variant. | None — recursion is supported, not blocked. |
 
