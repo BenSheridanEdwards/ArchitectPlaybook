@@ -57,6 +57,9 @@ LONG_PASSWORD = "".join(("Hq4Tz8", "Wm2Yk6", "Nb9Pr3", "Xc7Lf5", "Jd1"))
 HEX_PASSWORD = "".join(("9f3a1c", "7e5b2d", "8f4a6c", "0e9b1d", "3f5a7c", "2e"))
 WORD_PASSWORD = "".join(("correct", "horse", "battery", "staple"))
 PUNCTUATED_PASSWORD = "".join(("Kx7", "$mQ2", "{vL9", "<pR4", "*tW"))
+SHORT_PASSWORD = "".join(("ab", "cde"))
+PLAIN_KEY_BODY = "".join(("abcdefgh", "ijklmnop", "qrstuvwx", "yzabcdef", "ghijklmn", "opqrst"))
+DOLLAR_PASSWORD = "".join(("$Correct", "Horse", "Battery", "Staple42!"))
 ENV_SECRET = "s3cr3t" + "ValueForTheFixture99"
 
 
@@ -495,7 +498,7 @@ class SecurityCollectorTests(unittest.TestCase):
         secrets = result["checks"][SECRETS]
         self.assertEqual(secrets["status"], "violation")
         self.assertTrue(result["snapshot"]["secretScan"]["historyScanned"])
-        self.assertEqual(result["snapshot"]["secretScan"]["history"]["files"], ["lib/payments.ts"])
+        self.assertNotIn("files", result["snapshot"]["secretScan"]["history"])
         self.assert_verifies(result)
         self.assert_no_values(result, STRIPE)
 
@@ -838,15 +841,84 @@ class SecurityCollectorTests(unittest.TestCase):
         self.assert_verifies(result)
         self.assert_no_fragments(result, PUNCTUATED_PASSWORD)
 
-    def test_explicit_negations_of_local_env_files_are_probed(self) -> None:
-        for negation in ("!.env.staging.local", "!.env.qa.local", "!/apps/web/.env.*.local"):
+    def test_a_negation_that_can_match_a_local_env_file_is_the_finding(self) -> None:
+        cases = {
+            "!.env.staging.local": "partial",
+            "!.env.qa.local": "partial",
+            "!/apps/web/.env.*.local": "partial",
+            "!.env.[pq]a.local": "partial",
+            "!**/.env.local": "partial",
+            "!*.local": "partial",
+            "!.env.example": "present",
+            "!docs/*.md": "present",
+        }
+        for negation, expected in cases.items():
             with self.subTest(negation=negation):
                 self.write(".gitignore", f".env\n.env*.local\n{negation}\n")
                 self.commit(negation)
-                ignored = self.collect()["checks"][IGNORED]
-                self.assertEqual(ignored["status"], "partial")
-                expected = negation.lstrip("!/").replace("*", "any-mode")
-                self.assertIn(expected, ignored["evidence"][0])
+                result = self.collect()
+                ignored = result["checks"][IGNORED]
+                self.assertEqual(ignored["status"], expected)
+                if expected == "partial":
+                    self.assertIn(f".gitignore:3 — `{negation}` un-ignores a local environment file", ignored["evidence"])
+                self.assert_verifies(result)
+    # ----------------------------------------------------------------- fourth review regressions
+
+    def test_short_detected_values_are_redacted_whole(self) -> None:
+        self.write(".env", f"DB_PASSWORD={SHORT_PASSWORD}\n")
+        self.write(f"src/{SHORT_PASSWORD}.ts", "export const run = (input: string) => eval(input);\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["checks"][SECRETS]["status"], "violation")
+        self.assertNotIn(SHORT_PASSWORD, json.dumps(result))
+        self.assert_verifies(result)
+        redaction = collector.Redaction(["q7z"])
+        self.assertTrue(redaction.matches("src/q7z.ts"))
+        self.assertTrue(redaction.matches("q7z (inline action)"))
+        self.assertFalse(redaction.matches("src/aq7zb.ts"))
+
+    def test_private_key_bodies_are_redacted_wherever_they_reappear(self) -> None:
+        header = PRIVATE_KEY_HEADER
+        footer = "-----END RSA " + "PRIVATE KEY-----"
+        self.write("certs/server.pem", f"{header}\n{PLAIN_KEY_BODY}\n{footer}\n")
+        self.write("config/service.json", '{"private_key": "' + header + "\\n" + PLAIN_KEY_BODY[::-1] + "\\n" + footer + '"}\n')
+        self.write(f"src/{PLAIN_KEY_BODY[:14]}.ts", "export const run = (input: string) => eval(input);\n")
+        self.write(f"lib/{PLAIN_KEY_BODY[::-1][:14]}/page.tsx", "export const html = (x: string) => <div dangerouslySetInnerHTML={{ __html: x }} />;\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["checks"][SECRETS]["status"], "violation")
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, PLAIN_KEY_BODY, PLAIN_KEY_BODY[::-1])
+
+    def test_history_never_prints_file_names(self) -> None:
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.commit()
+        report = [{"RuleID": "generic-api-key", "File": f"keys/{WORD_PASSWORD}.txt", "Commit": "c" * 40}]
+        with mock.patch.object(collector, "run_gitleaks", return_value=(report, "gitleaks git --redact --log-opts=--all")):
+            result = self.collect("--with-scan")
+        self.assertEqual(result["snapshot"]["secretScan"]["history"], {"findings": 1, "rules": {"generic-api-key": 1}, "commits": ["c" * 12]})
+        self.assertNotIn(WORD_PASSWORD, json.dumps(result))
+
+    def test_single_quoted_values_are_literal_and_only_references_are_exempt(self) -> None:
+        self.write(
+            ".env.production",
+            f"DB_PASSWORD='{DOLLAR_PASSWORD}'\n"
+            f'API_SECRET="{DOLLAR_PASSWORD}"\n'
+            "SESSION_SECRET=${BASE_SECRET}\n"
+            "SIGNING_SECRET=$BASE_SECRET\n"
+            'TOKEN_SECRET="${BASE_SECRET}"\n',
+        )
+        self.commit()
+        result = self.collect()
+        flagged = [entry.split("variable ")[1].split(":")[0] for entry in result["checks"][SECRETS]["evidence"]]
+        self.assertEqual(flagged, ["DB_PASSWORD", "API_SECRET"])
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, DOLLAR_PASSWORD)
+
+    def test_the_redaction_guarantee_is_documented(self) -> None:
+        notes = (ROOT / "security-audit" / "references" / "detection.md").read_text(encoding="utf-8")
+        self.assertIn("## Redaction guarantee", notes)
+        self.assertIn("Redaction guarantee", collector.__doc__ or "")
 
 if __name__ == "__main__":
     unittest.main()

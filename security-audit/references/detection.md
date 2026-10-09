@@ -250,9 +250,9 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   shipped code and marks the result `consider`. It ignores strings, comments,
   regular expressions, prose in JSX text, and method declarations named
   `eval`, but still reads code inside `${...}` template interpolations and
-  after a `>` comparison. Trace each site: if request, storage, or message data can reach it,
-  re-record the check with `--judgement act-on` and the trace. Calls in tests
-  and minified vendor files are excluded.
+  after a `>` comparison. Trace each site: if request, storage, or message
+  data can reach it, re-record the check with `--judgement act-on` and the
+  trace. Calls in tests and minified vendor files are excluded.
 - **Message listeners.** `event.origin === 'https://exact.example'` or a `Set`
   of exact origins is present. `includes`, `endsWith`, `indexOf`, or a
   regular expression without anchors is a violation, because
@@ -264,38 +264,43 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   - The collector scans every tracked file, in any folder and of any size, for
     high-confidence formats, keystore and private-key files, and secret-named
     variables (including `*_KEY` and `*_PAT`) with real values in committed
-    environment files. Values are parsed as dotenv does: a quoted value ends at
-    its closing quote, an unquoted one at ` #`. Only a connection URL whose host
-    is local is exempt. A connection password is a placeholder only when the
-    whole password is a template expression such as `${DB_PASSWORD}`,
-    `<password>`, or `****`.
+    environment files.
+  - Values are parsed as dotenv does: a quoted value ends at its closing
+    quote, an unquoted one at ` #`, and a single-quoted value is literal. A
+    value is exempt as a reference only when it is entirely `${NAME}` or
+    `$NAME` outside single quotes. Only a connection URL whose host is local
+    is exempt, and a connection password is a placeholder only when the whole
+    password is a template expression such as `${DB_PASSWORD}`, `<password>`,
+    or `****`.
   - It skips whole-value placeholders (`changeme`, `your-key-here`, `<token>`,
     `${VAR}`, filler such as `xxxx`), the documented AWS example keys, local
     database URLs, and private-key headers with no key body after them, as in
     documentation templates. A value that merely contains a word such as
     `Example` is still a secret.
   - Citations quote only a fixed prefix such as `sk_live_` or a variable name
-    before `<REDACTED>`. Every string the collector prints, from any check or
-    snapshot fact, is tested against every value the scan detected (and every
-    eight-character piece of it), against credential formats, and against
-    credential-shaped runs such as long hexadecimal strings. A file or folder
-    whose name holds or looks like a credential is counted but never named. When every hit is under a test path, the result is
-    judged `consider`.
+    before `<REDACTED>`. The redaction guarantee below says what else is
+    withheld. When every hit is under a test path, the result is judged
+    `consider`.
   - A test-only private key or a revoked credential may be dismissed with a
     reason, but the key is still exposed: say whether it was ever live.
   - Google API keys are often public by design (Maps, Firebase) and are not in
     the high-confidence list. Judge them under the public-variable check.
   - With `--with-scan`, history findings are reported as counts, rule names,
-    commits, and files. A secret only in history still needs rotating.
+    and commit identifiers, never file names. A secret only in history still
+    needs rotating.
 - **Local environment files are ignored by Git (tool).** Critical, because a
   missing control is rated like the defect it prevents.
   - The collector asks Git which rule ignores `.env`, `.env.local`, the
     development, test, production, and staging `.local` variants, a made-up
-    `.env.any-mode.local` that only a general pattern covers, every untracked
-    environment file it finds on disk, and every environment file a tracked
-    `.gitignore` explicitly un-ignores with `!`. It asks in the root, every
+    `.env.any-mode.local` that only a general pattern covers, and every
+    untracked environment file it finds on disk. It asks in the root, every
     folder with a `package.json` or a Next.js or Vite configuration, and
     every folder that holds an environment file.
+  - A tracked `.gitignore` line whose `!` exception can match a local
+    environment file, such as `!.env.staging.local` or `!**/.env.local`, is
+    itself the finding (partial, citing the line), whether or not a matching
+    file exists yet. An exception for a template such as `!.env.example` is
+    not.
   - Only a rule in a `.gitignore` the repository tracks counts. An untracked
     `.gitignore`, `.git/info/exclude`, or a global ignore file protects one
     person, so that coverage is missing or partial.
@@ -387,6 +392,26 @@ start from every `tool(` definition and every model call.
 
   An in-memory limiter on serverless functions limits nothing; grade it
   partial.
+
+## Redaction guarantee
+
+The collector never prints a secret it has detected:
+
+- Every value the scan detects is redacted from all output, whatever check or
+  snapshot fact would print it: a key, a connection password, a private-key
+  body, or a secret-named environment value. A value of four characters or
+  more is redacted wherever it appears, and one of eight or more also by
+  every eight-character piece of it. A value of three characters or fewer
+  would match inside unrelated text, so it is redacted only where it stands
+  as a whole path component or a whole token.
+- Text that matches a credential format, or is shaped like a generated
+  credential (such as a long random or hexadecimal run), is withheld too.
+- File names from Git history are never printed; history is reported by
+  counts, rule names, and commit identifiers only.
+
+The limit: a secret that was never detected as a value cannot be recognised.
+A file name that is itself a password, but is not credential-shaped and
+matches no detected value, is shown as it is.
 
 ## Citing secrets safely
 

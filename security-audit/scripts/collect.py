@@ -13,22 +13,29 @@ Decides the checks that code can decide reliably:
 - `eval`, `new Function`, and string-form timers in shipped code, ignoring
   strings, comments, regular expressions, prose, and declarations;
 - with `--enrichment=--with-scan` and gitleaks installed, secrets anywhere in
-  Git history, reported as counts, rule names, and commits only.
+  Git history, reported as counts, rule names, and commit identifiers only.
 
 It also records Layer 0 facts the model reads first: the framework and router,
 every Server Action, route handler, and data-loading page, middleware,
 authentication, validation, sanitizer, rate-limit, and AI libraries, and
 candidate sites for each dangerous sink.
 
+Redaction guarantee: every value the scan detects, and every piece of it,
+is redacted from all output; text that matches a credential format or is
+shaped like one is withheld; file names from Git history are never printed.
+A secret that was never detected as a value, such as a file name that is
+itself a password but not credential-shaped, cannot be recognised, so file
+names are otherwise shown as they are. See references/detection.md.
+
 The output follows the audit protocol's collector contract: a JSON object with
-`checks` (results keyed by checkId) and `snapshot` (Layer 0 facts). The whole
-output is checked for credential-looking text before it is printed. The script
+`checks` (results keyed by checkId) and `snapshot` (Layer 0 facts). The script
 never writes to the repository. Standard library only; Python 3.9 or later.
 """
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import re
 import shutil
@@ -88,6 +95,7 @@ RULES = dict(SECRET_RULES)
 KEYSTORE_SUFFIXES = (".p12", ".pfx", ".jks", ".keystore", ".ppk")
 PRIVATE_KEY_FILE_NAMES = {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
 PEM_BODY_PATTERN = re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$")
+PEM_INLINE_VALUE_PATTERN = re.compile(r"PRIVATE KEY(?: BLOCK)?-----(?:\\r)?\\n(?P<body>[A-Za-z0-9+/=\\rn]+?)(?:\\r)?(?:\\n)?-----END")
 PEM_INLINE_BODY_PATTERN = re.compile(r"PRIVATE KEY(?: BLOCK)?-----(?:\\r)?\\n[A-Za-z0-9+/]{40,}")
 # Only these shapes may be quoted beside <REDACTED>: fixed rule prefixes and identifiers.
 SAFE_PREFIX_PATTERN = re.compile(r"^[A-Za-z0-9_.:/+ -]{1,40}$")
@@ -610,26 +618,48 @@ def credential_like(text: str) -> bool:
 
 
 FRAGMENT_LENGTH = 8
+SHORT_VALUE_LENGTH = 3
 
 
-def fragments(values: Iterable[str]) -> frozenset[str]:
-    """Every value, and every eight-character piece of it, that the final pass must never print."""
-    pieces: set[str] = set()
-    for value in values:
-        if len(value) < 6:
-            continue
-        pieces.add(value)
-        pieces.update(value[start:start + FRAGMENT_LENGTH] for start in range(len(value) - FRAGMENT_LENGTH + 1))
-    return frozenset(pieces)
+class Redaction:
+    """The detected values the final pass must never print.
+
+    Every value is redacted whole, at any length. A value of eight characters
+    or more is also redacted by every eight-character piece of it. A value of
+    three characters or fewer would match inside unrelated text, so it is
+    redacted only where it stands as a whole path component or a whole token.
+    """
+
+    def __init__(self, values: Iterable[str] = ()) -> None:
+        self.pieces: set[str] = set()
+        self.short: set[str] = set()
+        for value in values:
+            if not value:
+                continue
+            if len(value) <= SHORT_VALUE_LENGTH:
+                self.short.add(value)
+                continue
+            self.pieces.add(value)
+            self.pieces.update(value[start:start + FRAGMENT_LENGTH] for start in range(len(value) - FRAGMENT_LENGTH + 1))
+
+    def matches(self, text: str) -> bool:
+        if any(piece in text for piece in self.pieces):
+            return True
+        if not self.short:
+            return False
+        units = set(re.split(r"[\s/]+", text)) | set(re.split(r"[^A-Za-z0-9_]+", text))
+        return bool(units & self.short)
 
 
-def sensitive(text: str, detected: frozenset[str] = frozenset()) -> bool:
+NO_REDACTION = Redaction()
+
+
+def sensitive(text: str, detected: Redaction = NO_REDACTION) -> bool:
     """The one test every printed string passes.
 
-    No piece of a value the scan detected, no credential format, and no
-    credential-shaped run.
+    No value the scan detected, no credential format, and no credential-shaped run.
     """
-    return any(piece in text for piece in detected) or any_secret(text) or credential_like(text)
+    return detected.matches(text) or any_secret(text) or credential_like(text)
 
 
 def path_is_safe(path: str) -> bool:
@@ -701,8 +731,11 @@ def is_secret_name(name: str) -> bool:
     return bool(SECRET_NAME_PATTERN.search(upper))
 
 
-def parse_env_value(raw: str) -> str:
-    """The value of a dotenv assignment: quoted values end at their closing quote, others at ` #`."""
+def parse_env_value(raw: str) -> tuple[str, str]:
+    """The value of a dotenv assignment and its quote (`'`, `"`, or empty).
+
+    Quoted values end at their closing quote, others at ` #`.
+    """
     text = raw.strip()
     if text[:1] in ("'", '"'):
         quote = text[0]
@@ -712,10 +745,14 @@ def parse_env_value(raw: str) -> str:
                 index += 2
                 continue
             if text[index] == quote:
-                return text[1:index]
+                return text[1:index], quote
             index += 1
-        return text[1:]
-    return re.split(r"\s#", text, maxsplit=1)[0].strip()
+        return text[1:], quote
+    return re.split(r"\s#", text, maxsplit=1)[0].strip(), ""
+
+
+# A value that is entirely a reference to another variable, which dotenv expands.
+ENV_REFERENCE_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 
 
 def is_local_connection(value: str) -> bool:
@@ -731,8 +768,10 @@ def is_local_connection(value: str) -> bool:
 
 def env_secret_value(raw: str) -> str | None:
     """The value of an environment assignment, unless it is empty, a placeholder, or a local connection."""
-    value = parse_env_value(raw)
-    if is_placeholder_value(value) or value.startswith("$") or is_local_connection(value):
+    value, quote = parse_env_value(raw)
+    if quote != "'" and ENV_REFERENCE_PATTERN.fullmatch(value):
+        return None  # Expanded from another variable; single quotes keep `$` literal.
+    if is_placeholder_value(value) or is_local_connection(value):
         return None
     return value
 
@@ -772,13 +811,25 @@ def scan_secrets(root: Path, tracked: list[str]) -> dict[str, Any]:
         environment = is_env_file(path)
         if environment:
             env_files.append(path)
+        in_key_body = False
         for number, line, following in with_lookahead(lines):
+            if in_key_body:
+                if "-----END" in line:
+                    in_key_body = False
+                elif re.fullmatch(r"[A-Za-z0-9+/=]+", line.strip()):
+                    values.add(line.strip())
             hits = line_secrets(line, following)
             for rule, match in hits:
                 rules[rule] += 1
                 if rule == "connection-string-password":
                     values.add(match.group("password"))
-                elif rule != "private-key":
+                elif rule == "private-key":
+                    inline = PEM_INLINE_VALUE_PATTERN.search(line[match.start():])
+                    if inline:
+                        values.update(piece for piece in re.split(r"(?:\\r)?\\n", inline.group("body")) if piece)
+                    else:
+                        in_key_body = True
+                else:
                     values.add(match.group("secret"))
             if hits:
                 files_with_findings.add(path)
@@ -847,16 +898,18 @@ def run_gitleaks(root: Path) -> tuple[list[dict[str, Any]] | None, str]:
 
 
 def summarise_history(findings: list[dict[str, Any]]) -> dict[str, Any]:
-    """Counts, rule names, commits, and printable files only. Secret and Match fields are never read."""
+    """Counts, rule names, and commit identifiers only.
+
+    The Secret, Match, and File fields are never read: a file name in history
+    can itself carry a secret that the current tree no longer shows.
+    """
     items = [item for item in findings if isinstance(item, dict)]
     rules = Counter(str(item.get("RuleID", "unknown")) for item in items)
     commits = sorted({str(item.get("Commit", ""))[:12] for item in items if item.get("Commit")})
-    paths = sorted({str(item.get("File", "")) for item in items if item.get("File")})
     return {
         "findings": sum(rules.values()),
         "rules": {name: count for name, count in sorted(rules.items()) if SAFE_NAME_PATTERN.match(name.replace("-", "_"))},
         "commits": [commit for commit in commits if re.fullmatch(r"[0-9a-f]{1,12}", commit)][:20],
-        "files": [path for path in paths if path_is_safe(path)][:20],
     }
 
 
@@ -965,30 +1018,48 @@ def app_roots(files: list[str]) -> list[str]:
     return sorted(roots)
 
 
-def negated_env_names(root: Path, tracked: set[str]) -> list[str]:
-    """Environment-file names that a tracked `.gitignore` explicitly un-ignores with `!`.
+LOCAL_ENV_NAMES = (
+    ".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.staging.local",
+)
 
-    Wildcards are filled in (`*` as `any-mode`), so a pattern such as
-    `!.env.*.local` becomes a probe too. Committed templates are left out.
+
+def instance_of(pattern: str) -> str:
+    """One concrete name a glob matches: the first character of each class, `x` for `?`, `any-mode` for `*`."""
+    filled = re.sub(r"\[!?\^?([^\]])[^\]]*\]", r"\1", pattern)
+    return filled.replace("*", "any-mode").replace("?", "x")
+
+
+def is_local_env_name(name: str) -> bool:
+    return name.startswith(".env") and not ENV_TEMPLATE_PATTERN.search(name)
+
+
+def env_negations(root: Path, tracked: set[str]) -> list[str]:
+    """Citations of tracked `.gitignore` lines whose `!` exception can match a local environment file.
+
+    Such an exception un-ignores the file the moment it exists, so the line is
+    the finding whether or not a matching file exists yet. Exceptions for
+    committed templates such as `!.env.example` are not findings.
     """
-    names = []
+    found = []
     for ignore_file in sorted(path for path in tracked if path.rsplit("/", 1)[-1] == ".gitignore"):
         folder = ignore_file.rsplit("/", 1)[0] + "/" if "/" in ignore_file else ""
         try:
             lines = (root / ignore_file).read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
-        for line in lines:
-            pattern = line.strip()
-            if not pattern.startswith("!"):
+        for number, line in enumerate(lines, start=1):
+            entry = line.strip()
+            if not entry.startswith("!"):
                 continue
-            pattern = pattern[1:].lstrip("/").rstrip("/")
-            name = pattern.rsplit("/", 1)[-1]
-            if not name.startswith(".env") or ENV_TEMPLATE_PATTERN.search(name) or "**" in pattern:
+            component = entry[1:].rstrip("/").rsplit("/", 1)[-1]
+            if not component:
                 continue
-            filled = re.sub(r"\[[^\]]*\]", "x", pattern).replace("*", "any-mode").replace("?", "x")
-            names.append(folder + filled)
-    return names
+            candidates = [name for name in LOCAL_ENV_NAMES if fnmatch.fnmatchcase(name, component)]
+            if is_local_env_name(instance_of(component)):
+                candidates.append(instance_of(component))
+            if any(folder + name not in tracked for name in candidates) and path_is_safe(ignore_file):
+                found.append(f"{location(ignore_file)}:{number} — `{safe_fragment(entry)}` un-ignores a local environment file")
+    return found
 
 
 def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[str, Any]:
@@ -1007,9 +1078,6 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
         name = path.rsplit("/", 1)[-1]
         if name.startswith(".env") and not ENV_TEMPLATE_PATTERN.search(name) and path not in tracked and path not in probes:
             probes.append(path)  # An environment file on disk that Git would add.
-    for path in negated_env_names(root, tracked):
-        if path not in tracked and path not in probes:
-            probes.append(path)  # An explicit exception, reported before the file exists.
     output = (git(root, "check-ignore", "--no-index", "-v", "-n", *probes) or "") if probes else ""
     covered: list[str] = []
     local_only: list[str] = []
@@ -1049,14 +1117,27 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
             ),
             "judgement": "act-on",
         }
-    if not probes:
+    negations = env_negations(root, tracked)
+    if not probes and not negations:
         return {
             "status": "present",
             "evidence": ["command: `git ls-files` → every environment file name is tracked on purpose, so there is no local file to ignore"],
             "evidenceTier": "direct",
         }
-    if not uncovered and not local_only:
+    if not uncovered and not local_only and not negations:
         return {"status": "present", "evidence": covered[:4], "evidenceTier": "direct"}
+    if not uncovered and not local_only:
+        return {
+            "status": "partial",
+            "evidence": negations[:MAX_EVIDENCE] + covered[:2],
+            "evidenceTier": "direct",
+            "gap": (
+                "A tracked ignore file explicitly un-ignores a local environment file, so that file is committed "
+                "the first time someone creates it and runs `git add .`."
+            ),
+            "remediation": "Remove the `!` exception, or narrow it to a committed template such as `!.env.example`.",
+            "judgement": "act-on",
+        }
     missing_entry = f"command: `git check-ignore --no-index` → not ignored by a tracked rule: {', '.join((uncovered + local_only)[:12])}"
     if not covered:
         result = {
@@ -1075,7 +1156,7 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
         gap += "; only an untracked, personal, or global ignore file covers " + ", ".join(local_only[:6]) + ", which protects no one else who clones it"
     return {
         "status": "partial",
-        "evidence": [missing_entry] + covered[:3],
+        "evidence": [missing_entry] + negations[:4] + covered[:3],
         "evidenceTier": "direct",
         "gap": gap + ".",
         "remediation": "Add `.env*` to the committed `.gitignore` of each application folder, with `!.env.example` for the template.",
@@ -1369,7 +1450,7 @@ def build_snapshot(root: Path, files: list[str], sources: list[SourceFile], snap
 # --------------------------------------------------------------------------- output safety
 
 
-def scrub(value: Any, detected: frozenset[str] = frozenset()) -> tuple[Any, int]:
+def scrub(value: Any, detected: Redaction = NO_REDACTION) -> tuple[Any, int]:
     """Replace any credential-looking string in a value, returning the number replaced."""
     if isinstance(value, str):
         return (WITHHELD, 1) if sensitive(value, detected) else (value, 0)
@@ -1403,7 +1484,7 @@ def make_safe(output: dict[str, Any], detected_values: Iterable[str] = ()) -> di
     Evidence entries that fail are dropped, because a replaced entry would no
     longer verify; other text is replaced with a marker.
     """
-    detected = fragments(detected_values)
+    detected = Redaction(detected_values)
     for result in output["checks"].values():
         evidence = result.get("evidence")
         if not isinstance(evidence, list):
