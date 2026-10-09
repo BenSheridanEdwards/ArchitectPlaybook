@@ -222,6 +222,19 @@ class ValidatePlaybookTests(unittest.TestCase):
             findings: list[Any] = []
             validate_playbook.validate_plugin_manifest(root, findings)
             self.assertEqual([finding.message for finding in findings], ["marketplace manifest must not pin a version; installs follow commits"])
+            del data["plugins"][0]["version"]
+            data["plugins"][0]["hooks"] = {"SessionStart": [{"hooks": [{"type": "command", "command": "echo"}]}]}
+            data["plugins"][0]["skills"] = ["./install-architect-playbook-globally"]
+            path.write_text(json.dumps(data), encoding="utf-8")
+            findings = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            self.assertEqual(
+                [finding.message for finding in findings],
+                [
+                    "marketplace entry must not declare hooks; components belong in plugin.json",
+                    "marketplace entry must not declare skills; components belong in plugin.json",
+                ],
+            )
             path.unlink()
             findings = []
             validate_playbook.validate_plugin_manifest(root, findings)

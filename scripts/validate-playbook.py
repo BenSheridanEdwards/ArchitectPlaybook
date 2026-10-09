@@ -988,6 +988,7 @@ PLUGIN_NAME = "architect-playbook"
 ALLOWED_PLUGIN_KEYS = {
     "$schema", "name", "displayName", "description", "author", "homepage", "repository", "license", "keywords", "skills",
 }
+ALLOWED_MARKETPLACE_ENTRY_KEYS = {"name", "source", "description", "category", "tags", "displayName"}
 # Default component locations Claude Code loads from a plugin root. The
 # repository root is the plugin root, so none of these may exist there.
 PLUGIN_COMPONENT_PATHS = (
@@ -1077,6 +1078,13 @@ def validate_plugin_manifest(root: Path, findings: list[Finding]) -> None:
         )
     elif "version" in plugins[0] or "version" in marketplace:
         findings.append(Finding("error", marketplace_path, "marketplace manifest must not pin a version; installs follow commits"))
+    else:
+        # In strict mode Claude Code merges an entry's component fields into the
+        # plugin, so the entry may carry only identity and listing fields.
+        for key in sorted(set(plugins[0]) - ALLOWED_MARKETPLACE_ENTRY_KEYS):
+            findings.append(
+                Finding("error", marketplace_path, f"marketplace entry must not declare {key}; components belong in plugin.json")
+            )
 
 
 def main() -> int:
