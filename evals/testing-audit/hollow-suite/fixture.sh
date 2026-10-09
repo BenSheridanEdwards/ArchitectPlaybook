@@ -262,6 +262,13 @@ await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' });
 EOF
 w src/test/setup.ts <<'EOF'
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+// Without Vitest globals, Testing Library cannot register its own cleanup.
+afterEach(() => {
+  cleanup();
+});
 EOF
 w src/billing/invoiceTotals.test.ts <<'EOF'
 import { describe, expect, it } from 'vitest';

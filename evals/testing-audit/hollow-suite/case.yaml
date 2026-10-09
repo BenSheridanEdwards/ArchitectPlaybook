@@ -4,8 +4,7 @@ description: A TypeScript invoicing service with a React admin screen whose test
 tags: [testing, planted]
 runs: 3
 expected_outcome: >-
-  Publishes a complete run. The collector reports the committed it.only, no coverage thresholds, and
-  neither the Testing Library nor the jest-dom lint plugin; the mutation check is not evaluated. The
+  Publishes a complete run. The collector reports the committed it.only and neither the Testing Library nor the jest-dom lint plugin; the mutation check is not evaluated. The
   model finds the hollow invoice-total tests, the route tests that mock decideRefund and assert only on
   mocks, the untested refund rules on the busiest file, data access never run against a database, and
   component tests that rely on a snapshot, a CSS selector, and a utility class.
