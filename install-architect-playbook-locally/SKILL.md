@@ -35,8 +35,8 @@ The plugin is the recommended install (`/plugin install architect-playbook@archi
 ### Step 1 — Resolve the playbook root
 
 ```bash
-if [ -n "${FROM:-}" ]; then
-  set -- "$FROM"                          # an explicit --from must be valid; never fall back
+if [ "${FROM+set}" = set ]; then
+  set -- "$FROM"                          # an explicit --from, even empty, must be valid; never fall back
 else
   set -- "${CLAUDE_SKILL_DIR:-.}/.." "${CLAUDE_SKILL_DIR:-.}/../../.."
 fi
@@ -46,10 +46,10 @@ for candidate in "$@"; do
     PLAYBOOK_ROOT="$(cd "$candidate" && pwd)"; break
   fi
 done
-[ -n "$PLAYBOOK_ROOT" ] || { echo "Not a playbook clone: ${FROM:-the folder this skill runs from}. Re-run with --from=<path to your clone>."; exit 1; }
+[ -n "$PLAYBOOK_ROOT" ] || { echo "Not a playbook clone: '${FROM-the folder this skill runs from}'. Re-run with --from=<path to your clone>."; exit 1; }
 ```
 
-`FROM` is the value of `--from`. A Git worktree of the playbook counts as a clone. The script re-checks that the root is a Git checkout of the playbook.
+Set `FROM` only when `--from` was passed, to its value; leave it unset otherwise. A Git worktree of the playbook counts as a clone. The script re-checks that the root is a Git checkout of the playbook.
 
 If the skill runs from an installed copy rather than a clone, ask the user for the clone's path.
 

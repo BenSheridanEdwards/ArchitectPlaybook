@@ -170,20 +170,43 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
     return steps
 
 
+def replace_folder(source: Path, target: Path) -> None:
+    """Stage a complete copy beside the target, then swap it in, restoring the old folder on failure."""
+    staged = target.with_name(f".{target.name}.installing")
+    backup = target.with_name(f".{target.name}.previous")
+    for leftover in (staged, backup):
+        if leftover.exists():
+            shutil.rmtree(leftover)
+    shutil.copytree(source, staged, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED_NAMES))
+    if target.exists():
+        os.replace(target, backup)
+    try:
+        os.replace(staged, target)
+    except OSError:
+        if backup.exists():
+            os.replace(backup, target)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
+
+
+def replace_file(source: Path, target: Path) -> None:
+    """Copy to a sibling, then rename over the target, so a hard link to the old file is never written through."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staged = target.with_name(f".{target.name}.installing")
+    shutil.copy2(source, staged)
+    os.replace(staged, target)
+
+
 def apply(root: Path, destination: Path, steps: list[dict[str, str]]) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for step in steps:
         if step["status"] == "unchanged":
             continue
         if step["skill"].endswith("(calculator file only)"):
-            target = destination / CALCULATOR
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(root / CALCULATOR, target)
-            continue
-        target = destination / step["skill"]
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(root / step["skill"], target, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED_NAMES))
+            replace_file(root / CALCULATOR, destination / CALCULATOR)
+        else:
+            replace_folder(root / step["skill"], destination / step["skill"])
 
 
 def require_destination(destination: Path) -> Path:

@@ -197,6 +197,36 @@ class InstallPlaybookTests(unittest.TestCase):
         with self.assertRaises(installer.InstallError):
             installer.plan(self.clone, self.destination, ["three-audit"], False)
 
+    def test_a_hard_link_to_the_old_calculator_is_never_written_through(self) -> None:
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        outside = self.base / "shared.py"
+        outside.write_text("shared\n", encoding="utf-8")
+        target = self.destination / installer.CALCULATOR
+        target.unlink()
+        os.link(outside, target)
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        self.assertEqual(outside.read_text(encoding="utf-8"), "shared\n")
+        self.assertEqual(target.read_text(encoding="utf-8"), "calculator\n")
+
+    def test_a_failed_copy_keeps_the_previous_install(self) -> None:
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        (self.destination / "one-audit" / "local.md").write_text("previous\n", encoding="utf-8")
+        steps = installer.plan(self.clone, self.destination, skills, calculator_only)
+        original = installer.shutil.copytree
+
+        def failing_copy(*arguments: object, **options: object) -> None:
+            raise OSError("disk full")
+
+        installer.shutil.copytree = failing_copy
+        try:
+            with self.assertRaises(OSError):
+                installer.apply(self.clone, self.destination, steps)
+        finally:
+            installer.shutil.copytree = original
+        self.assertEqual((self.destination / "one-audit" / "local.md").read_text(encoding="utf-8"), "previous\n")
+
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)
         with self.assertRaises(installer.InstallError):
