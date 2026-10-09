@@ -145,6 +145,30 @@ class InstallPlaybookTests(unittest.TestCase):
                     installer.plan(self.clone, self.destination, skills, calculator_only)
                 self.assertEqual((outside / "keep.txt").read_text(encoding="utf-8"), "keep\n")
 
+    def test_a_calculator_only_install_can_become_the_full_scorer(self) -> None:
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        skills, calculator_only = installer.select(self.clone, ["repository-quality-score"], [])
+        steps = installer.plan(self.clone, self.destination, skills, calculator_only)
+        self.assertEqual({step["skill"]: step["status"] for step in steps}["repository-quality-score"], "updated")
+        installer.apply(self.clone, self.destination, steps)
+        self.assertTrue((self.destination / "repository-quality-score" / "SKILL.md").is_file())
+
+    def test_a_linked_claude_or_skills_folder_is_refused(self) -> None:
+        other = self.base / "other" / ".claude" / "skills"
+        other.mkdir(parents=True)
+        for linked in ("skills", ".claude"):
+            with self.subTest(linked=linked):
+                project = self.base / f"linked-{linked}"
+                if linked == "skills":
+                    (project / ".claude").mkdir(parents=True)
+                    os.symlink(other, project / ".claude" / "skills")
+                else:
+                    project.mkdir()
+                    os.symlink(other.parent, project / ".claude")
+                with self.assertRaises(installer.InstallError):
+                    installer.require_destination(project / ".claude" / "skills")
+
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)
         with self.assertRaises(installer.InstallError):

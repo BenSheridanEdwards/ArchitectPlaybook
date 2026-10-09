@@ -122,9 +122,17 @@ def require_no_links(destination: Path, relative: Path) -> None:
             raise InstallError(f"{current} is a symbolic link; move it aside first")
 
 
+def calculator_only_install(folder: Path) -> bool:
+    """Whether a scorer folder holds nothing but the calculator file an earlier audit install copied."""
+    files = [path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file() and "__pycache__" not in path.parts]
+    return files == [CALCULATOR.relative_to(SCORER).as_posix()]
+
+
 def require_owned(target: Path, name: str) -> None:
     """An existing folder is replaced only if it is this playbook's skill of the same name."""
     found = skill_name(target)
+    if found is None and name == SCORER and calculator_only_install(target):
+        return
     if found != name:
         raise InstallError(
             f"{target} exists but is not the playbook's {name} skill (its SKILL.md name is {found!r}); move it aside first"
@@ -178,10 +186,13 @@ def apply(root: Path, destination: Path, steps: list[dict[str, str]]) -> None:
 
 def require_destination(destination: Path) -> Path:
     """Only a `.claude/skills` folder may be written."""
-    resolved = destination.expanduser().resolve()
-    if resolved.name != "skills" or resolved.parent.name != ".claude":
+    requested = destination.expanduser().absolute()
+    if requested.name != "skills" or requested.parent.name != ".claude":
         raise InstallError(f"destination must be a .claude/skills folder: {destination}")
-    return resolved
+    for component in (requested.parent, requested):
+        if component.is_symlink():
+            raise InstallError(f"{component} is a symbolic link; install into the real folder instead")
+    return requested.resolve()
 
 
 def main(argv: list[str] | None = None) -> int:
