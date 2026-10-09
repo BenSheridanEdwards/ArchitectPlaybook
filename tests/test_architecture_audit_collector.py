@@ -158,6 +158,27 @@ class ArchitectureCollectorTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "present")
 
+    def test_a_ts_config_flag_covers_only_the_package_it_checks(self) -> None:
+        self.write("package.json", '{"name": "root", "workspaces": ["packages/*"]}\n')
+        for name, script in (("one", "depcruise src --ts-config tsconfig.json"), ("two", "depcruise src")):
+            self.write(f"packages/{name}/package.json", f'{{"name": "{name}", "scripts": {{"lint": "{script}"}}}}\n')
+            self.write(f"packages/{name}/tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}\n')
+            self.write(f"packages/{name}/.dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+            self.write(f"packages/{name}/src/index.ts", "export const value = 1;\n")
+        self.commit()
+        result = self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["evidence"], ["packages/two/.dependency-cruiser.js — no tsConfig option, so path aliases are not resolved"])
+
+    def test_inherited_aliases_need_ts_config_too(self) -> None:
+        self.write("config/base.json", '{"compilerOptions": {"paths": {"@/*": ["../src/*"]}}}\n')
+        self.write("tsconfig.json", '{"extends": "./config/base.json"}\n')
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write(".dependency-cruiser.js", "module.exports = { forbidden: [] };\n")
+        self.write("package.json", '{"name": "fixture", "scripts": {"lint": "depcruise src"}}\n')
+        self.commit()
+        self.assertEqual(self.collect()["checks"][CHECK + "boundaries-enforced-by-tooling"]["status"], "partial")
+
     def test_change_coupling_finds_features_inside_workspaces(self) -> None:
         files = ("apps/shop/src/features/cart/view.ts", "apps/shop/src/features/checkout/total.ts")
         for path in files:

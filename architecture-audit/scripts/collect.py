@@ -527,13 +527,41 @@ def cruiser_resolves_aliases(config: Path, seen: frozenset[Path]) -> bool:
 
 
 def folder_uses_aliases(directory: Path, root: Path) -> bool:
-    """Whether a tsconfig in this folder or a parent up to the root defines path aliases."""
+    """Whether a tsconfig in this folder or a parent up to the root has path aliases, including inherited ones."""
+    resolver = Resolver(root, [], [])
     for folder in [directory, *directory.parents]:
         for config in sorted(folder.glob("tsconfig*.json")) + sorted(folder.glob("jsconfig.json")):
-            if isinstance((load_jsonc(config).get("compilerOptions") or {}).get("paths"), dict):
+            aliases, _ = resolver._load_tsconfig(config.resolve(), depth=0)
+            if aliases:
                 return True
         if folder == root:
             break
+    return False
+
+
+def runner_commands(root: Path, directories: list[Path]) -> list[tuple[Path, str]]:
+    """Each package script and workflow, with the folder whose package defines it."""
+    commands = [
+        (directory, str(value))
+        for directory in directories
+        for value in (load_jsonc(directory / "package.json").get("scripts") or {}).values()
+    ]
+    commands += [(root, read_text(path)) for path in sorted((root / ".github" / "workflows").glob("*.y*ml"))]
+    return commands
+
+
+def flag_resolves_aliases(root: Path, directory: Path, commands: list[tuple[Path, str]]) -> bool:
+    """Whether a dependency-cruiser command that checks this folder passes --ts-config.
+
+    A package's own scripts check that package. A root script or workflow
+    checks the root, or a package it names by path.
+    """
+    folder = relative(root, directory)
+    for owner, command in commands:
+        if "depcruise" not in command or "--ts-config" not in command:
+            continue
+        if owner == directory or (owner == root and (directory == root or folder in command)):
+            return True
     return False
 
 
@@ -544,13 +572,17 @@ def alias_blind_cruiser_configs(root: Path, directories: list[Path]) -> list[str
     --ts-config command-line flag, dependency-cruiser leaves alias imports
     unresolved, so no rule ever matches them.
     """
-    if "--ts-config" in runner_text(root, directories):
-        return []
+    commands = runner_commands(root, directories)
     blind = []
     for directory in directories:
         for name in BOUNDARY_TOOL_FILES:
             config = directory / name
-            if config.is_file() and folder_uses_aliases(directory, root) and not cruiser_resolves_aliases(config, frozenset({config})):
+            if (
+                config.is_file()
+                and folder_uses_aliases(directory, root)
+                and not cruiser_resolves_aliases(config, frozenset({config}))
+                and not flag_resolves_aliases(root, directory, commands)
+            ):
                 blind.append(f"{relative(root, config)} — no tsConfig option, so path aliases are not resolved")
     return blind
 
