@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,31 +172,45 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
 
 
 def replace_folder(source: Path, target: Path) -> None:
-    """Stage a complete copy beside the target, then swap it in, restoring the old folder on failure."""
-    staged = target.with_name(f".{target.name}.installing")
-    backup = target.with_name(f".{target.name}.previous")
-    for leftover in (staged, backup):
-        if leftover.exists():
-            shutil.rmtree(leftover)
-    shutil.copytree(source, staged, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED_NAMES))
-    if target.exists():
-        os.replace(target, backup)
+    """Stage a complete copy in a fresh folder beside the target, then swap it in.
+
+    The staging folder is new and unique, so no existing path is written
+    through or deleted. If the swap fails, the old folder is restored.
+    """
+    staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.installing-", dir=str(target.parent)))
     try:
-        os.replace(staged, target)
-    except OSError:
-        if backup.exists():
-            os.replace(backup, target)
-        raise
-    if backup.exists():
-        shutil.rmtree(backup)
+        payload = staging / "new"
+        shutil.copytree(source, payload, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED_NAMES))
+        backup = staging / "previous"
+        if target.exists():
+            os.replace(target, backup)
+        try:
+            os.replace(payload, target)
+        except OSError:
+            if backup.exists():
+                os.replace(backup, target)
+            raise
+    finally:
+        shutil.rmtree(staging)
 
 
 def replace_file(source: Path, target: Path) -> None:
-    """Copy to a sibling, then rename over the target, so a hard link to the old file is never written through."""
+    """Write a fresh, uniquely named sibling, then rename it over the target.
+
+    A link at the old target, or at any predictable name, is never written
+    through.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    staged = target.with_name(f".{target.name}.installing")
-    shutil.copy2(source, staged)
-    os.replace(staged, target)
+    handle, staged = tempfile.mkstemp(prefix=f".{target.name}.installing-", dir=str(target.parent))
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(source.read_bytes())
+        shutil.copymode(source, staged)
+        os.replace(staged, target)
+    except BaseException:
+        if os.path.exists(staged):
+            os.unlink(staged)
+        raise
 
 
 def apply(root: Path, destination: Path, steps: list[dict[str, str]]) -> None:

@@ -227,6 +227,23 @@ class InstallPlaybookTests(unittest.TestCase):
             installer.shutil.copytree = original
         self.assertEqual((self.destination / "one-audit" / "local.md").read_text(encoding="utf-8"), "previous\n")
 
+    def test_planted_staging_paths_are_neither_followed_nor_deleted(self) -> None:
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        outside = self.base / "outside.txt"
+        outside.write_text("outside\n", encoding="utf-8")
+        os.symlink(outside, self.destination / ".one-audit.installing")
+        keep = self.destination / ".one-audit.previous"
+        keep.mkdir()
+        (keep / "valuable.md").write_text("keep\n", encoding="utf-8")
+        (self.destination / installer.CALCULATOR).write_text("old\n", encoding="utf-8")
+        (self.destination / "one-audit" / "extra.md").write_text("old\n", encoding="utf-8")
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        self.assertEqual(outside.read_text(encoding="utf-8"), "outside\n")
+        self.assertEqual((keep / "valuable.md").read_text(encoding="utf-8"), "keep\n")
+        self.assertEqual((self.destination / installer.CALCULATOR).read_text(encoding="utf-8"), "calculator\n")
+        self.assertFalse((self.destination / "one-audit" / "extra.md").exists())
+
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)
         with self.assertRaises(installer.InstallError):
