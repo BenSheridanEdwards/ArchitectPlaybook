@@ -38,6 +38,7 @@ import tempfile
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+from urllib.parse import urlsplit
 
 AUDIT = "security-audit"
 REDACTED = "<REDACTED>"
@@ -112,8 +113,10 @@ PROTOCOL_GUARD_PATTERNS = (
         r"[\"'](?=[^\"'\s]*[0-9])(?=[^\"'\s]*[A-Za-z])[A-Za-z0-9+/_.=-]{20,}[\"']"
     ),
 )
-# A run of mixed letters and digits this long in a file path may itself be a credential.
-CREDENTIAL_LIKE_RUN = re.compile(r"(?=[A-Za-z0-9_+=-]*[0-9])(?=[A-Za-z0-9_+=-]*[A-Za-z])[A-Za-z0-9_+=-]{24,}")
+# A long run of mixed-case letters and digits that switches character class
+# often looks like a generated credential, wherever it appears: in a file or
+# folder name, a storage key, or any other text the collector prints.
+TOKEN_RUN = re.compile(r"[A-Za-z0-9+=_-]{20,}")
 LOCAL_HOSTS = {
     "localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal", "db", "database", "postgres",
     "postgresql", "mysql", "mariadb", "mongo", "mongodb", "redis", "rabbitmq",
@@ -136,7 +139,9 @@ PUBLIC_BUT_SECRET_PATTERN = re.compile(r"SECRET|PRIVATE|PASSWORD|PASSWD|SERVICE_
 PUBLIC_NAME_PATTERN = re.compile(r"\b(?:NEXT_PUBLIC|VITE|EXPO_PUBLIC|REACT_APP|GATSBY|NUXT_PUBLIC|PUBLIC)_[A-Z0-9_]+\b")
 PUBLIC_SECRET_WORDS = re.compile(r"SECRET|PRIVATE|PASSWORD|PASSWD|TOKEN|CREDENTIAL|SERVICE_ROLE|SERVICE_KEY|ADMIN_KEY|SIGNING")
 ENV_TEMPLATE_PATTERN = re.compile(r"(?i)\.(?:example|sample|template|dist)(?:\.|$)")
-ENV_PROBES = (".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.staging.local")
+# `.env.any-mode.local` stands for every other mode: only a general `.env*.local`
+# or `.env*` rule covers it, so it shows whether a pattern protects variants not listed here.
+ENV_PROBES = (".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.any-mode.local")
 
 DYNAMIC_CODE_PATTERN = re.compile(
     r"(?<![\w$.])(?:(?:window|globalThis|self)\.)?eval\s*\("
@@ -355,7 +360,11 @@ def mask(text: str, strings: bool) -> str:
             blank(index, end)
             index = end
             continue
-        if character in "'\"`":
+        if character == "`":
+            index = template_end(text, index, strings, output, blank)
+            previous = "`"
+            continue
+        if character in "'\"":
             end = index + 1
             while end < length:
                 if text[end] == "\\":
@@ -391,6 +400,60 @@ def mask(text: str, strings: bool) -> str:
             previous = character
         index += 1
     return "".join(output)
+
+
+def template_end(text: str, start: int, strings: bool, output: list[str], blank: Any) -> int:
+    """Mask a template literal from its opening backtick and return the index after it.
+
+    Its text is blanked with `strings`; each `${...}` interpolation is code, so
+    it is masked like any other code, recursively.
+    """
+    length = len(text)
+    index = start + 1
+    segment = index
+    while index < length:
+        character = text[index]
+        if character == "\\":
+            index += 2
+            continue
+        if character == "`":
+            if strings:
+                blank(segment, index)
+            return index + 1
+        if text.startswith("${", index):
+            if strings:
+                blank(segment, index)
+            close = closing_brace(text, index + 1)
+            output[index + 2:close] = list(mask(text[index + 2:close], strings))
+            index = close + 1
+            segment = index
+            continue
+        index += 1
+    if strings:
+        blank(segment, length)
+    return length
+
+
+def closing_brace(text: str, open_index: int) -> int:
+    """The index of the `}` that closes the `{` at `open_index`, skipping strings."""
+    depth = 0
+    index = open_index
+    while index < len(text):
+        character = text[index]
+        if character in "'\"`":
+            end = index + 1
+            while end < len(text) and text[end] != character:
+                end += 2 if text[end] == "\\" else 1
+            index = end + 1
+            continue
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return len(text)
 
 
 def starts_regular_expression(text: str, index: int, previous: str) -> bool:
@@ -482,9 +545,34 @@ def is_placeholder(match: re.Match[str]) -> bool:
     return is_placeholder_value(match.group("secret")) or is_placeholder_value(match.group(0))
 
 
+def character_class(character: str) -> str:
+    if character.isdigit():
+        return "digit"
+    if character.isupper():
+        return "upper"
+    return "lower" if character.islower() else "other"
+
+
+def credential_like(text: str) -> bool:
+    """Whether text holds a run shaped like a generated credential, such as a random password."""
+    for run in TOKEN_RUN.findall(text):
+        classes = [character_class(character) for character in run]
+        if classes.count("digit") < 2 or classes.count("upper") < 2 or classes.count("lower") < 2:
+            continue
+        transitions = sum(1 for left, right in zip(classes, classes[1:]) if left != right)
+        if transitions >= 0.4 * (len(run) - 1):
+            return True
+    return False
+
+
+def sensitive(text: str) -> bool:
+    """The one test every printed string passes: no credential format and no credential-shaped run."""
+    return any_secret(text) or credential_like(text)
+
+
 def path_is_safe(path: str) -> bool:
-    """Whether a path can be printed: it neither is nor contains something credential-shaped."""
-    return not any_secret(path) and not CREDENTIAL_LIKE_RUN.search(path.rsplit("/", 1)[-1])
+    """Whether a path can be printed: no component of it is or contains something credential-shaped."""
+    return not any(sensitive(component) for component in path.split("/"))
 
 
 def quoted(prefix: str, safe: re.Pattern[str]) -> str | None:
@@ -551,19 +639,38 @@ def is_secret_name(name: str) -> bool:
     return bool(SECRET_NAME_PATTERN.search(upper))
 
 
+def parse_env_value(raw: str) -> str:
+    """The value of a dotenv assignment: quoted values end at their closing quote, others at ` #`."""
+    text = raw.strip()
+    if text[:1] in ("'", '"'):
+        quote = text[0]
+        index = 1
+        while index < len(text):
+            if quote == '"' and text[index] == "\\":
+                index += 2
+                continue
+            if text[index] == quote:
+                return text[1:index]
+            index += 1
+        return text[1:]
+    return re.split(r"\s#", text, maxsplit=1)[0].strip()
+
+
+def is_local_connection(value: str) -> bool:
+    """Whether a value is a URL whose host is a local or container-only machine."""
+    if "://" not in value:
+        return False
+    try:
+        host = (urlsplit(value).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in LOCAL_HOSTS or host.endswith(".localhost")
+
+
 def env_secret_value(raw: str) -> str | None:
-    """The value of an environment assignment, unless it is empty, a placeholder, or local-only."""
-    value = raw.strip()
-    if value[:1] in "'\"" and value[-1:] == value[:1] and len(value) >= 2:
-        value = value[1:-1]
-    else:
-        value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
-    lowered = value.lower()
-    if (
-        is_placeholder_value(value)
-        or value.startswith("$")
-        or any(host in lowered for host in ("localhost", "127.0.0.1", "host.docker.internal"))
-    ):
+    """The value of an environment assignment, unless it is empty, a placeholder, or a local connection."""
+    value = parse_env_value(raw)
+    if is_placeholder_value(value) or value.startswith("$") or is_local_connection(value):
         return None
     return value
 
@@ -797,6 +904,10 @@ def env_ignore_check(root: Path, files: list[str], tracked: set[str]) -> dict[st
             if candidate in tracked:
                 continue  # A committed `.env` holds defaults on purpose; a committed `.local` file is reported below.
             probes.append(candidate)
+    for path in files:
+        name = path.rsplit("/", 1)[-1]
+        if name.startswith(".env") and not ENV_TEMPLATE_PATTERN.search(name) and path not in tracked and path not in probes:
+            probes.append(path)  # An environment file on disk that Git would add.
     output = (git(root, "check-ignore", "--no-index", "-v", "-n", *probes) or "") if probes else ""
     covered: list[str] = []
     local_only: list[str] = []
@@ -903,11 +1014,23 @@ def is_declaration(code: str, match_end: int, before: str) -> bool:
     return False
 
 
+JSX_TAG_PATTERN = re.compile(r"<(?:/?[A-Za-z][\w.:-]*(?:\s[^<>]*)?/?)?$")
+
+
+def ends_jsx_tag(code: str, start: int) -> bool:
+    """Whether the `>` before an offset closes a JSX tag such as `<p>` or `</b>`, not a comparison."""
+    closing = code.rfind(">", 0, start)
+    opening = code.rfind("<", 0, closing)
+    return opening != -1 and bool(JSX_TAG_PATTERN.match(code[opening:closing]))
+
+
 def is_code_call(source: SourceFile, match: re.Match[str]) -> bool:
     """Whether a match is a call in code, not prose in JSX text or a declaration."""
     code = source.code
     before = previous_token(code, match.start())
-    if before == ">" or (re.match(r"[A-Za-z_$]", before) and before not in EXPRESSION_KEYWORDS):
+    if before == ">" and ends_jsx_tag(code, match.start()):
+        return False
+    if re.match(r"[A-Za-z_$]", before) and before not in EXPRESSION_KEYWORDS:
         return False
     if match.group(0).rstrip().endswith("(") and is_declaration(code, match.end(), before):
         return False
@@ -1099,7 +1222,7 @@ def build_snapshot(root: Path, files: list[str], sources: list[SourceFile], snap
     for source in production:
         for match in STORAGE_AUTH_PATTERN.finditer(source.masked):
             key = match.group("key")
-            shown = key if re.fullmatch(r"[A-Za-z0-9_.:-]{1,40}", key) and not CREDENTIAL_LIKE_RUN.search(key) else "(key not shown)"
+            shown = key if re.fullmatch(r"[A-Za-z0-9_.:-]{1,40}", key) and not sensitive(key) else "(key not shown)"
             storage.append(f"{source.site(match.start())} {shown}")
     snapshot["browserStorageAuthKeys"] = summarise(storage)
     snapshot["messageListeners"] = summarise(sites(production, MESSAGE_LISTENER_PATTERN))
@@ -1140,7 +1263,7 @@ def build_snapshot(root: Path, files: list[str], sources: list[SourceFile], snap
 def scrub(value: Any) -> tuple[Any, int]:
     """Replace any credential-looking string in a value, returning the number replaced."""
     if isinstance(value, str):
-        return (WITHHELD, 1) if any_secret(value) else (value, 0)
+        return (WITHHELD, 1) if sensitive(value) else (value, 0)
     if isinstance(value, list):
         total = 0
         items = []
@@ -1164,14 +1287,16 @@ def scrub(value: Any) -> tuple[Any, int]:
 def make_safe(output: dict[str, Any]) -> dict[str, Any]:
     """Check the complete output, so no credential-looking text is ever printed.
 
-    Evidence entries that look like credentials are dropped, because a replaced
-    entry would no longer verify; other text is replaced with a marker.
+    Every evidence entry and snapshot string, whichever check or fact produced
+    it, passes the same test, so a credential-shaped file or folder name is
+    withheld everywhere. Evidence entries that fail are dropped, because a
+    replaced entry would no longer verify; other text is replaced with a marker.
     """
     for result in output["checks"].values():
         evidence = result.get("evidence")
         if not isinstance(evidence, list):
             continue
-        kept = [entry for entry in evidence if not any_secret(entry)]
+        kept = [entry for entry in evidence if not sensitive(entry)]
         if len(kept) < len(evidence):
             kept.append(
                 f"command: `collect.py output check` → {len(evidence) - len(kept)} evidence entries withheld because they looked like credentials"

@@ -53,6 +53,7 @@ DATABASE_PASSWORD = "Pr0d" + "Passw0rd" + "Zebra42"
 PRIVATE_KEY_HEADER = "-----BEGIN RSA " + "PRIVATE KEY-----"
 PRIVATE_KEY_BODY = "".join(("MIIEow", "IBAAKC", "AQEAu1", "SU1L7V", "LPHCgc", "BIjSnT", "3fHxD2", "pNk8qY", "0r1Wv5", "Lz9QmB", "7cT4sX", "e6Ja"))
 GENERIC_PASSWORD = "".join(("q8Zt3L", "w9Rv2X", "n5Kp7Y", "d4Mh"))
+LONG_PASSWORD = "".join(("Hq4Tz8", "Wm2Yk6", "Nb9Pr3", "Xc7Lf5", "Jd1"))
 ENV_SECRET = "s3cr3t" + "ValueForTheFixture99"
 
 
@@ -626,7 +627,7 @@ class SecurityCollectorTests(unittest.TestCase):
         self.assert_verifies(result)
 
     def test_every_application_folder_and_local_variant_is_probed(self) -> None:
-        self.write(".gitignore", "/.env\n/.env.local\n/.env.development.local\n/.env.production.local\n/.env.staging.local\n")
+        self.write(".gitignore", "/.env\n/.env.local\n/.env.development.local\n/.env.production.local\n/.env.any-mode.local\n")
         self.write("apps/api/package.json", '{"name": "api", "dependencies": {"express": "5.1.0"}}\n')
         self.commit()
         evidence = self.collect()["checks"][IGNORED]["evidence"][0]
@@ -715,6 +716,64 @@ class SecurityCollectorTests(unittest.TestCase):
                 self.assertIsNotNone(re.search(pattern, clean))
                 for start in range(len(body) - 7):
                     self.assertIsNone(re.search(pattern, clean + body[start:start + 8]), body[start:start + 8])
+    # ----------------------------------------------------------------- second review regressions
+
+    def test_a_credential_shaped_file_or_folder_name_is_withheld_everywhere(self) -> None:
+        self.write(f"src/{LONG_PASSWORD}.ts", "export const run = (input: string) => eval(input);\n")
+        self.write(f"lib/{LONG_PASSWORD}/view.tsx", "export const View = ({ html }: { html: string }) => <div dangerouslySetInnerHTML={{ __html: html }} />;\n")
+        self.write(f"apps/{LONG_PASSWORD}/package.json", '{"name": "hidden"}\n')
+        self.commit()
+        result = self.collect()
+        self.assertFalse(collector.path_is_safe(f"lib/{LONG_PASSWORD}/view.tsx"))
+        self.assertTrue(any("withheld" in entry for entry in result["checks"][DYNAMIC]["evidence"]))
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, LONG_PASSWORD)
+
+    def test_ordinary_names_are_not_mistaken_for_credentials(self) -> None:
+        for name in ("useOAuth2Callback1Handler", "UserProfile2FactorSettings", "20240101120000_create_invoices", "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"):
+            self.assertFalse(collector.credential_like(name), name)
+        self.assertTrue(collector.credential_like(LONG_PASSWORD))
+
+    def test_discovered_and_unlisted_local_variants_are_probed(self) -> None:
+        listed = (".env", ".env.local", ".env.development.local", ".env.test.local", ".env.production.local", ".env.staging.local")
+        self.write(".gitignore", "".join(f"/{name}\n" for name in listed))
+        self.commit()
+        self.write(".env.qa.local", "FEATURE=on\n")
+        ignored = self.collect()["checks"][IGNORED]
+        self.assertEqual(ignored["status"], "partial")
+        self.assertIn(".env.qa.local", ignored["evidence"][0])
+        self.assertIn(".env.any-mode.local", ignored["evidence"][0])
+
+    def test_eval_in_template_interpolations_and_after_comparisons_is_code(self) -> None:
+        self.write(
+            "src/run.ts",
+            "export function run(input: string) {\n"
+            "  const label = `value: ${eval(input)}`;\n"
+            "  const bigger = 1 > eval(input);\n"
+            "  const nested = `a ${`b ${new Function(input)}`}`;\n"
+            "  return [label, bigger, nested];\n"
+            "}\n",
+        )
+        self.commit()
+        dynamic = self.collect()["checks"][DYNAMIC]
+        self.assertEqual(dynamic["evidence"], ["src/run.ts:2 — `eval(`", "src/run.ts:3 — `eval(`", "src/run.ts:4 — `new Function(`"])
+
+    def test_environment_values_are_parsed_before_placeholder_and_host_rules(self) -> None:
+        self.write(
+            ".env.production",
+            f"DB_PASSWORD={GENERIC_PASSWORD[:6]}localhost{GENERIC_PASSWORD[6:]}\n"
+            'PASSWORD="changeme" # fill later\n'
+            "API_SECRET='your-secret-here'  # from the dashboard\n"
+            "DATABASE_URL=postgres://app:" + GENERIC_PASSWORD + "@localhost:5432/app\n"
+            f'SESSION_SECRET="{GENERIC_PASSWORD[:8]}#{GENERIC_PASSWORD[8:]}" # rotated monthly\n'
+            f"SIGNING_KEY={GENERIC_PASSWORD} # set by the platform\n",
+        )
+        self.commit()
+        result = self.collect()
+        flagged = [entry.split("variable ")[1].split(":")[0] for entry in result["checks"][SECRETS]["evidence"]]
+        self.assertEqual(flagged, ["DB_PASSWORD", "SESSION_SECRET", "SIGNING_KEY"])
+        self.assert_verifies(result)
+        self.assert_no_fragments(result, GENERIC_PASSWORD)
 
 if __name__ == "__main__":
     unittest.main()

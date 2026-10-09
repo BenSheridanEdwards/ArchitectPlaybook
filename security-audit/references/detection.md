@@ -249,7 +249,8 @@ Read a file before citing it. Quote only the fragment that carries the signal.
 - **No eval or new Function (tool).** The collector lists every call in
   shipped code and marks the result `consider`. It ignores strings, comments,
   regular expressions, prose in JSX text, and method declarations named
-  `eval`. Trace each site: if request, storage, or message data can reach it,
+  `eval`, but still reads code inside `${...}` template interpolations and
+  after a `>` comparison. Trace each site: if request, storage, or message data can reach it,
   re-record the check with `--judgement act-on` and the trace. Calls in tests
   and minified vendor files are excluded.
 - **Message listeners.** `event.origin === 'https://exact.example'` or a `Set`
@@ -263,15 +264,19 @@ Read a file before citing it. Quote only the fragment that carries the signal.
   - The collector scans every tracked file, in any folder and of any size, for
     high-confidence formats, keystore and private-key files, and secret-named
     variables (including `*_KEY` and `*_PAT`) with real values in committed
-    environment files.
+    environment files. Values are parsed as dotenv does: a quoted value ends at
+    its closing quote, an unquoted one at ` #`. Only a connection URL whose host
+    is local is exempt.
   - It skips whole-value placeholders (`changeme`, `your-key-here`, `<token>`,
     `${VAR}`, filler such as `xxxx`), the documented AWS example keys, local
     database URLs, and private-key headers with no key body after them, as in
     documentation templates. A value that merely contains a word such as
     `Example` is still a secret.
   - Citations quote only a fixed prefix such as `sk_live_` or a variable name
-    before `<REDACTED>`. A file whose path itself looks like a credential is
-    counted but not named. When every hit is under a test path, the result is
+    before `<REDACTED>`. Every string the collector prints, from any check or
+    snapshot fact, is tested for credential formats and for credential-shaped
+    runs, so a file or folder whose name looks like a credential is counted
+    but never named. When every hit is under a test path, the result is
     judged `consider`.
   - A test-only private key or a revoked credential may be dismissed with a
     reason, but the key is still exposed: say whether it was ever live.
@@ -281,10 +286,12 @@ Read a file before citing it. Quote only the fragment that carries the signal.
     commits, and files. A secret only in history still needs rotating.
 - **Local environment files are ignored by Git (tool).** Critical, because a
   missing control is rated like the defect it prevents.
-  - The collector asks Git which rule ignores `.env`, `.env.local`, and the
-    development, test, production, and other `.local` variants. It asks in the
-    root, every folder with a `package.json` or a Next.js or Vite
-    configuration, and every folder that holds an environment file.
+  - The collector asks Git which rule ignores `.env`, `.env.local`, the
+    development, test, and production `.local` variants, a made-up
+    `.env.any-mode.local` that only a general pattern covers, and every
+    untracked environment file it finds on disk. It asks in the root, every
+    folder with a `package.json` or a Next.js or Vite configuration, and
+    every folder that holds an environment file.
   - Only a rule in a `.gitignore` the repository tracks counts. An untracked
     `.gitignore`, `.git/info/exclude`, or a global ignore file protects one
     person, so that coverage is missing or partial.
