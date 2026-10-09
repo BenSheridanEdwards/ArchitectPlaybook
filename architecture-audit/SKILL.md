@@ -1,368 +1,169 @@
 ---
 name: architecture-audit
-description: Graphify-powered architectural audit of a TypeScript codebase. Produces a diagnostic snapshot + checks module boundaries, coupling, state/data flow, and conventions, with optional implementation plan.
+description: Audit a TypeScript codebase's structure — import cycles and boundaries, module depth, change hotspots, and data-flow ownership — with verified evidence, then run a design session on the candidate you choose.
 disable-model-invocation: true
 argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-run] [--pattern=<name>] [--learn|--teach]"
 ---
 
 # /architecture-audit
 
-Audit a TypeScript codebase against an opinionated architectural baseline organised in four layers — **module boundaries**, **coupling and complexity**, **state and data flow**, **convention adherence** — preceded by a **diagnostic snapshot** that describes the codebase's actual shape. Uses the Graphify knowledge graph as the primary data source. Then offers to generate an implementation plan for the gaps. The audit is fully static and read-only.
+Find where the structure of a TypeScript codebase makes change expensive or risky, and what to change first.
 
-The default mental model is TypeScript and React. Most checks apply to any TypeScript codebase; the state and data flow layer leans React-specific because that is where the most consequential architectural pain in modern frontend work actually lives.
+The audit has three sources:
+- a deterministic collector, which builds the import graph, Git hotspots, and change coupling;
+- the shared design vocabulary;
+- the judgement of the model, spent where change concentrates.
 
-## Publishing results
+It is static and read-only. It ends with a design session on one candidate, not a generic plan.
 
-Record every result through the shared audit protocol. Never write the four findings files by hand.
+The vocabulary comes from John Ousterhout's deep modules and from the red flags agent contributors trip over:
+- **Module:** anything with an interface and an implementation.
+- **Interface:** everything a caller must know.
+- **Depth:** behaviour hidden per unit of interface.
+- **Seam:** where an interface lives.
+- **Locality:** what maintainers gain when a change stays in one place.
 
-```bash
-python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin architecture-audit
-```
-
-Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
-
-A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
-
-Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
-
-## Hard requirement: the Graphify knowledge graph
-
-This is the one audit that requires `graphify-out/graph.json`. Half the checks (god-node detection, community comparison, circular-dependency detection, fan-in and fan-out analysis) are unimplementable without it. If the graph is missing, the skill writes the canonical output files with every applicable catalog check marked `not-evaluated`, a null status, and reason `knowledge-graph-not-detected`, then prints this message:
-
-> `/architecture-audit` requires the Graphify knowledge graph. Please run `/pre-audit-setup` first, then re-run this audit.
-
-There is no scored half-audit. The explicit not-evaluated result prevents a misleading category score while giving downstream tools a complete, honest evidence record.
+[Detection notes](references/detection.md) explain how to evaluate each check.
 
 ## Usage
 
 ```
-/architecture-audit                                 # default: concise Top 5 + full report saved + ask about plan
-/architecture-audit --worktree                          # create an isolated Git worktree, then run the audit there
-/architecture-audit --learn                         # mid-level engineer teaching mode (detailed explanations + file/line examples)
-/architecture-audit --teach                         # alias for --learn
-/architecture-audit --pattern=<feature-folders|layered|atomic-design|monorepo-workspaces|infer>  # override inferred architectural pattern
-/architecture-audit --threshold-god-module=40       # override the default fan-in threshold (default 30)
-/architecture-audit --threshold-god-component=30    # override the default god-component parent threshold (default 25)
-/architecture-audit --threshold-file-size=500       # override the default file-size threshold in lines (default 400)
-/architecture-audit --threshold-fan-out=20          # override the default component fan-out threshold (default 15)
+/architecture-audit                     # audit the current repository
+/architecture-audit --worktree          # run in .worktrees/architecture-audit on its own branch
+/architecture-audit --since=<ref>       # judge only what changed since <ref> (a provisional, filtered run)
+/architecture-audit --months=12         # widen the Git history window for hotspots (default 6)
+/architecture-audit --with-run          # also run installed dependency-cruiser, madge, or knip to confirm collector results
+/architecture-audit --pattern=layered   # declare the intended pattern instead of inferring it
+/architecture-audit --learn             # teaching mode; --teach is an alias
 ```
 
-**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
+`--pattern` accepts `feature-folders`, `layered`, `hexagonal`, or `monorepo-workspaces`. It replaces the inferred pattern as the declared dependency direction, and is recorded in the snapshot, so it does not make the run provisional. `--since` and `--months` do, because they change what the audit measures.
 
-This skill never accepts `--apply`. The implementation plan is descriptive Markdown.
+## Ownership
 
-The defaults baked into the skill are the recommended baseline. Threshold flags exist as an escape hatch for codebases with deliberately different sensibilities; the canonical path to evolving the defaults themselves is `/system-self-improve`.
+| Concern | Owner |
+| --- | --- |
+| Import cycles, boundaries, module depth, state ownership, change hotspots, server-state placement | `/architecture-audit` |
+| React component and hook correctness | `/react-audit` |
+| Runtime cost of rendering and data fetching | `/performance-audit` |
+| Lint rules that enforce boundaries, as configuration | `/linting-audit` |
+| Whether architecture documents and decision records exist and are current | `/documentation-audit` |
 
-## The opinionated baseline
+`/architecture-audit` owns where server data loads and how global client state is held. The React and performance audits still carry overlapping checks (`react-audit.server-state-in-data-layer`, `react-audit.single-global-state-library`, and `performance-audit.single-data-fetching-strategy`). Under Architecture Decision Record 0004, each retires its copy or points it here with `relatedChecks` when its catalog moves to schema `1.2.0`.
 
-A check resolves to one of four statuses, with the same semantics as `/accessibility-audit`:
+The three tool checks always cover the whole repository, also in a `--since` run, because a cycle or a boundary rule is a property of the whole graph.
 
-- **present** — the invariant holds; the audit found no problems.
-- **partial** — the invariant holds in most places but the audit found a small number of edge cases.
-- **missing** — a structural prerequisite is absent (for example, no feature folders exist, so the "single entry point" check has nothing to evaluate).
-- **violation** — the invariant is broken; the audit identified concrete code that fails it.
+## The baseline
 
-Layer 0 is informational only and has no status.
+Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violation`. Checks that cannot apply are recorded as not applicable, and checks you could not evaluate as not evaluated. Severity follows Architecture Decision Record 0004. The method column says whether the collector decides the check (`tool`) or you do (`model`).
 
 ### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
 
-Written before any check runs, so the human reading the report has architectural context.
+The collector records these facts:
+- source files and resolved imports;
+- import cycles;
+- hubs (high fan-in and fan-out) and the most-imported modules;
+- orphan candidates;
+- Git hotspots and change coupling;
+- boundary tooling, decision-record directories, and glossaries.
 
-- Top 10 god nodes by PageRank, with file path and incoming edge count.
-- Communities detected by Graphify, with member count, dominant directory, and a representative file per community.
-- Module count, edge count, average and median fan-in and fan-out.
-- Directory tree depth statistics: deepest path, average depth, count of files at each depth.
-- Detected meta-framework: Next.js App Router, Next.js Pages Router, Remix, Vite-React, plain React, plain TypeScript.
-- Detected architectural pattern: feature-folders, layered, atomic-design, monorepo-workspaces, or no-clear-pattern. The inference rationale is recorded so the user can audit the audit.
-- Monorepo presence: yes or no, with workspace count when yes.
+Add the framework, the architectural pattern you infer (with your reasoning), and whether the repository is a multi-package workspace.
 
-### Layer 1 — Module boundaries
+### Layer 1 — Dependency structure
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| No circular dependencies | The dependency graph is acyclic. | One or more cycles detected by Graphify; each cycle reported as an ordered list of module paths. |
-| Feature folders have a single entry point | Each top-level folder under `src/features/`, `src/modules/`, or the equivalent for the detected pattern exposes a barrel (`index.ts`) and external imports go through it. | An external file imports from a deep path inside a feature folder, bypassing its `index.ts`. Reported with the importer, the feature, and the bypassed path. |
-| No deep relative imports | Relative imports go up at most two levels (`../../`). | Any import string containing `../../../` or deeper. Reported with the importer file. |
-| No back-imports across layers | When the architectural pattern is layered (or detected as layered), upstream layers do not import from downstream layers (for example, UI does not import from data; data does not import from UI). When the pattern is feature-folders, sibling features do not import from each other except through their public entry points. | An import that crosses a boundary in the wrong direction. Reported with the importer, the import, and the direction of the violation. |
-| Cross-workspace contracts respected (monorepos only) | Internal packages import only from each other's published entry points, not deep paths. Explicitly not applicable when the project is not a monorepo. | A deep import into another workspace's `src/` directory. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| No import cycles | medium | tool | Runtime imports form no cycles; type-only imports are excluded. | A cycle among runtime imports, cited by the importing lines that form it. |
+| Boundaries enforced by tooling | medium | tool | A boundary tool encodes the dependency rules and runs in a script or continuous integration. | No boundary tool, or one that nothing runs. |
+| Dependencies point the declared way | medium | model | Domain and shared code do not import user-interface, framework, or infrastructure code; sibling features meet only at public entry points. | An import against the declared or inferred direction. |
+| Module internals are unreachable | medium | model | Outside code imports only a module's public entry point, and something makes importing internals fail. | Imports reaching into another feature's or package's internal files. |
+| Workspaces import each other through entry points | medium | tool | Workspaces import each other by package name. Not applicable outside multi-package workspaces. | A relative import into another workspace's files; test-only cases are partial. |
 
-### Layer 2 — Coupling and complexity
+### Layer 2 — Module design
 
-Defaults are in parentheses; every threshold is overridable via the flags above.
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Modules are deep | medium | model | Important modules hide substantial behaviour behind a small interface; deleting one would concentrate complexity. | An interface nearly as complex as its implementation, or callers coordinating several calls for one operation. |
+| No pass-through layers | medium | model | Every layer adds policy, adaptation, or a distinct abstraction. | A wrapper that forwards the same arguments to another with the same shape. |
+| Each piece of state has one owner | high | model | Each store, cache entry, table, or shared object has one writer. | More than one module writes the same state. |
+| One supported way to do each task | medium | model | Each recurring task has one supported mechanism. | Two mechanisms for the same task in active use. |
+| No hand-synced lists | medium | model | Each list of items has one source the others derive from, or a check that fails when they disagree. | The same items listed in several places with no derivation or check. |
+| Representations stay behind interfaces | medium | model | External data is parsed into domain types at the boundary; wire, storage, and framework types stay inside their module. | Wire or storage types used deep inside other layers. |
+| Code grouped by what it knows | low | model | Modules are organised around the knowledge they own, not execution order. | Stage-named modules that each re-implement one representation. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| No god module | No single module has fan-in greater than the threshold (default 30). | A module exceeding the threshold. Reported with the module path, its PageRank rank, and its inbound edge count. |
-| No god component | No React component is rendered by more than the threshold number of parents (default 25). | A component exceeding the threshold, with the component path and the count of distinct rendering parents. |
-| File size budget | No source file exceeds the threshold in lines (default 400). | A file exceeding the threshold, reported with its line count. |
-| Component fan-out budget | No component imports more than the threshold (default 15) — high fan-out signals a component that is doing too much. | A component exceeding the threshold, reported with the count and the imported modules. |
-| No orphaned files | Every source file is reachable from at least one entry point. | Files with zero inbound edges that are not themselves entry points (the application entry, route files, test files, configuration files). Reported as a list of likely-dead modules; the user verifies before deletion. |
+### Layer 3 — Change risk
 
-### Layer 3 — State and data flow
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Hotspots are cohesive and tested | medium | model | The most frequently changed files are cohesive and tested at their interface. | A top hotspot that is large, mixes responsibilities, or is untested. |
+| Files that change together live together | medium | model | Files that repeatedly change together share a module, or the coupling is explained. | Strong change coupling across features or packages with no structural reason. |
+| Hub modules are stable | medium | model | High fan-in modules import little and change rarely; re-exporting barrels are judged by what they expose. | High fan-in with high fan-out, or with frequent change. |
+| No orphaned modules | low | model | Every source module is reachable from an entry point, route, test, or configuration. | Modules nothing imports that are not entry points, verified before reporting. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Single state-management strategy | Exactly one of: Redux Toolkit, Zustand, Jotai, MobX, React Context (alone). Not multiple in the same application. | Two or more state-management libraries present in `package.json` dependencies, with no clear migration path declared. |
-| Data fetching layer separated | Server state lives in a designated data-fetching layer (TanStack Query, SWR, RTK Query, or a custom hooks layer) — not in component-level `useEffect` plus `fetch`. | Files outside the designated hooks or data layer that call `fetch`, `axios`, or framework-level data primitives directly. Reported with file references. |
-| No global mutable singletons | No top-level `let` exports holding mutable state. | A module-level mutable export (`export let x = ...`). Reported per occurrence. |
-| Side effects isolated | Components do not read or write `localStorage`, `sessionStorage`, `document.cookie`, or `window.*` directly — they go through a hook or a service module. | Direct usage in component files. Reported with file references. |
-| Server vs. client distinction (Next.js App Router only) | The `'use client'` directive is used deliberately, not on every file. Server components do not import client-only modules and vice versa. Explicitly not applicable when the App Router is not in use. Soft check — framework-bound and reported as `partial` for excessive boundary fragmentation. | A `'use client'` file importing a known server-only module, or a server component importing a known client-only one. Excessive `'use client'` boundary fragmentation (more than half of the components marked client) reported as `partial`. |
+### Layer 4 — Data flow and decisions
 
-### Layer 4 — Convention adherence
-
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| File-naming consistency | The audit detects the dominant naming pattern in each directory (PascalCase for components, `useFoo.ts` for hooks, kebab-case for utilities, etc.) and flags outliers. Soft check — inferred from the dominant local convention and reported as `partial` for mixed adherence. | Files whose name does not match the dominant pattern in their directory. |
-| Directory-structure consistency | Every directory at the same depth follows the same organisational convention as siblings of the same kind. Soft check — inferred from sibling structure and reported as `partial` for mixed adherence. | A directory that does not match the inferred pattern (a feature folder among layered directories, or vice versa). |
-| Index barrels consistent | If barrel files (`index.ts` re-exports) are used in any feature folder, they are used in every feature folder. Soft check — applies only when feature barrels are an established local convention and reports mixed usage as `partial`. | Mixed-mode usage. |
-| Public API documented | Each feature folder's `index.ts` has a documenting comment block describing its public surface, or the folder has a `README.md`. This is a soft check — missing documentation reports as `partial`, never `violation`. | Feature folders without either a documenting comment in the barrel or a `README.md`. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Server state has one home | medium | model | Server data loads in one designated place: a query layer, or the framework's server-side data primitives. | Client components fetching in effects, or several data-fetching strategies. |
+| One client-state strategy | medium | model | Global client state uses one strategy; context is for dependency injection and stable values. | Two or more global state libraries with no stated migration. |
+| Side effects sit at the edges | medium | model | Components reach storage, cookies, and globals through a hook or service. | Direct storage, cookie, or window access in components. |
+| Decisions are recorded and still hold | medium | model | Hard-to-reverse decisions are recorded, and the code still follows them. | No record of major decisions, or code that contradicts one. |
+| Domain language is consistent | low | model | Each domain concept has one name in code and documentation. Soft check — mixed adherence is reported as partial. | One concept named differently across modules. |
 
 ## What this skill does
 
-1. **Requires the knowledge graph for evaluation.** When it is missing, writes a canonical no-score result with every applicable check explicitly `not-evaluated`, then prints the friendly recovery message above.
-2. **Reads the knowledge graph.** Loads `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`. The PreToolUse hook installed by `/pre-audit-setup` reminds you of this on every Glob and Grep — respect it.
-3. **Confirms a TypeScript project.** Detects TypeScript via `tsconfig.json` and a `package.json` dependency on `typescript`. If absent, writes a canonical not-applicable audit with every catalog check present once and a null status.
-4. **Detects the meta-framework and the architectural pattern.** Records both in the diagnostic snapshot. The pattern detection is heuristic; the rationale is recorded so the user can override with `--pattern=` if the inference is wrong.
-5. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/architecture-audit/snapshot.md` and embeds the same content at the top of `findings.md`. The snapshot is informational and always present.
-6. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-7. **Writes phase 1 outputs** to `.architect-audits/architecture-audit/`:
-   - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
-   - `findings.json` — machine-readable.
-   - `snapshot.md` — diagnostic snapshot on its own, for easy linking from elsewhere.
-   - `metadata.json` — skill version, run timestamp, Graphify revision hash, framework, detected pattern, applied thresholds, applied filters.
-8. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
-
-   > "Generate an implementation plan for the architectural violations and partial-coverage gaps? (yes/no)"
-
-   On `yes`, writes `.architect-audits/architecture-audit/implementation-plan.md` describing exactly which boundaries to introduce, which god modules to decompose, which conventions to align, and which orphans to remove — ordered by layer and then by severity. The plan does not modify any project files.
-
-   On `no`, exits cleanly.
+1. Stages a run through the shared audit protocol. The collector decides the three tool checks and records the Layer 0 facts.
+2. Spends your reading on the hotspots, the hubs, and the modules the collector flags, rather than walking every file.
+3. Evaluates the model checks with the deletion test and the red flags in the detection notes. Every finding cites the lines it rests on.
+4. Publishes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` through the protocol, and summarises the act-on findings.
+5. Offers a design session on one candidate the user picks.
 
 ## Implementation steps
 
-### Step 1 — Confirm the prerequisites
+1. **Begin.** Follow [the run protocol](../audit-protocol/references/run-protocol.md). With `--worktree`, create the worktree as it describes.
 
-```bash
-test -f package.json || { echo "architecture-audit: no package.json detected; change directory to the project root."; exit 1; }
-```
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin architecture-audit
+   ```
 
-If TypeScript is absent, write the canonical audit-level not-applicable result. If TypeScript is present but `graphify-out/graph.json` is absent, write all four canonical outputs with each catalog check applicable but `not-evaluated`, `evidenceQuality: "none"`, `status: null`, and evaluation reason `knowledge-graph-not-detected`; then tell the user to run `/pre-audit-setup`.
+   - Pass `--since <ref>` for a diff-scoped run.
+   - Pass `--enrichment with-run` and `--threshold months=<n>` to record those options. The collector receives both.
+   - The collector runs automatically.
+2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/architecture-audit/.staging/run.json`. If `graphify-out/GRAPH_REPORT.md` exists, read its god nodes and communities. Record the framework, the pattern, and your reasoning with `snapshot --set`. With `--pattern`, record it as `declaredPattern` and judge direction against it; otherwise record `inferredPattern` and the evidence for it.
+3. **Confirm the tool checks when asked.** With `--with-run`, run `npx --no-install depcruise`, `madge --circular`, or `knip` if they are installed. Re-record any check whose result differs, citing the command.
+4. **Evaluate every model check.**
+   - Start with the top hotspots, the hubs, and the change-coupling pairs. Then sample the feature and package entry points.
+   - Apply the detection notes.
+   - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
+   - Use `hypothesis` for suspicions you cannot verify.
+   - Use `not-evaluated` with a reason when the repository gives you no basis, for example no recorded decisions to compare against.
+5. **Judge.** Keep at most about five findings `act-on`, ranked by severity and then by how often the code changes. Dismiss with a reason anything that is consistent with a recorded decision or a deliberate convention.
+6. **Finish.** Run `audit_run.py finish architecture-audit`, fix anything it rejects, and present the chat summary the protocol defines.
+7. **Offer the design session.** Ask: "Want to explore one of these? Pick a number, or say no."
 
-### Step 2 — Detect framework and architectural pattern
+## Phase 2: the design session
 
-Read `package.json` and the directory layout:
+Do not write a static plan for architecture. On the user's pick:
 
-- `next` dependency plus `app/` directory → Next.js App Router.
-- `next` dependency plus `pages/` directory → Next.js Pages Router.
-- `@remix-run/*` dependency → Remix.
-- `vite` plus `react` → Vite-React.
-- `react-scripts` → Create React App.
-- `react` only → plain React.
-- Otherwise → plain TypeScript.
+1. **Frame the problem.** State the constraints, what the deepened module must hide, its dependency category, and which tests will survive.
+2. **Design it twice.** Sketch two or three structurally distinct interfaces:
+   - the smallest interface;
+   - the most common caller first;
+   - ports and adapters where the dependency is truly external.
 
-Pattern inference (skipped when `--pattern=` is set explicitly):
-
-- A `src/features/` or `src/modules/` directory with sibling folders, each containing its own components, hooks, and tests → `feature-folders`.
-- Top-level directories named for layers (`presentation/`, `application/`, `domain/`, `infrastructure/`, or `ui/`, `services/`, `data/`) → `layered`.
-- Directories named `atoms/`, `molecules/`, `organisms/`, `templates/`, `pages/` → `atomic-design`.
-- A `packages/` directory plus a workspace declaration in `package.json` (or `pnpm-workspace.yaml`) → `monorepo-workspaces`.
-- None of the above → `no-clear-pattern`.
-
-Record both the detection result and the rationale in `metadata.json`.
-
-### Step 3 — Build the diagnostic snapshot
-
-Read the knowledge graph and compute the items listed in Layer 0 above. Write `snapshot.md` and prepend the same content to `findings.md`.
-
-### Step 4 — Resolve each check
-
-For each check in the active layer list, walk its detection logic against the graph and the source tree:
-
-- **All required signals indicate the invariant holds →** `present`.
-- **Most signals hold; a small number of exceptions →** `partial`. Define "small" per check (typically: at most three offenders, or fewer than 5% of the relevant population).
-- **The structural prerequisite is absent →** `missing`.
-- **Concrete violators exist →** `violation`. Always include sample file references.
-
-Record every matching path in the `evidence` array. For checks that can produce many offenders (god modules, deep relative imports, naming inconsistencies), record up to ten representative samples plus a total count rather than the exhaustive list.
-
-### Step 5 — Write phase 1 outputs
-
-Create `.architect-audits/architecture-audit/` if it does not exist. Write `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json`. If a previous run exists, overwrite all four. `implementation-plan.md` is preserved unless the user agrees to regenerate it.
-
-### Step 6 — Print the concise chat summary and offer phase 2
-
-Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 5. The chat output has exactly this shape:
-
-1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
-2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
-   - **Title** (one clear line).
-   - **Why it matters** (explain the principle in 1–2 sentences).
-   - **Real consequences if ignored** (honest downside for the team or project).
-   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
-   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
-3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/architecture-audit/findings.md`
-
-When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
-- For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
-- Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
-- Include a short "What you'll learn from fixing this" section for each recommendation.
-- Keep the numbered/lettered structure so the user can still reply with "2b" or "1 and 3".
-- End with the same bottom-line link to the full report.
-
-After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
-
-### Step 7 — Phase 2: generate the implementation plan
-
-When the user agrees, build `implementation-plan.md`:
-
-1. **Header** — repository name, baseline version, framework, detected pattern, timestamp, total counts per layer.
-2. **Layer 1 — module boundaries plan**:
-   - For each circular dependency, propose a specific edge to break and the refactor that breaks it (extract shared dependency, invert direction with an interface, move shared code).
-   - For each missing barrel, the file to create and a starter export list.
-   - For each deep relative import, the import to rewrite and the path-alias entry to add to `tsconfig.json` if appropriate.
-3. **Layer 2 — coupling and complexity plan**:
-   - For each god module, candidate cleavage planes derived from community structure.
-   - For each oversized file, suggested split lines based on internal cohesion.
-   - For each orphan, a short note recommending verification before deletion.
-4. **Layer 3 — state and data flow plan**:
-   - Migration strategy when multiple state-management libraries are present.
-   - Files to extract direct `fetch` calls from, with the recommended hooks-layer destination.
-   - Replacement strategy for any global mutable singletons.
-5. **Layer 4 — convention adherence plan**:
-   - Renames per outlier file, in batched form (suitable for a single rename pull request per directory).
-   - Documentation snippets for missing public API documentation.
-6. **Closing checklist** — a flat checkbox list mirroring the gaps, suitable for pasting into a pull-request description.
-
-The plan is descriptive, not executable. It does not move files, rewrite imports, or delete orphans.
+   Compare them on depth, locality, and where the seam sits, and recommend one.
+3. **Grill the choice in rounds.** Ask every currently answerable question at once, numbered, each with your recommended answer. Look up facts yourself; ask the user only for decisions.
+4. **Write the agreed outcome** to `.architect-audits/architecture-audit/implementation-plan.md` as agent briefs, in the format the protocol defines.
+5. **Offer to record rejections.** If the user rejects a candidate for a lasting reason, offer `audit_run.py decide <check-id> --decision accepted-risk ...`, or an architecture decision record, so later audits do not suggest it again.
 
 ## Repository Quality Score findings contract
 
-`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
-top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
-`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
-`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
-repository, exact Git commit, and whether the audited source tree was clean.
-`execution` records `filtersApplied`, `filterArguments`, threshold and policy
-overrides, `enrichmentArguments`, and graph availability.
-
-Emit every entry from `checks.json` exactly once and use its full `checkId` and
-layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
-`classification`, canonical `status`, and `evidence`. A check that does not apply
-is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
-unresolved applicable check is `applicable`/`not-evaluated` with a null status;
-never guess a pass or failure. `metadata.json` repeats the common run, target,
-catalog, and execution identity. The complete contract is
-`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
-
-## Findings file shape
-
-`findings.json` (the example shows one representative check; emitted output
-contains every catalog check exactly once):
-
-```json
-{
-  "schemaVersion": "2.0.0",
-  "runIdentifier": "<uuid>",
-  "skillName": "architecture-audit",
-  "skillVersion": "1.0.0",
-  "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.0.0",
-  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
-  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
-  "runStartedAt": "2026-04-26T13:47:00Z",
-  "runFinishedAt": "2026-04-26T13:47:24Z",
-  "framework": "next-app-router",
-  "pattern": { "detected": "feature-folders", "rationale": "src/features/* with co-located components, hooks, and tests", "overrideUsed": false },
-  "thresholds": { "godModule": 30, "godComponent": 25, "fileSize": 400, "fanOut": 15 },
-  "snapshot": {
-    "godNodes": [
-      { "path": "src/lib/api-client.ts", "inboundEdges": 87, "pageRank": 0.041 }
-    ],
-    "communities": [
-      { "id": 0, "memberCount": 42, "dominantDirectory": "src/features/inbox", "representative": "src/features/inbox/MessageList.tsx" }
-    ],
-    "moduleCount": 1284,
-    "edgeCount": 5712,
-    "fanInMean": 4.4,
-    "fanInMedian": 2,
-    "fanOutMean": 4.4,
-    "fanOutMedian": 3,
-    "directoryDepth": { "deepest": 7, "average": 3.2 }
-  },
-  "summary": {
-    "moduleBoundaries":       { "present": 2, "partial": 1, "missing": 0, "violation": 2 },
-    "couplingAndComplexity":  { "present": 1, "partial": 1, "missing": 0, "violation": 3 },
-    "stateAndDataFlow":       { "present": 3, "partial": 0, "missing": 0, "violation": 2 },
-    "conventionAdherence":    { "present": 2, "partial": 1, "missing": 0, "violation": 1 }
-  },
-  "checks": [
-    {
-      "layer": "coupling-and-complexity",
-      "checkId": "architecture-audit.no-god-module",
-      "applicability": "applicable",
-      "applicabilityReason": null,
-      "evaluationState": "evaluated",
-      "evaluationReason": null,
-      "evidenceQuality": "complete",
-      "classification": "threshold-violation",
-      "status": "violation",
-      "thresholdApplied": 30,
-      "evidence": [],
-      "samples": [
-        { "path": "src/lib/api-client.ts", "inboundEdges": 87, "pageRank": 0.041 }
-      ],
-      "expectation": "No module has fan-in greater than 30.",
-      "gap": "1 module exceeds the threshold; api-client is a load-bearing god node.",
-      "remediation": "Decompose api-client by feature: extract per-feature client modules and have features import their own slice."
-    }
-  ]
-}
-```
-
-`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top followed by one section per check, grouped by layer.
-
-`snapshot.md` contains only the snapshot — useful for linking directly from a pull-request description or from another skill's output.
-
-`metadata.json`:
-
-```json
-{
-  "skillName": "architecture-audit",
-  "skillVersion": "1.0.0",
-  "runStartedAt": "2026-04-26T13:47:00Z",
-  "runFinishedAt": "2026-04-26T13:47:24Z",
-  "graphifyRevision": "<hash from graphify-out/metadata>",
-  "framework": "next-app-router",
-  "pattern": { "detected": "feature-folders", "rationale": "...", "overrideUsed": false },
-  "thresholds": { "godModule": 30, "godComponent": 25, "fileSize": 400, "fanOut": 15 },
-  "filtersApplied": { "layers": ["module-boundaries", "coupling-and-complexity", "state-and-data-flow", "convention-adherence"], "include": [], "exclude": [] }
-}
-```
-
-## Idempotency rules
-
-- Re-running with no flags overwrites `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` in place.
-- `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it.
-- Filter flags, threshold overrides, and the pattern override are recorded in `metadata.json` so a partial run can be reproduced.
-
-## Failure modes and remediation
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| Knowledge graph missing | `/pre-audit-setup` has not been run, or the graph has been deleted. | Write the canonical no-score result with every applicable check explicitly `not-evaluated`, print the recovery message, and do not invent findings. |
-| `tsconfig.json` missing | The skill is being run on a JavaScript-only project, or outside the project root. | If `package.json` identifies a valid project root, write the canonical not-applicable audit result; otherwise ask the user to change to the project root. |
-| Pattern inference inconclusive | The directory layout matches no clear convention. | Record `no-clear-pattern` in the snapshot. Emit pattern-specific catalog checks as `not-applicable`/`not-evaluated` with null status and an explanation. |
-| Pattern override is wrong | The user passed `--pattern=layered` but no layered structure exists. | Trust the user's intent. Run the layered-style checks and report what they would expect to see; many will resolve as `missing` or `violation`. |
-| Threshold override is extreme | A user passes `--threshold-god-module=1000`. | Honour the value. Record it in `metadata.json` so the report makes the choice visible. |
-| Graph stale (large refactor since last `/graphify`) | The graph and the source no longer agree. | Detect stale-graph by comparing graph file modification time to the most recent `git log` commit time on source files. When stale, prefix the diagnostic snapshot with a warning and recommend `/pre-audit-setup --force`. Do not refuse to run. |
+The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `runStartedAt` and `runFinishedAt`, and the `checkCatalogVersion`. It records `applicability`, `evaluationState`, and `evidenceQuality` for every catalog check, and repeats the run identity in `metadata.json`. See `.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
 
 ## What this skill explicitly does NOT do
 
-- Run any code, type-checker, linter, or test.
-- Move files, rewrite imports, delete orphans, or otherwise modify the project.
-- Install any package or dependency.
-- Create, modify, or delete any file outside `.architect-audits/architecture-audit/`.
-- Open pull requests or commit anything to git.
-- Audit JavaScript-only projects.
-- Audit individual workspaces in a monorepo. The skill audits the repository root and reports on cross-workspace boundaries; per-workspace deep-dives are recommended as follow-up.
-- Make architectural decisions on the user's behalf. The implementation plan proposes; the human disposes.
+- Modify, move, or delete any project file. The only writes are under `.architect-audits/architecture-audit/`, through the protocol.
+- Grade file length or fan-in alone. A widely imported primitive is healthy, and a long cohesive module can be deep.
+- Treat idiomatic framework data loading, such as Server Components, loaders, and Server Actions, as a violation.
+- Require barrel files. It asks that internals be unreachable, however that is enforced.
+- Audit non-TypeScript code, or make design decisions for the user. The design session proposes; the user decides.
