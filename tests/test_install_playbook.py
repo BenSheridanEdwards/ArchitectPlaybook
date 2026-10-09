@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,7 +44,7 @@ class InstallPlaybookTests(unittest.TestCase):
         for name in ("audit-protocol", "repository-quality-score", "one-audit", "two-audit", "pre-audit-setup", "install-architect-playbook-locally"):
             folder = self.clone / name
             folder.mkdir(parents=True)
-            (folder / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+            (folder / "SKILL.md").write_text(f"---\nname: {name}\n---\n# {name}\n", encoding="utf-8")
         (self.clone / "repository-quality-score" / "scripts").mkdir()
         (self.clone / installer.CALCULATOR).write_text("calculator\n", encoding="utf-8")
         (self.clone / "repository-quality-score" / "score-policy.json").write_text(
@@ -113,6 +114,36 @@ class InstallPlaybookTests(unittest.TestCase):
         installer.apply(self.clone, self.destination, steps)
         self.assertFalse((self.destination / "one-audit" / "stale.md").exists())
         self.assertTrue((self.destination / "graphify").is_dir())
+
+    def test_a_foreign_skill_with_the_same_folder_name_is_never_replaced(self) -> None:
+        foreign = self.destination / "one-audit"
+        foreign.mkdir(parents=True)
+        (foreign / "SKILL.md").write_text("---\nname: custom-security\n---\n", encoding="utf-8")
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        with self.assertRaises(installer.InstallError):
+            installer.plan(self.clone, self.destination, skills, calculator_only)
+        self.assertTrue((foreign / "SKILL.md").exists())
+
+    def test_symbolic_links_below_the_destination_are_refused(self) -> None:
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        cases = {
+            "scripts folder": (Path("repository-quality-score/scripts"), outside),
+            "calculator file": (installer.CALCULATOR, outside / "keep.txt"),
+            "dangling link": (installer.CALCULATOR, outside / "missing.py"),
+            "skill folder": (Path("one-audit"), outside),
+        }
+        for name, (link, target) in cases.items():
+            with self.subTest(name=name):
+                if self.destination.exists():
+                    shutil.rmtree(self.destination)
+                (self.destination / link).parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(target, self.destination / link)
+                with self.assertRaises(installer.InstallError):
+                    installer.plan(self.clone, self.destination, skills, calculator_only)
+                self.assertEqual((outside / "keep.txt").read_text(encoding="utf-8"), "keep\n")
 
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)

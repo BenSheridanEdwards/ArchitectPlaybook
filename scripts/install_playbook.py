@@ -98,12 +98,48 @@ def digest(path: Path) -> str:
     return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
 
 
+def skill_name(folder: Path) -> str | None:
+    """The `name` in a skill folder's SKILL.md frontmatter, if it has one."""
+    try:
+        text = (folder / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not text.startswith("---\n"):
+        return None
+    for line in text[4 : text.find("\n---", 4)].splitlines():
+        key, _, value = line.partition(":")
+        if key.strip() == "name":
+            return value.strip().strip("'\"")
+    return None
+
+
+def require_no_links(destination: Path, relative: Path) -> None:
+    """No component below the destination may be a symbolic link, so nothing is written outside it."""
+    current = destination
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise InstallError(f"{current} is a symbolic link; move it aside first")
+
+
+def require_owned(target: Path, name: str) -> None:
+    """An existing folder is replaced only if it is this playbook's skill of the same name."""
+    found = skill_name(target)
+    if found != name:
+        raise InstallError(
+            f"{target} exists but is not the playbook's {name} skill (its SKILL.md name is {found!r}); move it aside first"
+        )
+
+
 def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool) -> list[dict[str, str]]:
     steps = []
     for name in skills:
         target = destination / name
-        if target.is_symlink() or (target.exists() and not target.is_dir()):
+        require_no_links(destination, Path(name))
+        if target.exists() and not target.is_dir():
             raise InstallError(f"{target} is not a folder; move it aside first")
+        if target.exists():
+            require_owned(target, name)
         if not target.exists():
             status = "installed"
         else:
@@ -112,6 +148,10 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
     if calculator_only:
         target = destination / CALCULATOR
         source = root / CALCULATOR
+        require_no_links(destination, CALCULATOR)
+        scorer = destination / SCORER
+        if (scorer / "SKILL.md").exists():
+            require_owned(scorer, SCORER)
         if not target.exists():
             status = "installed"
         else:
