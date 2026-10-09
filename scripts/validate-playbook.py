@@ -179,6 +179,10 @@ def validate_skills(root: Path, findings: list[Finding]) -> None:
         if frontmatter.get("name") != expected_name:
             findings.append(Finding("error", skill_path, f"frontmatter name must be {expected_name!r}"))
         validate_invocation_frontmatter(skill_path, frontmatter, keys, findings)
+        if re.search(r"\$\{CLAUDE_(?:SKILL_DIR|PLUGIN_ROOT)[^}A-Z_]", body):
+            findings.append(
+                Finding("error", skill_path, "write ${CLAUDE_SKILL_DIR} exactly; Claude Code substitutes only that form, so a default such as :- reaches the shell unchanged")
+            )
         header = text.split("\n---", 1)[0]
         if re.search(r"^(?:disable-model-invocation|user-invocable):\s*['\"]", header, flags=re.MULTILINE):
             findings.append(
