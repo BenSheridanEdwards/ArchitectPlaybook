@@ -169,6 +169,34 @@ class InstallPlaybookTests(unittest.TestCase):
                 with self.assertRaises(installer.InstallError):
                     installer.require_destination(project / ".claude" / "skills")
 
+    def test_an_unowned_scorer_folder_is_never_overwritten(self) -> None:
+        foreign = self.destination / installer.CALCULATOR
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("someone else's calculator\n", encoding="utf-8")
+        (self.destination / "repository-quality-score" / "notes.md").write_text("theirs\n", encoding="utf-8")
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        with self.assertRaises(installer.InstallError):
+            installer.plan(self.clone, self.destination, skills, calculator_only)
+        self.assertEqual(foreign.read_text(encoding="utf-8"), "someone else's calculator\n")
+
+    def test_linked_sources_are_refused(self) -> None:
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("private\n", encoding="utf-8")
+        calculator = self.clone / installer.CALCULATOR
+        calculator.unlink()
+        os.symlink(outside / "secret.txt", calculator)
+        skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
+        with self.assertRaises(installer.InstallError):
+            installer.plan(self.clone, self.destination, skills, calculator_only)
+        self.assertFalse(self.destination.exists())
+        linked_skill = self.base / "elsewhere-audit"
+        linked_skill.mkdir()
+        (linked_skill / "SKILL.md").write_text("---\nname: three-audit\n---\n", encoding="utf-8")
+        os.symlink(linked_skill, self.clone / "three-audit")
+        with self.assertRaises(installer.InstallError):
+            installer.plan(self.clone, self.destination, ["three-audit"], False)
+
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)
         with self.assertRaises(installer.InstallError):

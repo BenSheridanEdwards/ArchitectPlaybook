@@ -143,6 +143,7 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
     steps = []
     for name in skills:
         target = destination / name
+        require_no_links(root, Path(name))
         require_no_links(destination, Path(name))
         if target.exists() and not target.is_dir():
             raise InstallError(f"{target} is not a folder; move it aside first")
@@ -157,8 +158,9 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
         target = destination / CALCULATOR
         source = root / CALCULATOR
         require_no_links(destination, CALCULATOR)
+        require_no_links(root, CALCULATOR)
         scorer = destination / SCORER
-        if (scorer / "SKILL.md").exists():
+        if scorer.exists():
             require_owned(scorer, SCORER)
         if not target.exists():
             status = "installed"
