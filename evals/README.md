@@ -18,7 +18,7 @@ Run them against a copy of the plugin outside it:
 ```bash
 rsync -a --delete --exclude .git --exclude evals/results ./ /tmp/architect-playbook-eval/
 cd /tmp/architect-playbook-eval
-claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash
+claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash --judge-model sonnet
 ```
 
 - `--scaffold` runs each case's `fixture.sh`, which builds the fixture
@@ -33,7 +33,13 @@ claude plugin eval . --scaffold --no-publish --ablation none --allow-tools Bash
   protocol commands the audit writes, and the run stalls before publishing.
 - Add `--case architecture-tangled-store` to run one case, `--runs 1` for a
   quick check, `--concurrency 2` to run two at once, and `--max-cost-usd
-  <amount>` to cap spending. An architecture run costs about a dollar.
+  <amount>` to cap spending. An architecture run costs about a dollar and a
+  security run about a dollar and a half.
+- Add `--judge-model sonnet` for the `llm` graders. They read the whole
+  findings report, often over 30,000 characters, and the default judge model
+  gives noisy verdicts at that length. On the same security report, it voted
+  to fail a list that met every point of its rubric, while `sonnet` passed it
+  unanimously.
 
 **macOS:** `/usr/bin/git` and `/usr/bin/python3` are Xcode shims that cannot
 start inside the sandbox. Put the real tools first on `PATH`:
@@ -50,6 +56,8 @@ Results go to `evals/results/<timestamp>/` in the copy.
 | --- | --- |
 | `architecture-audit/tangled-store` | Recall. A storefront with an import cycle, no boundary tooling, a component importing another feature's internal file, Zustand and Redux both writing cart state, two HTTP clients, effect-based fetching beside a query layer, storage access in components, a wire type rendered in a component, and an untested checkout hotspot. |
 | `architecture-audit/well-kept-store` | Precision. The same storefront built well, so every finding it raises is a false positive. |
+| `security-audit/vulnerable-app` | Recall. A Next.js invoicing app with a committed live-format Stripe key (assembled when the fixture is built), no ignore rule for local environment files, an unauthenticated Server Action that deletes any invoice by id, a route handler and a page that return any user's invoice, middleware-only authorization on a bypassable Next.js version, server-side request forgery in a link preview, a customer note rendered as unsanitized HTML, an open redirect after sign-in that also runs `javascript:` URLs, no sign-in attempt limit, a token in localStorage, and an assistant tool that refunds any invoice the model names. |
+| `security-audit/hardened-app` | Precision. The same app with a data-access layer, input validation, a hardened session cookie, rate-limited sign-in, a random payment-link token, a safe redirect, sanitized HTML, an oEmbed allowlist, a nonce-based Content Security Policy, and scoped, rate-limited assistant tools, so every finding it raises is a false positive. |
 | `testing-audit/hollow-suite` | Recall. A TypeScript invoicing service with a React admin screen: invoice-total tests that compare the code with itself or assert nothing, route tests that mock the service's own refund rules and assert only on mocks, untested refund rules on the busiest file, a committed `it.only`, no coverage threshold, no database tests, a snapshot and utility-class component tests, and no Testing Library or jest-dom lint plugin. |
 | `testing-audit/sound-suite` | Precision. The same service tested well: refund boundaries with literal expectations, PostgreSQL through Testcontainers, the email provider and the admin screen's API faked with Mock Service Worker, role-based component tests, coverage thresholds, and both lint plugins. |
 

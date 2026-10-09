@@ -793,7 +793,7 @@ One pull request per audit, in this order of risk reduction. Each rewrite:
 4. React (compiler era). Retire `server-state-in-data-layer` and `single-global-state-library`, which `/architecture-audit` owns since #27, or point them there with `relatedChecks`.
 5. Dependency (supply chain).
 6. Quality gates (run them, branch protection, Actions hardening).
-7. Agentic (2026 surface).
+7. Agentic (2026 surface). The security collector scans every tracked file, settings files included, so point the settings-file secret checks at `security-audit.no-secrets-in-source` with `relatedChecks`, or retire them.
 8. Accessibility (Web Content Accessibility Guidelines 2.2 gaps, browser mode).
 9. Performance (measured mode). Retire or point `single-data-fetching-strategy` at `/architecture-audit`'s `server-state-has-one-home`.
 10. Linting.
