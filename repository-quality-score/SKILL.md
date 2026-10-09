@@ -171,7 +171,7 @@ paths.
 | Results target another commit | Exclude them and rerun those audits on the current commit |
 | Findings are legacy-shaped | Use exact safe mappings when possible, always provisional, and name audits to rerun |
 | Unknown or duplicate check identifier | Exclude that audit candidate and rerun the audit |
-| Catalog missing from installation | Reinstall the complete playbook; do not search unrelated directories |
+| Catalog missing from installation | Update the plugin or reinstall the complete playbook; do not search unrelated directories |
 | Filter or threshold override used | Produce a provisional score and record the customization |
 | Skipped or failed check evaluation | Reduce coverage and produce a provisional score |
 | Findings change while scoring | Retry once, then stop with an unavailable result |

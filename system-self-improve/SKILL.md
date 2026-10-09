@@ -32,7 +32,7 @@ Three input modes, in priority order. The skill scans for them in this order and
 
 ## Where `/system-self-improve` operates
 
-The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit a globally-installed copy of a skill in `~/.claude/skills/` because changes there don't survive re-install — improvements must land in the source repository and be re-installed via `/install-architect-playbook-locally` or `/install-architect-playbook-globally`.
+The skill must run from inside a clone of the architect-playbook repository, or pointed at one via `--playbook-path=<path>`. It cannot edit an installed copy: neither a copy in `~/.claude/skills/`, nor the plugin's copy or marketplace clone under `~/.claude/plugins/`, because those are replaced on the next install or update. Improvements land in the source repository and reach plugin users through a plugin update, or copy-install users through a re-install.
 
 When the gap report lives in a target project (`<some-project>/.architect-audits/<audit>/review-gap-report.md`) and the playbook clone is elsewhere, the user passes both `--gap-report=<path>` and `--playbook-path=<path>`.
 
@@ -153,6 +153,7 @@ Detect the playbook by looking for the conventional structure at the current wor
 - A `README.md` at the root mentioning "Architect Playbook" or "architect-playbook" in its first heading.
 - A `CLAUDE.md` at the root with the project rules.
 - At least one `<skill-name>/SKILL.md` directory at the root.
+- A `.git` directory or file at the root, and a path outside `~/.claude/plugins/`. The plugin's cached copy and marketplace clone look like a playbook clone, but edits there are discarded on update.
 
 If none of these resolves, stop with:
 
@@ -337,7 +338,7 @@ Print the commit suggestion and the modified-file list. Do not commit.
 - Commit any change to git. The skill prints the suggested Conventional Commits message and the modified-file list; the user commits.
 - Push, open a pull request, or otherwise interact with any remote.
 - Skip the confirmation prompt under `--apply`. There is no flag to bypass it.
-- Operate on globally-installed skill copies under `~/.claude/skills/`. Improvements must land in the source repository and be re-installed.
+- Operate on installed copies under `~/.claude/skills/` or `~/.claude/plugins/`. Improvements must land in the source repository and reach users through a plugin update or a re-install.
 - Run any code, including the audits whose findings it might be analysing.
 - Decide on its own that an audit's threshold is wrong without an input gap. Pattern-based suggestions from `--from-audit-history` are surfaced as candidates only, not as automatic edits.
 

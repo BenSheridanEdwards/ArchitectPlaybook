@@ -41,19 +41,16 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 
 ## The workflow
 
-1. **Get the playbook and install the skills.**
-   ```bash
-   git clone <this-repository> ~/architect-playbook
-   cd ~/architect-playbook
-   claude       # open this directory in Claude Code
+1. **Install the playbook as a Claude Code plugin.** In any Claude Code session:
    ```
-   Then, in the Claude Code chat:
+   /plugin marketplace add BenSheridanEdwards/ArchitectPlaybook
+   /plugin install architect-playbook@architect-playbook
    ```
-   /install-architect-playbook-globally
-   ```
-   That's it. Every audit slash command is now available in every Claude Code session on the machine. The clone ships with `.claude/skills/install-architect-playbook-globally/SKILL.md` as a real bootstrap skill directory, kept content-identical to the top-level installer by repository validation. It works on Windows and Unix checkouts without Git symlink support.
+   Every audit is now available as a slash command, such as `/architecture-audit`, in every project. If another skill already uses a name, the full form `/architect-playbook:architecture-audit` always works. To update, run `claude plugin update architect-playbook@architect-playbook` in a terminal (or turn on auto-update for the marketplace in `/plugin`), then `/reload-plugins` or restart Claude Code.
 
-   *(Optional, for teams: once you `cd` into a target project, you can also run `/install-architect-playbook-locally` to pin the skills alongside that project in version control. Most users don't need this.)*
+   If you installed the skills by copying them before, remove those copies from `~/.claude/skills/` (or the project's `.claude/skills/`). A copied skill owns the bare command name, so `/architecture-audit` would keep running the old copy.
+
+   *Without plugins:* clone this repository, open it in Claude Code, and run `/install-architect-playbook-globally` to copy the skills into `~/.claude/skills/`, or `/install-architect-playbook-locally` inside a project to pin them in its version control. The clone ships `.claude/skills/install-architect-playbook-globally/SKILL.md` as a real bootstrap skill directory, kept identical to the top-level installer by repository validation.
 
 2. **Prepare the project.**
    ```
@@ -94,7 +91,7 @@ worktree each (`--worktree`).
 
 | Phase | Audits | Why here |
 | --- | --- | --- |
-| 0 — Prepare | `/install-architect-playbook-globally`, `/pre-audit-setup` | Install the skills and, optionally, build the knowledge graph that audits use to choose where to read first. |
+| 0 — Prepare | `/plugin install architect-playbook@architect-playbook`, `/pre-audit-setup` | Install the skills and, optionally, build the knowledge graph that audits use to choose where to read first. |
 | 1 — Base plate | `/agentic-audit`, `/quality-gates-audit` | Establish whether the context layer is truthful and the gates are real before trusting anything else. |
 | 2 — Behaviour floor | `/testing-audit` | The safety net. Nothing else is safe to change until you know what the tests actually cover. |
 | 3 — Structure | `/architecture-audit` | Fix boundaries and coupling before polishing the code that sits inside them. |

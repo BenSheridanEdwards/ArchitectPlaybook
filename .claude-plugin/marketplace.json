@@ -1,0 +1,16 @@
+{
+  "name": "architect-playbook",
+  "description": "The Architect Playbook plugin: audits for TypeScript and React codebases.",
+  "owner": {
+    "name": "Ben Sheridan-Edwards",
+    "url": "https://github.com/BenSheridanEdwards"
+  },
+  "plugins": [
+    {
+      "name": "architect-playbook",
+      "source": "./",
+      "description": "Opinionated, evidence-verified audits of TypeScript and React codebases: architecture, testing, security, dependencies, quality gates, and more, with a Repository Quality Score.",
+      "category": "development"
+    }
+  ]
+}

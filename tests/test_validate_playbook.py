@@ -161,6 +161,85 @@ class ValidatePlaybookTests(unittest.TestCase):
             validate_playbook.validate_skills(Path(tmp), findings)
             self.assertFalse(any("argument-hint" in finding.message for finding in findings))
 
+    def write_plugin_repository(self, root: Path, skills: list[str]) -> None:
+        for name in ("example-audit", "install-architect-playbook-globally"):
+            (root / name).mkdir()
+            (root / name / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
+        (root / ".claude-plugin").mkdir()
+        (root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "architect-playbook", "skills": skills}), encoding="utf-8"
+        )
+        (root / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({"name": "architect-playbook", "owner": {"name": "Owner"}, "plugins": [{"name": "architect-playbook", "source": "./"}]}),
+            encoding="utf-8",
+        )
+
+    def test_plugin_manifest_lists_every_skill_but_the_installers(self) -> None:
+        cases = {
+            "complete": (["./example-audit"], []),
+            "missing": ([], ["plugin manifest skills is missing ./example-audit"]),
+            "unknown": (["./example-audit", "./ghost"], ["plugin manifest skills lists ./ghost, which is not a playbook skill"]),
+            "no prefix": (["example-audit"], ["plugin manifest skill path must be ./<skill-folder>: 'example-audit'"]),
+            "duplicate": (["./example-audit", "./example-audit"], ["plugin manifest skills lists ./example-audit more than once"]),
+            "installer": (
+                ["./example-audit", "./install-architect-playbook-globally"],
+                ["plugin manifest skills lists ./install-architect-playbook-globally, which is an installer, which a plugin install replaces"],
+            ),
+        }
+        for name, (skills, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_plugin_repository(root, skills)
+                findings: list[Any] = []
+                validate_playbook.validate_plugin_manifest(root, findings)
+                self.assertEqual([finding.message for finding in findings], expected)
+
+    def test_plugin_root_must_not_start_servers_or_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_plugin_repository(root, ["./example-audit"])
+            (root / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+            (root / "monitors").mkdir()
+            (root / "monitors" / "monitors.json").write_text("[]", encoding="utf-8")
+            manifest = root / ".claude-plugin" / "plugin.json"
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["experimental"] = {"monitors": [{"name": "poll", "command": "echo started", "description": "poll"}]}
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            messages = [finding.message for finding in findings]
+            self.assertEqual(sum("would load for every plugin user" in message for message in messages), 2)
+            self.assertIn("plugin manifest must not declare experimental; the playbook ships only skills and pins no version", messages)
+
+    def test_marketplace_lists_the_plugin_without_pinning_a_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_plugin_repository(root, ["./example-audit"])
+            path = root / ".claude-plugin" / "marketplace.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["plugins"][0]["version"] = "1.0.0"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            findings: list[Any] = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            self.assertEqual([finding.message for finding in findings], ["marketplace manifest must not pin a version; installs follow commits"])
+            del data["plugins"][0]["version"]
+            data["plugins"][0]["hooks"] = {"SessionStart": [{"hooks": [{"type": "command", "command": "echo"}]}]}
+            data["plugins"][0]["skills"] = ["./install-architect-playbook-globally"]
+            path.write_text(json.dumps(data), encoding="utf-8")
+            findings = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            self.assertEqual(
+                [finding.message for finding in findings],
+                [
+                    "marketplace entry must not declare hooks; components belong in plugin.json",
+                    "marketplace entry must not declare skills; components belong in plugin.json",
+                ],
+            )
+            path.unlink()
+            findings = []
+            validate_playbook.validate_plugin_manifest(root, findings)
+            self.assertEqual([finding.message for finding in findings], ["marketplace manifest is missing"])
+
     def test_valid_minimal_skill_repository_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

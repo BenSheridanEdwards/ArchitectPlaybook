@@ -109,8 +109,8 @@ class ProtocolError(Exception):
 def load_calculator() -> Any:
     if not CALCULATOR_PATH.is_file():
         raise ProtocolError(
-            "the Repository Quality Score calculator is missing; reinstall the audit with the playbook "
-            f"installer, which copies {CALCULATOR_PATH.relative_to(SKILLS_ROOT).as_posix()}"
+            "the Repository Quality Score calculator is missing; update the architect-playbook plugin, or "
+            f"reinstall the audit with the playbook installer, which copies {CALCULATOR_PATH.relative_to(SKILLS_ROOT).as_posix()}"
         )
     spec = importlib.util.spec_from_file_location("architect_playbook_calculator", CALCULATOR_PATH)
     if spec is None or spec.loader is None:
