@@ -213,7 +213,7 @@ For a non-technical explanation with formulas and a worked example, read
 
 ### Setup utilities
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/install-architect-playbook-locally`](install-architect-playbook-locally/SKILL.md) | Copy every playbook skill into the current project's `.claude/skills/`. |
 | [`/install-architect-playbook-globally`](install-architect-playbook-globally/SKILL.md) | Copy every playbook skill into `~/.claude/skills/`. |
@@ -277,19 +277,19 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 
 ### Scoring
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/repository-quality-score`](repository-quality-score/SKILL.md) | Aggregate completed audit findings into deterministic per-audit scores, one overall score, coverage, deductions, and an official, provisional, or unavailable status. Optional: `--current-worktree-only`. |
 
 ### Review
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/ben-architect-review`](ben-architect-review/SKILL.md) | Perform a principles-based architectural pull request review using Ben's judgement, then ask whether to post it as pending or submit it on GitHub. |
 
 ### Meta
 
-| Trigger | Purpose |
+| Command | Purpose |
 | --- | --- |
 | [`/system-self-improve`](system-self-improve/SKILL.md) | Read gap reports and evolve the playbook itself. |
 

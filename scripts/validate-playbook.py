@@ -178,7 +178,12 @@ def validate_skills(root: Path, findings: list[Finding]) -> None:
         if frontmatter.get("name") != expected_name:
             findings.append(Finding("error", skill_path, f"frontmatter name must be {expected_name!r}"))
         validate_invocation_frontmatter(skill_path, frontmatter, keys, findings)
-        if re.search(r"^argument-hint:\s*[\[{]", text.split("\n---", 1)[0], flags=re.MULTILINE):
+        header = text.split("\n---", 1)[0]
+        if re.search(r"^(?:disable-model-invocation|user-invocable):\s*['\"]", header, flags=re.MULTILINE):
+            findings.append(
+                Finding("error", skill_path, "frontmatter invocation flags must be unquoted true or false; YAML reads a quoted value as text")
+            )
+        if re.search(r"^argument-hint:\s*[\[{]", header, flags=re.MULTILINE):
             findings.append(
                 Finding("error", skill_path, "frontmatter argument-hint must be quoted; YAML reads an unquoted [ or { value as a list or map")
             )

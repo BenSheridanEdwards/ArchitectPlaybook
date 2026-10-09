@@ -133,6 +133,10 @@ class ValidatePlaybookTests(unittest.TestCase):
                 VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"', "argument-hint: [--worktree] [--learn]"),
                 "argument-hint must be quoted",
             ),
+            "quoted boolean": (
+                VALID_SKILL.replace("disable-model-invocation: true", 'disable-model-invocation: "true"'),
+                "must be unquoted true or false",
+            ),
             "argument hint": (
                 VALID_SKILL.replace('argument-hint: "[--worktree] [--learn]"\n', ""),
                 "must give an argument-hint",
