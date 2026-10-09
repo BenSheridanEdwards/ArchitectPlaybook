@@ -38,7 +38,7 @@ The plugin is the recommended install (`/plugin install architect-playbook@archi
 if [ "${FROM+set}" = set ]; then
   set -- "$FROM"                          # an explicit --from, even empty, must be valid; never fall back
 else
-  set -- "${CLAUDE_SKILL_DIR:-.}/.." "${CLAUDE_SKILL_DIR:-.}/../../.."
+  set -- "${CLAUDE_SKILL_DIR}/.." "${CLAUDE_SKILL_DIR}/../../.."   # Claude Code fills in this exact form
 fi
 PLAYBOOK_ROOT=""
 for candidate in "$@"; do
@@ -59,7 +59,7 @@ If the skill runs from an installed copy rather than a clone, ask the user for t
 python3 "$PLAYBOOK_ROOT/scripts/install_playbook.py" --destination "$(pwd)/.claude/skills" [--include <skill>]... [--exclude <skill>]...
 ```
 
-The script selects the skills, closes the selection over dependencies (Step 3 explains the rules), compares each skill with the destination by a digest of file names, contents, and symbolic links, and prints one line per skill: `installed`, `updated`, or `unchanged`. It writes nothing. It fails with a clear message on a dependency conflict or an invalid destination.
+The script selects the skills, closes the selection over dependencies (Step 3 explains the rules), compares each skill with the destination by a digest of file names, contents, and symbolic links, and prints one line per skill: `installed`, `updated`, or `unchanged`, plus `preserved` for each existing folder that is not a playbook skill. It writes nothing. It fails with a clear message on a dependency conflict or an invalid destination.
 
 ### Step 3 — Dependency rules the script applies
 

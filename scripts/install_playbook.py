@@ -46,9 +46,12 @@ def playbook_skills(root: Path) -> list[str]:
 
 def require_clone(root: Path) -> None:
     """The source must be a Git checkout of the playbook, including a worktree."""
-    completed = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
-    )
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
+        )
+    except OSError as error:
+        raise InstallError(f"cannot run git to check the clone: {error}") from error
     top = completed.stdout.strip()
     if completed.returncode != 0 or Path(top).resolve() != root.resolve() or not (root / PROTOCOL / "SKILL.md").is_file():
         raise InstallError(f"{root} is not a playbook clone; run the installer from a clone, or pass --from")
@@ -66,6 +69,8 @@ def select(root: Path, include: list[str], exclude: list[str]) -> tuple[list[str
     if unknown:
         raise InstallError(f"not a playbook skill: {', '.join(unknown)}")
     selected = set(include or available) - set(exclude)
+    if not selected:
+        raise InstallError("nothing to install: the filters exclude every skill")
     if SCORER in selected:
         missing = set(policy_audits(root)) - selected
         if missing & set(exclude):
@@ -159,6 +164,11 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
         else:
             status = "unchanged" if digest(target) == digest(root / name) else "updated"
         steps.append({"skill": name, "status": status})
+    preserved = sorted(
+        path.name
+        for path in (destination.iterdir() if destination.is_dir() else [])
+        if path.is_dir() and not path.name.startswith(".") and path.name not in playbook_skills(root)
+    )
     if calculator_only:
         target = destination / CALCULATOR
         source = root / CALCULATOR
@@ -167,11 +177,15 @@ def plan(root: Path, destination: Path, skills: list[str], calculator_only: bool
         scorer = destination / SCORER
         if scorer.exists():
             require_owned(scorer, SCORER)
-        if not target.exists():
+        if (scorer / "SKILL.md").exists():
+            # A full scorer is installed; its calculator belongs to it and is left alone.
+            status = "unchanged"
+        elif not target.exists():
             status = "installed"
         else:
             status = "unchanged" if target.read_bytes() == source.read_bytes() else "updated"
         steps.append({"skill": f"{SCORER} (calculator file only)", "status": status})
+    steps += [{"skill": name, "status": "preserved"} for name in preserved]
     return steps
 
 
@@ -220,7 +234,7 @@ def replace_file(source: Path, target: Path) -> None:
 def apply(root: Path, destination: Path, steps: list[dict[str, str]]) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for step in steps:
-        if step["status"] == "unchanged":
+        if step["status"] not in ("installed", "updated"):
             continue
         if step["skill"].endswith("(calculator file only)"):
             replace_file(root / CALCULATOR, destination / CALCULATOR)
@@ -262,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for step in steps:
             print(f"{step['status'] + ':':11} {step['skill']}")
-        written = sum(step["status"] != "unchanged" for step in steps)
+        written = sum(step["status"] in ("installed", "updated") for step in steps)
         verb = "written" if arguments.apply else "would be written"
         print(f"\n{len(steps)} skills checked; {written} {verb} into {destination}")
     return 0

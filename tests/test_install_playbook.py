@@ -245,6 +245,20 @@ class InstallPlaybookTests(unittest.TestCase):
         self.assertEqual((self.destination / installer.CALCULATOR).read_text(encoding="utf-8"), "calculator\n")
         self.assertFalse((self.destination / "one-audit" / "extra.md").exists())
 
+    def test_an_installed_full_scorer_keeps_its_calculator_and_others_are_reported(self) -> None:
+        installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, *installer.select(self.clone, ["repository-quality-score"], [])))
+        calculator = self.destination / installer.CALCULATOR
+        calculator.write_text("edited\n", encoding="utf-8")
+        (self.destination / "graphify").mkdir()
+        steps = installer.plan(self.clone, self.destination, *installer.select(self.clone, [], ["repository-quality-score"]))
+        statuses = {step["skill"]: step["status"] for step in steps}
+        self.assertEqual(statuses["repository-quality-score (calculator file only)"], "unchanged")
+        self.assertEqual(statuses["graphify"], "preserved")
+        installer.apply(self.clone, self.destination, steps)
+        self.assertEqual(calculator.read_text(encoding="utf-8"), "edited\n")
+        with self.assertRaises(installer.InstallError):
+            installer.select(self.clone, ["one-audit"], ["one-audit"])
+
     def test_only_a_claude_skills_folder_is_a_destination(self) -> None:
         installer.require_destination(self.destination)
         with self.assertRaises(installer.InstallError):
