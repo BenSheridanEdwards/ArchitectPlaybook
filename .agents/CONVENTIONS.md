@@ -16,17 +16,19 @@ change that breaks one of them fails the gate.
 
 ## Naming and language
 
-- No abbreviations in prose, identifiers, headings, or triggers. Spell every
+- No abbreviations in prose, identifiers, headings, or commands. Spell every
   word out (Documentation, not docs; Performance, not perf; Repository, not
   repo). Canonical ecosystem filenames such as `.gitignore`, `tsconfig.json`,
   and `package.json` keep their standard form.
-- A skill folder name matches its slash-command trigger. The frontmatter
-  `trigger` value equals `/<folder-name>` and `name` equals `<folder-name>`.
+- A skill folder name is its slash command: `name` equals `<folder-name>`.
 
 ## Skill frontmatter and body
 
-- Frontmatter keys start in this order: `name`, `description`, `trigger`. The
-  `description` is a single line.
+- Frontmatter keys start in this order: `name`, `description`. The
+  `description` is a single line. There is no `trigger` key.
+- Every skill sets `disable-model-invocation: true`, so it runs only when a user
+  invokes it. A user-invocable skill gives an `argument-hint` listing its flags;
+  a skill with `user-invocable: false` needs none.
 - A non-stub skill body includes `## Usage`, `## What this skill does`,
   `## Implementation steps`, and `## What this skill explicitly does NOT do`.
 - An audit's `## Usage` documents `--worktree` as a flag on the audit command

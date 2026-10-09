@@ -1,7 +1,8 @@
 ---
 name: architecture-audit
 description: Graphify-powered architectural audit of a TypeScript codebase. Produces a diagnostic snapshot + checks module boundaries, coupling, state/data flow, and conventions, with optional implementation plan.
-trigger: /architecture-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-run] [--pattern=<name>] [--learn]"
 ---
 
 # /architecture-audit

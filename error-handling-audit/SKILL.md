@@ -1,7 +1,8 @@
 ---
 name: error-handling-audit
 description: Audit a TypeScript codebase's error-handling discipline against an opinionated baseline spanning throw and catch hygiene, async and network error handling, React error boundaries, and logging and observability. Static-only by design. Optionally generates an implementation plan for the gaps.
-trigger: /error-handling-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--learn]"
 ---
 
 # /error-handling-audit

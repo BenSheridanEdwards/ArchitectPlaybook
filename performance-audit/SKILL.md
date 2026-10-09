@@ -1,7 +1,8 @@
 ---
 name: performance-audit
 description: Audit runtime performance patterns in a TypeScript/React frontend (render, network/data, assets/CWV, main-thread). Static-first with optional --with-lighthouse-results enrichment and implementation plan.
-trigger: /performance-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--with-lighthouse-results] [--lighthouse-results-path=<path>] [--learn]"
 ---
 
 # /performance-audit

@@ -296,9 +296,9 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 ## Conventions
 
 - **Conventional Commits** for every commit.
-- **No abbreviations** in skill names, triggers, descriptions, headings, identifiers, or prose.
+- **No abbreviations** in skill names, commands, descriptions, headings, identifiers, or prose.
 - **Read-only by default.** Mutating runs require an explicit `--apply` flag and print a dry-run summary first.
-- **Frontmatter shape** is fixed: `name`, `description`, `trigger`. The `trigger` value equals `/<folder-name>`.
+- **Frontmatter shape** is fixed: `name` (the folder name, which is also the slash command), `description`, `disable-model-invocation: true`, and an `argument-hint`.
 - **No hard-coded absolute paths** in skill bodies. Derive from the current working directory or `$HOME`.
 
 The full set of project-wide rules lives in [CLAUDE.md](CLAUDE.md).

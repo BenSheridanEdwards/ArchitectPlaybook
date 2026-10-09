@@ -1,7 +1,8 @@
 ---
 name: agentic-audit
 description: Audit a project's agentic instruction files (CLAUDE.md, AGENTS.md, .cursor/rules, .cursorrules, .github/copilot-instructions.md, Windsurf, Aider) and Claude Code settings (.claude/settings.json, .claude/settings.local.json) against an opinionated baseline covering project context coverage, operational guidance, settings hygiene, and multi-agent drift. Static-only with optional implementation plan.
-trigger: /agentic-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--threshold-<name>=<value>] [--learn]"
 ---
 
 # /agentic-audit

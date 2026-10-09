@@ -1,7 +1,8 @@
 ---
 name: linting-audit
 description: Audit a TypeScript project's lint configuration against an opinionated baseline spanning configuration shape, rule coverage, strictness and enforcement, and suppressions hygiene. Auto-detects ESLint or Biome. Static-first with optional --with-run enrichment. Optionally generates an implementation plan for the gaps.
-trigger: /linting-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--with-run] [--threshold-suppressions-per-file=<n>] [--learn]"
 ---
 
 # /linting-audit

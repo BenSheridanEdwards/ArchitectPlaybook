@@ -166,20 +166,18 @@ def validate_skills(root: Path, findings: list[Finding]) -> None:
         skill_path = directory / "SKILL.md"
         text = skill_path.read_text(encoding="utf-8")
         frontmatter, keys, body = parse_frontmatter(text)
-        expected_keys = ["name", "description", "trigger"]
-        if keys[:3] != expected_keys:
-            findings.append(Finding("error", skill_path, "frontmatter key order must start with name, description, trigger"))
+        expected_keys = ["name", "description"]
+        if keys[:2] != expected_keys:
+            findings.append(Finding("error", skill_path, "frontmatter key order must start with name, description"))
         for key in expected_keys:
             if key not in frontmatter or not frontmatter[key].strip():
                 findings.append(Finding("error", skill_path, f"frontmatter missing non-empty {key!r}"))
         if "\n" in frontmatter.get("description", ""):
             findings.append(Finding("error", skill_path, "frontmatter description must be one line"))
         expected_name = directory.name
-        expected_trigger = f"/{directory.name}"
         if frontmatter.get("name") != expected_name:
             findings.append(Finding("error", skill_path, f"frontmatter name must be {expected_name!r}"))
-        if frontmatter.get("trigger") != expected_trigger:
-            findings.append(Finding("error", skill_path, f"frontmatter trigger must be {expected_trigger!r}"))
+        validate_invocation_frontmatter(skill_path, frontmatter, keys, findings)
         if is_stub(body):
             continue
         for section in REQUIRED_SECTIONS:
@@ -187,6 +185,26 @@ def validate_skills(root: Path, findings: list[Finding]) -> None:
                 findings.append(Finding("error", skill_path, f"missing required section: {section}"))
         if directory.name.endswith("-audit"):
             validate_audit_contract(skill_path, body, findings)
+
+
+def validate_invocation_frontmatter(
+    skill_path: Path, frontmatter: dict[str, str], keys: list[str], findings: list[Finding]
+) -> None:
+    """Skills run only when a user asks, and say which arguments they take.
+
+    `trigger` is not a Claude Code field: the slash command is the skill name.
+    """
+    if "trigger" in keys:
+        findings.append(Finding("error", skill_path, "frontmatter must not use trigger; the slash command is the skill name"))
+    for key in ("disable-model-invocation", "user-invocable"):
+        if key in frontmatter and frontmatter[key] not in {"true", "false"}:
+            findings.append(Finding("error", skill_path, f"frontmatter {key} must be true or false"))
+    if frontmatter.get("disable-model-invocation") != "true":
+        findings.append(
+            Finding("error", skill_path, "frontmatter must set disable-model-invocation: true; playbook skills run only when a user invokes them")
+        )
+    if frontmatter.get("user-invocable") != "false" and not frontmatter.get("argument-hint", "").strip():
+        findings.append(Finding("error", skill_path, "frontmatter must give an argument-hint for the slash command's flags"))
 
 
 def validate_audit_contract(skill_path: Path, body: str, findings: list[Finding]) -> None:

@@ -1,7 +1,6 @@
 ---
 name: audit-protocol
 description: Shared run protocol, scripts, and reporting rules that every Architect Playbook audit follows. Audits load it by path; it is not run on its own.
-trigger: /audit-protocol
 user-invocable: false
 disable-model-invocation: true
 ---

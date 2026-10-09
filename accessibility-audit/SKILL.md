@@ -1,7 +1,8 @@
 ---
 name: accessibility-audit
 description: Audit a TypeScript/React frontend against an opinionated WCAG 2.2 AA baseline (tooling, component patterns, application shell) with optional implementation plan.
-trigger: /accessibility-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--severity=error] [--learn]"
 ---
 
 # /accessibility-audit

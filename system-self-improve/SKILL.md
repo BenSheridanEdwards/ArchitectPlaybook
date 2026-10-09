@@ -1,7 +1,8 @@
 ---
 name: system-self-improve
 description: The meta-improvement layer of the architect-playbook. Reads a review's gap report (or a user-supplied gap, or audit-history patterns), locates the affected SKILL.md and adjacent files, and proposes a minimal reversible edit to the playbook so the same class of gap is more likely to be caught next time. Dry-run by default; --apply enables mutation but always prompts for confirmation.
-trigger: /system-self-improve
+disable-model-invocation: true
+argument-hint: "[--gap-report=<path>] [--target-skill=<name>] [--plan] [--apply]"
 ---
 
 # /system-self-improve

@@ -1,7 +1,8 @@
 ---
 name: install-architect-playbook-globally
 description: Copy every architect-playbook skill into ~/.claude/skills/ so the slash commands are available in every Claude Code session on this machine.
-trigger: /install-architect-playbook-globally
+disable-model-invocation: true
+argument-hint: "[--dry-run] [--force] [--include=<skill>] [--exclude=<skill>]"
 ---
 
 # /install-architect-playbook-globally

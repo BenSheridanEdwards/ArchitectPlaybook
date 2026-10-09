@@ -1,7 +1,8 @@
 ---
 name: typescript-audit
 description: Audit a TypeScript project's type discipline against an opinionated baseline spanning compiler configuration, type quality in source, type system usage, and type safety at IO boundaries. Static-first with optional --with-run enrichment from tsc --noEmit. Optionally generates an implementation plan for the gaps.
-trigger: /typescript-audit
+disable-model-invocation: true
+argument-hint: "[--worktree] [--with-run] [--threshold-<name>=<value>] [--learn]"
 ---
 
 # /typescript-audit
