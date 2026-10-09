@@ -125,6 +125,10 @@ class ValidatePlaybookTests(unittest.TestCase):
                 VALID_SKILL.replace("disable-model-invocation: true\n", ""),
                 "must set disable-model-invocation: true",
             ),
+            "substitution with a default": (
+                VALID_SKILL + '\nRun `python3 "${CLAUDE_SKILL_DIR:-.}/scripts/x.py"`.\n',
+                "write ${CLAUDE_SKILL_DIR} exactly",
+            ),
             "invalid boolean": (
                 VALID_SKILL.replace("disable-model-invocation: true", "disable-model-invocation: yes"),
                 "disable-model-invocation must be true or false",
