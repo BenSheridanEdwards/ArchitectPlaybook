@@ -1,6 +1,6 @@
 ---
 name: testing-audit
-description: Audit whether a JavaScript or TypeScript project's tests would fail if the product broke — runner, lint, and coverage facts from a collector, a pre-filter for hollow tests, risk-ranked judgement, and optional mutation testing.
+description: Audit whether a JavaScript or TypeScript project's tests would fail if the product broke — runner and lint facts from a collector, a pre-filter for hollow tests, risk-ranked judgement, and optional mutation testing.
 disable-model-invocation: true
 argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-mutation] [--learn|--teach]"
 ---
@@ -9,15 +9,15 @@ argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-mutation] [-
 
 Find out whether a project's tests would catch the bugs that matter, and which tests to fix, add, or retire first.
 
-The audit asks one question of every test it reads: **would this fail if the behaviour it names broke?** It applies to any JavaScript or TypeScript project: a Node service, a library, a command-line tool, or a web application. The component layer applies only when the project has a user interface.
+The audit asks one question of every test it reads: **would this fail if the behaviour it names broke?** It applies to any project with JavaScript or TypeScript product code or tests: a Node service, a library, a command-line tool, or a web application. The component layer applies only when the project has a user interface. When the only scripts are tooling, such as a commit-lint configuration in a Python repository, the collector marks every check not applicable; record the whole audit with `audit-not-applicable`.
 
 It has four sources:
-- a deterministic collector, which detects runners, focused and skipped tests, coverage thresholds, and the Testing Library and jest-dom lint rules (read statically from the ESLint configuration);
+- a deterministic collector, which detects runners, focused and skipped tests, and the Testing Library and jest-dom lint rules that apply to the test files (read statically from the ESLint configuration);
 - a mechanical pre-filter in the collector, which flags tests whose shape suggests they cannot fail;
 - the judgement of the model, spent on the riskiest code first: Git churn hotspots and high fan-in modules;
 - optionally, a Stryker mutation run on the five riskiest files (`--with-mutation`).
 
-It is static and read-only by default. Only `--with-mutation` runs the project's tests, inside Stryker's sandbox.
+It is static and read-only by default. Only `--with-mutation` runs the project's tests: the collector forces Stryker to mutate a sandbox copy (`inPlace: false`) and sends its report, log, and sandbox under `.architect-audits/testing-audit/mutation/`.
 
 **Testing philosophy.** The audit grades with three principles. Test behaviour, not implementation: assert what a user or caller observes. Snapshots are a smell: a snapshot nobody reviewed is an expected value copied from the code. Assert on meaning, not styling: a role, a label, or a semantic token, never a raw utility class.
 
@@ -41,12 +41,12 @@ It is static and read-only by default. Only `--with-mutation` runs the project's
 | Concern | Owner |
 | --- | --- |
 | Whether the tests would catch bugs, how they mock, and whether critical paths are covered above the unit level | `/testing-audit` |
-| Whether tests, coverage, and end-to-end suites run in hooks and continuous integration | `/quality-gates-audit` |
+| Whether coverage thresholds exist and are enforced, and whether tests and end-to-end suites run in hooks and continuous integration | `/quality-gates-audit` |
 | Whether change hotspots are cohesive and well designed | `/architecture-audit` |
 | Whether error paths are handled at all | `/error-handling-audit` |
 | Automated accessibility scans and performance measurement in end-to-end runs | `/accessibility-audit`, `/performance-audit` |
 
-The runner, coverage, and critical-path checks name their quality-gates counterparts in `relatedChecks`; this audit rates only what those checks do not: whether the suite exists, runs, and tests the right things.
+The runner and critical-path checks name their quality-gates counterparts in `relatedChecks`; this audit rates only what those checks do not: whether the suite exists, runs, and tests the right things. Coverage thresholds are `quality-gates-audit.coverage-threshold-enforced`'s concern; the collector records where they live as a snapshot fact and does not rate them here.
 
 ## The baseline
 
@@ -57,7 +57,8 @@ Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violat
 The collector records:
 - runners, test files by kind (unit, integration, component, Vitest browser mode, Playwright component, end-to-end), the number of tests, and Storybook stories with `play` functions;
 - user-interface frameworks, Testing Library packages, database clients, Mock Service Worker setups, and Testcontainers or other integration tooling;
-- package scripts and continuous-integration lines that run tests, and where coverage thresholds live;
+- package scripts and continuous-integration lines that run tests, and where coverage thresholds live (a cross-reference for `/quality-gates-audit`, not graded here);
+- source files too large to read, which degrade the focus check;
 - module mocks of the repository's own modules, flake signals, and Testing Library query and interaction counts;
 - the risk ranking (churn plus fan-in), untested risky files, the mutation targets, and the pre-filter's candidates.
 
@@ -67,9 +68,8 @@ Add the critical paths you identify, and which test level covers each.
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Tests run under a configured runner | high | tool | Test files exist, a runner is declared, and a package script runs it. | No tests, tests with no runner, or no script that runs them (partial). |
+| Tests run under a configured runner | high | tool | Test files exist, a runner is declared, and a package script runs it. An unrecognised `test` command leaves the check not evaluated. | No tests, tests with no runner, or no script that runs them (partial). |
 | No focused or skipped tests committed | medium | tool | No `.only`, `fit`, or `fdescribe`; no `.skip`, `xit`, `.todo`, or `.fixme` left behind. | A focused test (violation); skipped or to-do tests (partial). |
-| Coverage thresholds configured | medium | tool | The unit or integration runner sets thresholds, and something collects coverage so they can fail. | No thresholds (missing), or thresholds nothing enforces (partial). |
 
 ### Layer 2 — Test effectiveness
 
@@ -94,8 +94,8 @@ The collector records these checks as not applicable when the project has no use
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Testing Library lint rules enforced | medium | tool | eslint-plugin-testing-library's framework configuration plus `prefer-user-event` and `prefer-explicit-assert`, covering the twelve rules in the detection notes. | Plugin not enabled (missing), or some rules off (partial). |
-| jest-dom lint rules enforced | low | tool | eslint-plugin-jest-dom's recommended rules are on. | Plugin not enabled (missing), or some rules off (partial). |
+| Testing Library lint rules enforced | medium | tool | For the component test files, eslint-plugin-testing-library's framework configuration plus `prefer-user-event` and `prefer-explicit-assert`, covering the twelve rules in the detection notes. | Plugin not enabled for test files (missing), or some rules off (partial). |
+| jest-dom lint rules enforced | low | tool | For the component test files, eslint-plugin-jest-dom's recommended rules are on. | Plugin not enabled for test files (missing), or some rules off (partial). |
 | Components tested through what users perceive | medium | model | Queries by role, label, or text; user-event or a real browser; assertions on what users see. | Test IDs or selectors as the norm, assertions on state, props, or raw utility classes, or snapshots in place of assertions. |
 
 ## Judging a test
@@ -126,9 +126,9 @@ Classify each candidate as **real**, **hollow**, **mirror** (it asserts that an 
    ```
 
    - Pass `--since <ref>` for a diff-scoped run, and `--threshold months=<n>` for `--months`.
-   - Pass `--enrichment with-mutation` for `--with-mutation`. The collector then runs Stryker itself, writing only under `.architect-audits/testing-audit/mutation/`, and records the mutation check. If Stryker is missing, fails, or times out, the check is not evaluated with the reason.
+   - Pass `--enrichment with-mutation` for `--with-mutation`. The collector then runs Stryker itself on a sandbox copy, writing only under `.architect-audits/testing-audit/mutation/`, and records the mutation check. Stryker gets what is left of the protocol's 600-second collector limit after the scan, less a margin, and at most seven minutes. If Stryker is missing, fails, or runs out of time, the check is not evaluated with the reason.
 2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/testing-audit/.staging/run.json`: `riskRanking`, `untestedRiskyFiles`, `preFilter`, `moduleMocks`, `flakeSignals`, and `firstClassTooling`. Identify the critical paths from routes, handlers, and the risk ranking, and record them with `snapshot --set criticalPaths=<json>`.
-3. **Read within the discovery budget.** Read the tests of the five highest-ranked modules, then the first 25 pre-filter candidates in their ranked order. Widen by another 25 only while more than a third of what you read is hollow or a mirror. Record what you sampled with `snapshot --set sampled=<json>`.
+3. **Read within the discovery budget.** Read the tests of the five highest-ranked modules, then the first 25 pre-filter candidates in their ranked order. Widen by another 25 only while more than a third of what you read is hollow or a mirror, up to the 100 candidates the snapshot lists. Record what you sampled with `snapshot --set sampled=<json>`.
 4. **Evaluate every model check.**
    - Apply "Judging a test" and the detection notes.
    - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
@@ -163,9 +163,10 @@ The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `
 
 ## What this skill explicitly does NOT do
 
-- Modify, add, or delete any test, configuration, or source file. The only writes are under `.architect-audits/testing-audit/`, through the protocol and, with `--with-mutation`, Stryker.
+- Modify, add, or delete any test, configuration, or source file. The only writes are under `.architect-audits/testing-audit/`, through the protocol and, with `--with-mutation`, Stryker's sandbox, report, and log.
 - Install packages, or run ESLint. Lint rules are read from the configuration as text.
 - Run the test suite, end-to-end suites, or a browser, except Stryker's sandboxed runs with `--with-mutation`.
+- Rate coverage thresholds. `/quality-gates-audit` owns them.
 - Require a test file per component or module. One integration test can cover a page of components.
 - Treat coverage as proof of effectiveness, or grade a test by its shape alone. The pre-filter only chooses what to read.
 - Audit languages other than JavaScript and TypeScript.
