@@ -125,7 +125,11 @@ def require_no_links(destination: Path, relative: Path) -> None:
 
 def calculator_only_install(folder: Path) -> bool:
     """Whether a scorer folder holds nothing but the calculator file an earlier audit install copied."""
-    files = [path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file() and "__pycache__" not in path.parts]
+    files = [
+        path.relative_to(folder).as_posix()
+        for path in folder.rglob("*")
+        if path.is_file() and not SKIPPED_NAMES.intersection(path.relative_to(folder).parts)
+    ]
     return files == [CALCULATOR.relative_to(SCORER).as_posix()]
 
 

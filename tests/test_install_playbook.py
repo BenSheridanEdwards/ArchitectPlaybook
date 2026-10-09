@@ -148,6 +148,7 @@ class InstallPlaybookTests(unittest.TestCase):
     def test_a_calculator_only_install_can_become_the_full_scorer(self) -> None:
         skills, calculator_only = installer.select(self.clone, ["one-audit"], [])
         installer.apply(self.clone, self.destination, installer.plan(self.clone, self.destination, skills, calculator_only))
+        (self.destination / "repository-quality-score" / ".DS_Store").write_bytes(b"finder")
         skills, calculator_only = installer.select(self.clone, ["repository-quality-score"], [])
         steps = installer.plan(self.clone, self.destination, skills, calculator_only)
         self.assertEqual({step["skill"]: step["status"] for step in steps}["repository-quality-score"], "updated")
