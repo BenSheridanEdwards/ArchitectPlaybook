@@ -7,4 +7,3 @@ Only unsupported audit
 exit=0; status=provisional; score=100
 auditsSelected=1; checksEvaluated=2
 excludedCandidates=0
-

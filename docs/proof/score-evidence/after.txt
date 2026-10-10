@@ -7,4 +7,3 @@ Only unsupported audit
 exit=2; status=unavailable; score=None
 auditsSelected=0; checksEvaluated=0
 excludedCandidates=1
-
