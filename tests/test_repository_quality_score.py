@@ -361,6 +361,44 @@ class RepositoryQualityScoreTests(unittest.TestCase):
         self.assertEqual(metadata["runIdentifier"], result["runIdentifier"])
         self.assertEqual(metadata["runFinishedAt"], result["runFinishedAt"])
 
+    def test_unevidenced_canonical_checks_cannot_produce_an_official_score(self) -> None:
+        for evidence in ([], [""], [" \t"], ["tracked.txt", " "]):
+            for quality in ("complete", "degraded"):
+                with self.subTest(evidence=evidence, quality=quality):
+                    findings = self._canonical_findings("audit-one", ["present", "present"])
+                    check = findings["checks"][0]
+                    check["evidence"] = evidence
+                    check["evidenceQuality"] = quality
+                    check["evaluationReason"] = "fallback method" if quality == "degraded" else None
+                    self._write_findings("audit-one", findings)
+                    self._write_findings(
+                        "audit-two", self._canonical_findings("audit-two", ["present"])
+                    )
+
+                    completed = self._run_score()
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    result = self._score_json()
+                    self.assertEqual(result["status"], "provisional")
+                    self.assertEqual(result["coverage"]["auditsSelected"], 1)
+                    self.assertEqual(result["missingAudits"], ["audit-one"])
+                    self.assertTrue(result["excludedCandidates"])
+                    self.assertIn("evidence", str(result["excludedCandidates"]))
+
+    def test_only_unevidenced_findings_leave_the_score_unavailable(self) -> None:
+        findings = self._canonical_findings("audit-one", ["present", "present"])
+        for check in findings["checks"]:
+            check["evidence"] = []
+        self._write_findings("audit-one", findings)
+
+        completed = self._run_score()
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        result = self._score_json()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIsNone(result["overallScore"])
+        self.assertEqual(result["coverage"]["checksEvaluated"], 0)
+
     def test_filtered_or_degraded_canonical_evidence_is_provisional(self) -> None:
         self._write_findings(
             "audit-one",

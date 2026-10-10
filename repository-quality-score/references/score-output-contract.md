@@ -12,6 +12,14 @@ applicable evaluated check contributes according to status. A non-applicable
 check is excluded. An applicable check that was not evaluated is excluded and
 reduces assessment coverage.
 
+Canonical evidence entries must be nonblank strings. Every applicable evaluated
+check needs at least one entry, for both complete and degraded evidence. A
+candidate that violates this structure is excluded; it cannot contribute a score
+or assessment coverage. Not-applicable and not-evaluated checks may have empty
+evidence lists. The calculator validates presence, not citation truth: the audit
+protocol verifies evidence against the repository when recording and finishing
+a run.
+
 ## Score formulas
 
 ```text

@@ -572,8 +572,8 @@ def _canonical_check(
         if optional_value is not None and not isinstance(optional_value, str):
             raise ScoreInputError(f"{check_id}.{optional_name} must be a string or null")
     evidence_raw = require_list(item.get("evidence", []), f"{check_id}.evidence")
-    if any(not isinstance(entry, str) for entry in evidence_raw):
-        raise ScoreInputError(f"{check_id}.evidence entries must be strings")
+    if any(not isinstance(entry, str) or not entry.strip() for entry in evidence_raw):
+        raise ScoreInputError(f"{check_id}.evidence entries must be non-empty strings")
 
     if applicability == "not-applicable":
         if (
@@ -590,6 +590,8 @@ def _canonical_check(
     elif applicability_reason is not None:
         raise ScoreInputError(f"{check_id} applicable checks cannot have applicabilityReason")
     elif evaluation == "evaluated":
+        if not evidence_raw:
+            raise ScoreInputError(f"{check_id} evaluated checks need at least one evidence entry")
         if status not in catalog_check.allowed_statuses or evidence_quality == "none":
             raise ScoreInputError(
                 f"{check_id} evaluated checks need an allowed status and evidence quality"
