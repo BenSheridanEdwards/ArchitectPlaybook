@@ -30,8 +30,8 @@ Its Vitest configuration sets global lines and functions thresholds to 100%.
 The fixture source is in `reproduce.py`. To repeat the runner corroboration,
 copy its package/config/source files to a disposable directory, install the
 four exact tool versions there, and run those two commands. The absolute runner
-fixture path in the receipts is replaced with `<fixture>`; other output is
-retained. An initial isolated Vitest attempt with Vite 7.3.7 failed before tests
+fixture path in the receipts is replaced with `<fixture>` and trailing spaces
+are removed; other output is retained. An initial isolated Vitest attempt with Vite 7.3.7 failed before tests
 ran (`Unknown method: getBuiltins`); the successful receipts use the pinned
 Vite version above. Those proof dependencies are not shipped dependencies.
 

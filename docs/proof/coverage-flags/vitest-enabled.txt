@@ -10,10 +10,10 @@ RUN  v4.0.0 <fixture>
 
  % Coverage report from v8
 ---------------|---------|----------|---------|---------|-------------------
-File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ---------------|---------|----------|---------|---------|-------------------
-All files      |      50 |      100 |      50 |      50 |                   
- arithmetic.js |      50 |      100 |      50 |      50 | 5                 
+All files      |      50 |      100 |      50 |      50 |
+ arithmetic.js |      50 |      100 |      50 |      50 | 5
 ---------------|---------|----------|---------|---------|-------------------
 ERROR: Coverage for lines (50%) does not meet global threshold (100%)
 ERROR: Coverage for functions (50%) does not meet global threshold (100%)
