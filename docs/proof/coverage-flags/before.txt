@@ -1,0 +1,21 @@
+{
+  "script": "vitest run --coverage=false",
+  "status": "present",
+  "collectedBy": [
+    "package.json \u2014 `--coverage`"
+  ]
+}
+{
+  "script": "vitest run --coverage.provider=v8",
+  "status": "present",
+  "collectedBy": [
+    "package.json \u2014 `--coverage`"
+  ]
+}
+{
+  "script": "vitest run --coverage.enabled",
+  "status": "present",
+  "collectedBy": [
+    "package.json \u2014 `--coverage`"
+  ]
+}

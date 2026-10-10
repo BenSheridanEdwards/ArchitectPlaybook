@@ -1,0 +1,22 @@
+{
+  "script": "vitest run --coverage=false --coverage=true",
+  "status": "present",
+  "collectedBy": [
+    "package.json \u2014 `--coverage=true`"
+  ]
+}
+{
+  "script": "vitest run --coverage --testNamePattern 'adds|subtracts' --coverage=false",
+  "status": "present",
+  "collectedBy": [
+    "package.json \u2014 `--coverage`"
+  ]
+}
+{
+  "script": "vitest run ",
+  "workflowStepName": "Replace nyc coverage with Vitest",
+  "status": "present",
+  "collectedBy": [
+    ".github/workflows/ci.yml:4 \u2014 `nyc`"
+  ]
+}
