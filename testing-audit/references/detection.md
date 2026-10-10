@@ -53,7 +53,13 @@ modules, custom matchers, and page objects.
     `--test-coverage-lines` and its siblings.
   - Thresholds fail a run only when coverage is collected: `coverage.enabled`,
     `collectCoverage`, `--coverage` in a script or workflow, or c8 or nyc
-    wrapping the run. Thresholds with none of these are partial.
+    wrapping the run. Thresholds with none of these are partial. CLI evidence
+    requires a collection flag (`--coverage` or `--coverage.enabled`, bare or
+    explicitly `true`); a `false` value or a provider, reporter, or threshold
+    sub-option alone does not enable collection. A later collection flag in
+    the same command determines its CLI evidence. Separate shell commands are
+    scanned independently. This is a static inventory, not evaluation of
+    effective configuration or arbitrary shell expressions.
 
 ## Layer 2: test effectiveness
 

@@ -1112,6 +1112,24 @@ def object_block(text: str, key: str) -> str | None:
     return text[opening:closing + 1] if closing != -1 else text[opening:]
 
 
+def coverage_collection_flag(command: str) -> str | None:
+    """Find an enabled collection option, not a coverage sub-option or false value."""
+    for fragment in re.split(r"[;&|]", command):
+        matches = list(re.finditer(
+            r"(?<![\w-])--(?:coverage(?:\.enabled)?|experimental-test-coverage)"
+            r"(?:=['\"]?(?:true|false)['\"]?|\s+['\"]?(?:true|false)['\"]?)?(?=$|[\s'\";&|])",
+            fragment,
+        ))
+        if matches:
+            flag = matches[-1].group(0)
+            if not re.search(r"(?:=|\s)['\"]?false['\"]?$", flag):
+                return flag
+        wrapper = re.search(r"(?<![\w-])(?:c8|nyc)\s", fragment)
+        if wrapper:
+            return wrapper.group(0).strip()
+    return None
+
+
 def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows: list[str]) -> dict[str, Any]:
     thresholds: list[str] = []
     enabled: list[str] = []
@@ -1152,14 +1170,14 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
         match = re.search(r"--coverage\.thresholds\.\w+=\d+|--test-coverage-(?:lines|branches|functions)=\d+|\bc8\b[^&|;]*--check-coverage|\bnyc\b[^&|;]*--check-coverage", fragment)
         if match:
             thresholds.append(cite_file(path, match.group(0)))
-        match = re.search(r"--coverage\b(?!\.thresholds)|--experimental-test-coverage|(?<![\w-])(?:c8|nyc)\s", fragment)
-        if match:
-            enabled.append(cite_file(path, match.group(0).strip()))
+        flag = coverage_collection_flag(fragment)
+        if flag:
+            enabled.append(cite_file(path, flag))
     for path in workflows:
         for number, line in enumerate(read_text(root / path).split("\n"), start=1):
-            match = re.search(r"--coverage\b|--experimental-test-coverage", line.split("#", 1)[0])
-            if match:
-                enabled.append(cite(path, number, match.group(0)))
+            flag = coverage_collection_flag(line.split("#", 1)[0])
+            if flag:
+                enabled.append(cite(path, number, flag))
     return {"thresholds": thresholds, "enabled": enabled}
 
 

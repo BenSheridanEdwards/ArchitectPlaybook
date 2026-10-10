@@ -1,0 +1,19 @@
+RUN  v4.0.0 <fixture>
+      Coverage enabled with v8
+
+ ✓ src/arithmetic.test.js (1 test) 1ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  12:37:31
+   Duration  137ms (transform 11ms, setup 0ms, collect 18ms, tests 1ms, environment 0ms, prepare 15ms)
+
+ % Coverage report from v8
+---------------|---------|----------|---------|---------|-------------------
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------|---------|----------|---------|---------|-------------------
+All files      |      50 |      100 |      50 |      50 |                   
+ arithmetic.js |      50 |      100 |      50 |      50 | 5                 
+---------------|---------|----------|---------|---------|-------------------
+ERROR: Coverage for lines (50%) does not meet global threshold (100%)
+ERROR: Coverage for functions (50%) does not meet global threshold (100%)
