@@ -1,0 +1,16 @@
+{
+  "script": "vitest run --coverage=false --coverage=true",
+  "status": "partial",
+  "collectedBy": []
+}
+{
+  "script": "vitest run --coverage --testNamePattern 'adds|subtracts' --coverage=false",
+  "status": "partial",
+  "collectedBy": []
+}
+{
+  "script": "vitest run ",
+  "workflowStepName": "Replace nyc coverage with Vitest",
+  "status": "partial",
+  "collectedBy": []
+}

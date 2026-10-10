@@ -36,8 +36,29 @@ ran (`Unknown method: getBuiltins`); the successful receipts use the pinned
 Vite version above. Those proof dependencies are not shipped dependencies.
 
 Automated regressions cover scripts and workflow lines, bare/valued/quoted
-booleans, coverage sub-options, later overrides, separate shell commands,
+booleans, coverage sub-options, duplicate options, quoted separators, shell commands,
 node:test and c8/nyc controls, and the public collector CLI. The collector stays
 a static inventory; it does not evaluate arbitrary shell/config expressions or
 prove that every observed command is executed in CI. No UI changed, so
 screenshots and video are not applicable.
+
+## Independent adversarial review
+
+The review of the initial PR head found two P2 findings: wrapper names in
+workflow descriptions had acquired collection credit, and the new last-value
+precedence assumption was invalid for Vitest. A quoted separator could also
+split a single invocation before its duplicate flag. All are now covered by
+regressions and corrected. Duplicate collection options are conservatively
+uncredited; shell separators are recognized outside quotes; package wrapper
+evidence is preserved without extending it to workflow descriptions.
+
+```sh
+python3 docs/proof/coverage-flags/reproduce.py --review
+```
+
+`review-before.txt` uses the initial PR collector; `review-after.txt` uses the
+corrected branch. `vitest-duplicate.txt` records the real runner rejecting a
+duplicated coverage option before tests run, with exit 1. These review cases
+failed in 16 regression subcases on the initial PR head. Quoted workflow run
+values retain their positive/negative controls. The original three-scenario
+before/after receipts above remain valid.

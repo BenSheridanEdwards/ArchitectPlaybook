@@ -265,8 +265,8 @@ class CoverageTests(CollectorTestCase):
             for flag in (
                 "--coverage", "--coverage=true", "--coverage true", "--coverage='true'", '--coverage "true"',
                 "--coverage.enabled", "--coverage.enabled=true", "--coverage.enabled true",
-                "--coverage.enabled=false --coverage.enabled=true",
                 "--coverage=false && vitest run --coverage",
+                "--coverage && vitest run --coverage=false",
             ):
                 with self.subTest(source=source, flag=flag):
                     command = f"vitest run {flag}"
@@ -274,6 +274,48 @@ class CoverageTests(CollectorTestCase):
                     self.write(".github/workflows/ci.yml", f"jobs:\n  test:\n    steps:\n      - run: {command if source == 'workflow' else 'npm test'}\n")
                     self.commit()
                     self.assertEqual(self.check(self.collect(), "coverage-thresholds-configured")["status"], "present")
+
+    def test_duplicate_coverage_options_do_not_claim_collection(self) -> None:
+        self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 100 } } } };\n")
+        for source in ("script", "workflow"):
+            for flags in (
+                "--coverage=false --coverage=true",
+                "--coverage.enabled=false --coverage.enabled=true",
+                "--coverage --testNamePattern 'adds|subtracts' --coverage=false",
+                "--coverage --testNamePattern='adds|subtracts' --coverage=false",
+                "--coverage --testNamePattern '|' --coverage=false",
+                "--coverage --testNamePattern 'adds;subtracts' --coverage=false",
+                "--coverage --testNamePattern 'adds&subtracts' --coverage=false",
+            ):
+                with self.subTest(source=source, flags=flags):
+                    command = f"vitest run {flags}"
+                    self.package({**VITEST_PACKAGE, "scripts": {"test": command if source == "script" else "vitest run"}})
+                    self.write(".github/workflows/ci.yml", f"jobs:\n  test:\n    steps:\n      - run: {command if source == 'workflow' else 'npm test'}\n")
+                    self.commit()
+                    result = self.collect()
+                    self.assertEqual(self.check(result, "coverage-thresholds-configured")["status"], "partial")
+                    self.assertEqual(result["snapshot"]["coverage"]["collectedBy"], [])
+
+    def test_workflow_step_names_do_not_turn_wrappers_into_collection(self) -> None:
+        self.package(VITEST_PACKAGE)
+        self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 100 } } } };\n")
+        for wrapper in ("c8", "nyc"):
+            with self.subTest(wrapper=wrapper):
+                self.write(".github/workflows/ci.yml", f"jobs:\n  test:\n    steps:\n      - name: Replace {wrapper} coverage with Vitest\n        run: npm test\n")
+                self.commit()
+                result = self.collect()
+                self.assertEqual(self.check(result, "coverage-thresholds-configured")["status"], "partial")
+                self.assertEqual(result["snapshot"]["coverage"]["collectedBy"], [])
+
+    def test_quoted_workflow_run_values_keep_their_collection_semantics(self) -> None:
+        self.package(VITEST_PACKAGE)
+        self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 100 } } } };\n")
+        for quote in ("'", '\"'):
+            for flag, status in (("--coverage", "present"), ("--coverage=false", "partial"), ("--coverage.provider=v8", "partial")):
+                with self.subTest(quote=quote, flag=flag):
+                    self.write(".github/workflows/ci.yml", f"jobs:\n  test:\n    steps:\n      - run: {quote}vitest run {flag}{quote}\n")
+                    self.commit()
+                    self.assertEqual(self.check(self.collect(), "coverage-thresholds-configured")["status"], status)
 
     def test_node_coverage_and_c8_nyc_wrappers_still_count(self) -> None:
         self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 100 } } } };\n")

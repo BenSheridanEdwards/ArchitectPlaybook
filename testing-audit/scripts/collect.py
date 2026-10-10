@@ -31,6 +31,7 @@ import argparse
 import difflib
 import json
 import re
+import shlex
 import subprocess
 import sys
 from collections import Counter
@@ -1114,19 +1115,44 @@ def object_block(text: str, key: str) -> str | None:
 
 def coverage_collection_flag(command: str) -> str | None:
     """Find an enabled collection option, not a coverage sub-option or false value."""
-    for fragment in re.split(r"[;&|]", command):
-        matches = list(re.finditer(
-            r"(?<![\w-])--(?:coverage(?:\.enabled)?|experimental-test-coverage)"
-            r"(?:=['\"]?(?:true|false)['\"]?|\s+['\"]?(?:true|false)['\"]?)?(?=$|[\s'\";&|])",
-            fragment,
-        ))
-        if matches:
-            flag = matches[-1].group(0)
-            if not re.search(r"(?:=|\s)['\"]?false['\"]?$", flag):
-                return flag
-        wrapper = re.search(r"(?<![\w-])(?:c8|nyc)\s", fragment)
-        if wrapper:
-            return wrapper.group(0).strip()
+    fragments: list[str] = []
+    start = 0
+    quote = ""
+    escaped = False
+    for index, character in enumerate(command):
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            if character == quote:
+                quote = ""
+        elif character in "'\"":
+            quote = character
+        elif character in ";&|\n":
+            fragments.append(command[start:index])
+            start = index + 1
+    fragments.append(command[start:])
+    for fragment in fragments:
+        try:
+            tokens = shlex.split(fragment, comments=True)
+        except ValueError:
+            continue
+        flags: list[tuple[str, str]] = []
+        for index, token in enumerate(tokens):
+            name, assignment, value = token.partition("=")
+            if name not in ("--coverage", "--coverage.enabled", "--experimental-test-coverage"):
+                continue
+            flag = token
+            if not assignment:
+                value = "true"
+                if index + 1 < len(tokens) and tokens[index + 1] in ("true", "false"):
+                    value = tokens[index + 1]
+                    flag += " " + value
+            flags.append((flag, value))
+        # Duplicate flags can be rejected by the runner; do not invent precedence.
+        if len(flags) == 1 and flags[0][1] == "true":
+            return flags[0][0]
     return None
 
 
@@ -1171,11 +1197,20 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
         if match:
             thresholds.append(cite_file(path, match.group(0)))
         flag = coverage_collection_flag(fragment)
+        if not flag:
+            wrapper = re.search(r"(?<![\w-])(?:c8|nyc)\s", fragment)
+            flag = wrapper.group(0).strip() if wrapper else None
         if flag:
             enabled.append(cite_file(path, flag))
     for path in workflows:
         for number, line in enumerate(read_text(root / path).split("\n"), start=1):
-            flag = coverage_collection_flag(line.split("#", 1)[0])
+            fragment = line.split("#", 1)[0].strip()
+            inline_run = re.match(r"(?:-\s*)?run:\s*(.+)", fragment)
+            if inline_run:
+                fragment = inline_run.group(1)
+                if fragment[:1] in ("'", '"') and fragment[-1:] == fragment[:1]:
+                    fragment = fragment[1:-1]
+            flag = coverage_collection_flag(fragment)
             if flag:
                 enabled.append(cite(path, number, flag))
     return {"thresholds": thresholds, "enabled": enabled}
