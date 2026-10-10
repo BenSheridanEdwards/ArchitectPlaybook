@@ -242,7 +242,7 @@ Every audit accepts the universal `--worktree`, `--learn`, and `--teach` flags. 
 #### Code quality
 
 - **[Architecture](architecture-audit/SKILL.md)** (`/architecture-audit`) — import cycles and boundaries, module depth, state ownership, change hotspots, and data flow, with a deterministic import-graph collector. Optional: `--since`, `--months`, `--with-run`, `--pattern`.
-- **[Testing](testing-audit/SKILL.md)** (`/testing-audit`) — test strategy, Testing Library behavior focus, coverage quality, and brittle tests. Optional: `--with-run`.
+- **[Testing](testing-audit/SKILL.md)** (`/testing-audit`) — whether the tests would fail if the product broke: hollow and mock-only tests, critical paths above the unit level, and runner, coverage, and Testing Library lint facts from a deterministic collector, for any JavaScript or TypeScript project. Optional: `--since`, `--months`, `--with-mutation`.
 - **[React](react-audit/SKILL.md)** (`/react-audit`) — idiomatic React, component boundaries, state ownership, hooks, and React 19 patterns.
 - **[TypeScript](typescript-audit/SKILL.md)** (`/typescript-audit`) — type system strength, strictness, unsafe escape hatches, and input/output validation. Optional: `--with-run`.
 - **[Linting](linting-audit/SKILL.md)** (`/linting-audit`) — linting configuration quality and whether formatting and lint rules protect the codebase. Optional: `--with-run`.
@@ -266,7 +266,7 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 | [Performance](performance-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-lighthouse-results`, `--lighthouse-results-path` |
 | [Error Handling](error-handling-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
 | [Architecture](architecture-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--since`, `--months`, `--with-run`, `--pattern` |
-| [Testing](testing-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |
+| [Testing](testing-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--since`, `--months`, `--with-mutation` |
 | [React](react-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | — |
 | [TypeScript](typescript-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |
 | [Linting](linting-audit/SKILL.md) | `--worktree`, `--learn`, `--teach` | `--with-run` |

@@ -7,7 +7,7 @@ argument-hint: "[--audit=<name>] [--install] [--scaffold-configs]"
 
 # /preflight
 
-A pre-audit readiness check. Several audits in the playbook accept optional enrichment flags (`--with-stats`, `--with-run`, `--with-network`, `--with-lighthouse-results`, `--with-scan`, `--with-link-check`) that depend on tooling being present in the target project. Running an audit, discovering the tooling is missing, installing it, then re-running the audit is wasteful — `/preflight` consolidates that into one pre-step.
+A pre-audit readiness check. Several audits in the playbook accept optional enrichment flags (`--with-stats`, `--with-run`, `--with-mutation`, `--with-network`, `--with-lighthouse-results`, `--with-scan`, `--with-link-check`) that depend on tooling being present in the target project. Running an audit, discovering the tooling is missing, installing it, then re-running the audit is wasteful — `/preflight` consolidates that into one pre-step.
 
 Run `/preflight` once before launching audits. The default mode is read-only: it prints a status table for every relevant tool and writes findings to `.architect-audits/preflight/`. With explicit flags, it can install missing development dependencies and scaffold minimal project configuration, prompting before every change.
 
@@ -39,7 +39,7 @@ For each audit that supports enrichment, `/preflight` checks the target project 
 | --- | --- | --- | --- |
 | bundle-build-audit | `--with-stats` | `webpack-bundle-analyzer`, `@next/bundle-analyzer`, `rollup-plugin-visualizer`, or `vite-bundle-visualizer`, whichever matches the build tool | Plugin reference in `webpack.config.*`, `next.config.*`, `vite.config.*`, or `rollup.config.*` |
 | typescript-audit | `--with-run` | `typescript` | `tsconfig.json` exists |
-| testing-audit | `--with-run` | `vitest` or `jest` | Coverage configuration block in `vitest.config.*` or `jest.config.*` |
+| testing-audit | `--with-mutation` | `@stryker-mutator/core` | n/a; without a `stryker.config.*`, Stryker runs `npm test` |
 | dependency-audit | `--with-network` | None — the package manager's audit subcommand is built in | n/a; confirms the package manager is detected |
 | performance-audit | `--with-lighthouse-results` | `lighthouse` (as a development dependency, not the system CLI) | `.lighthouserc.json` or `.lighthouserc.js` |
 | security-audit | `--with-scan` | `eslint-plugin-security`, `eslint-plugin-no-unsanitized`, `eslint-plugin-react-security` | Plugins listed in `.eslintrc*` or `eslint.config.*` |

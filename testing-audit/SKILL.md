@@ -1,446 +1,171 @@
 ---
 name: testing-audit
-description: Audit React tests against Testing Library query priority and well-known React Testing Library pitfalls. Static-first with optional --with-run coverage enrichment and implementation plan.
+description: Audit whether a JavaScript or TypeScript project's tests would fail if the product broke — runner, lint, and coverage facts from a collector, a pre-filter for hollow tests, risk-ranked judgement, and optional mutation testing.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--with-run] [--threshold-<name>=<value>] [--learn|--teach]"
+argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--with-mutation] [--learn|--teach]"
 ---
 
 # /testing-audit
 
-Audit a TypeScript and React project's tests against an opinionated baseline organised in four layers — **test runner and tooling**, **query priority and selector hygiene**, **interaction and async patterns**, **test design and coverage** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
+Find out whether a project's tests would catch the bugs that matter, and which tests to fix, add, or retire first.
 
-The default mental model is React component tests written with `@testing-library/react`, plus end-to-end tests in Playwright or Cypress. Vitest and Jest are both supported as the test runner. Mocha and other runners are out of scope.
+The audit asks one question of every test it reads: **would this fail if the behaviour it names broke?** It applies to any JavaScript or TypeScript project: a Node service, a library, a command-line tool, or a web application. The component layer applies only when the project has a user interface.
 
-## Publishing results
+It has four sources:
+- a deterministic collector, which detects runners, focused and skipped tests, coverage thresholds, and the Testing Library and jest-dom lint rules (read statically from the ESLint configuration);
+- a mechanical pre-filter in the collector, which flags tests whose shape suggests they cannot fail;
+- the judgement of the model, spent on the riskiest code first: Git churn hotspots and high fan-in modules;
+- optionally, a Stryker mutation run on the five riskiest files (`--with-mutation`).
 
-Record every result through the shared audit protocol. Never write the four findings files by hand.
+It is static and read-only by default. Only `--with-mutation` runs the project's tests, inside Stryker's sandbox.
 
-```bash
-python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin testing-audit
-```
+**Testing philosophy.** The audit grades with three principles. Test behaviour, not implementation: assert what a user or caller observes. Snapshots are a smell: a snapshot nobody reviewed is an expected value copied from the code. Assert on meaning, not styling: a role, a label, or a semantic token, never a raw utility class.
 
-Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
-
-A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
-
-Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
-
-## How this differs from neighbouring audits
-
-| Concern | Owner |
-| --- | --- |
-| Whether tests *run* at every lifecycle stage (pre-commit, pre-push, continuous integration) | `/quality-gates-audit` |
-| Whether `eslint-plugin-testing-library` and `eslint-plugin-jest-dom` are *configured* | `/linting-audit` |
-| Whether tests *catch errors well* (error boundaries, async error paths) | `/error-handling-audit` |
-| **Whether the tests themselves are well-formed**: query priority, async patterns, design, coverage | `/testing-audit` |
-| End-to-end accessibility scans (axe in Playwright/Cypress) | `/accessibility-audit` |
-| End-to-end performance measurement (Lighthouse CI) | `/performance-audit` |
-
-When a single fix passes multiple audits (for example, configuring `eslint-plugin-testing-library` satisfies both `/linting-audit` and `/testing-audit`), every relevant audit surfaces the same gap so the user sees it once and resolves it once.
-
-## Testing philosophy
-
-This audit is opinionated. Three principles set the tone for everything below:
-
-1. **Test behaviour, not implementation.** Assertions describe what the user perceives — what they see, click, type, hear, and read. Tests do not assert internal state shape, prop names, or specific function call sequences except where those *are* the public behaviour. The implementation plan's top-priority section addresses behaviour-vs-implementation drift before any other layer-4 work.
-2. **Snapshots are a smell.** They almost always couple tests to implementation, churn on every harmless refactor, and rarely catch real regressions. Small, intentional, named snapshots are tolerable; large or whole-component snapshots are reported as `violation`. The skill's stated position is that snapshots are the exception, never the default.
-3. **Assert against semantic tokens, not utility classes.** `expect(button).toHaveClass('bg-primary')` is resilient to design-system updates. `expect(button).toHaveClass('bg-gray-100')` breaks the moment the theme changes — and worse, it's testing what colour the button is rather than what the button is. Better still: assert on role, label, or text and skip the class assertion entirely.
-
-These principles map directly to checks in Layer 4. They are not aspirations; they are how the audit grades.
-
-## The query priority ladder
-
-Layer 2's checks grade tests against this canonical Testing Library priority. It is reproduced here verbatim so the audit's stance is unmistakable.
-
-**Priority 1 — Accessible to everyone (preferred):**
-
-1. `getByRole` — the most reliable; queries elements exposed in the accessibility tree. Use with the `name` option: `getByRole('button', { name: /submit/i })`.
-2. `getByLabelText` — the right tool for form fields. Mirrors how users navigate forms.
-3. `getByPlaceholderText` — when a label isn't available. A placeholder is not a substitute for a label.
-4. `getByText` — for non-interactive elements; how users find content outside forms.
-5. `getByDisplayValue` — useful for navigating pages with pre-filled form values.
-
-**Priority 2 — Semantic queries (variable user experience):**
-
-1. `getByAltText` — for elements supporting `alt` (img, area, input, custom elements).
-2. `getByTitle` — least reliable in this tier; the `title` attribute is not consistently read by screen readers and is not visible by default for sighted users.
-
-**Priority 3 — Test IDs (last resort):**
-
-1. `getByTestId` — the user cannot see or hear these. Use only when semantic matching is not feasible.
-
-A healthy test suite sits heavily in Priority 1. The audit measures the distribution and flags codebases that lean on Priority 3 or fall back to `container.querySelector`.
-
-## Static-first design with optional run enrichment
-
-This skill is read-only. Two modes:
-
-- **Static (default).** Read configuration files, source files, and test files. Pattern-detect query usage, async patterns, mocking shapes, structural test design, and styling-assertion hygiene.
-- **Static plus opt-in `--with-run`.** Invoke the detected test runner in coverage mode (`vitest run --coverage --reporter=json`, `jest --coverage --json`) and parse the output. The coverage data feeds the diagnostic snapshot and enriches a small number of run-required checks (real coverage threshold verification, real test-count breakdown).
-
-The skill **never modifies any test, configuration, or source file**, and **never runs Playwright or Cypress end-to-end suites in `--with-run`**. End-to-end runs serve real browsers and have side effects; that is a separate concern and the user's call.
+[Detection notes](references/detection.md) explain how to evaluate each check, the hollow-test shapes, and the look-alikes to keep.
 
 ## Usage
 
 ```
-/testing-audit                                    # default: concise Top 5 + full report saved + ask about plan
-/testing-audit --worktree                          # create an isolated Git worktree, then run the audit there
-/testing-audit --learn                            # mid-level engineer teaching mode (detailed explanations + file/line examples)
-/testing-audit --teach                            # alias for --learn
-/testing-audit --with-run                         # static plus enrichment from Vitest/Jest coverage run
-/testing-audit --threshold-priority-one-ratio=80  # override default 70 (percent)
-/testing-audit --threshold-testid-ratio=5         # override default 10 (percent, ceiling)
-/testing-audit --threshold-by-role-ratio=60       # override default 50 (percent of Priority 1)
-/testing-audit --threshold-user-event-ratio=90    # override default 80 (percent)
-/testing-audit --threshold-snapshot-lines=50      # override default 100 (lines, ceiling for partial)
+/testing-audit                     # audit the current repository
+/testing-audit --worktree          # run in .worktrees/testing-audit on its own branch
+/testing-audit --since=<ref>       # judge only tests and modules changed since <ref> (a provisional, filtered run)
+/testing-audit --months=12         # widen the Git history window for the risk ranking (default 6)
+/testing-audit --with-mutation     # also run an installed Stryker on the five riskiest files
+/testing-audit --learn             # teaching mode; --teach is an alias
 ```
 
-**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
+`--since` and `--months` make the run provisional, because they change what the audit measures. Without `--with-mutation`, the mutation check is recorded as not evaluated, which lowers coverage but never the score.
 
-The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
+## Ownership
 
-**💡 Pro tip**: Run `/preflight --audit=testing` first to detect — and optionally install — the development dependency that makes `--with-run` useful (`vitest` or `jest`, with their coverage configuration in place). Skip if you already know the tooling is wired up.
+| Concern | Owner |
+| --- | --- |
+| Whether the tests would catch bugs, how they mock, and whether critical paths are covered above the unit level | `/testing-audit` |
+| Whether tests, coverage, and end-to-end suites run in hooks and continuous integration | `/quality-gates-audit` |
+| Whether change hotspots are cohesive and well designed | `/architecture-audit` |
+| Whether error paths are handled at all | `/error-handling-audit` |
+| Automated accessibility scans and performance measurement in end-to-end runs | `/accessibility-audit`, `/performance-audit` |
 
-## The opinionated baseline
+The runner, coverage, and critical-path checks name their quality-gates counterparts in `relatedChecks`; this audit rates only what those checks do not: whether the suite exists, runs, and tests the right things.
 
-A check resolves to one of four statuses:
+## The baseline
 
-- **present** — the invariant holds.
-- **partial** — most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.
-- **missing** — a structural prerequisite is absent (no test runner installed, for example).
-- **violation** — the audit identified concrete code that breaks the invariant.
-
-Layer 0 is informational only and has no status.
+Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violation`. Checks that cannot apply are recorded as not applicable, and checks you could not evaluate as not evaluated, never as `partial`. Severity follows Architecture Decision Record 0004: behaviour-level checks are high, and lint-rule checks are medium or low. The method column says whether the collector decides the check (`tool`) or you do (`model`).
 
 ### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
 
-- Detected test runner: Vitest (with version), Jest (with version), or none.
-- Detected component testing library: `@testing-library/react`, `@testing-library/preact`, none.
-- Detected end-to-end framework: Playwright, Cypress, none.
-- Test file count and total test count (test count requires `--with-run`).
-- **Query usage distribution** across the priority ladder: counts and percentages per tier, with `getByRole` broken out specifically.
-- `userEvent` vs `fireEvent` usage ratio.
-- `getByTestId` and `container.querySelector` usage counts and the top files for each.
-- Coverage data when `--with-run`: line, statement, branch, and function coverage.
-- Flaky-pattern signal counts: fixed `setTimeout`/`setInterval` waits in tests, ordering-dependent test patterns, shared mutable test state.
-- Snapshot test count and average snapshot size in lines.
-- Components without any test file mapping to them (graph-aware when Graphify is present; falls back to per-folder heuristics otherwise).
+The collector records:
+- runners, test files by kind (unit, integration, component, Vitest browser mode, Playwright component, end-to-end), the number of tests, and Storybook stories with `play` functions;
+- user-interface frameworks, Testing Library packages, database clients, Mock Service Worker setups, and Testcontainers or other integration tooling;
+- package scripts and continuous-integration lines that run tests, and where coverage thresholds live;
+- module mocks of the repository's own modules, flake signals, and Testing Library query and interaction counts;
+- the risk ranking (churn plus fan-in), untested risky files, the mutation targets, and the pre-filter's candidates.
 
-### Layer 1 — Test runner and tooling
+Add the critical paths you identify, and which test level covers each.
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Single test runner installed | Exactly one of Vitest or Jest in `devDependencies`. | Both present, with no clear migration. |
-| `@testing-library/react` installed | When React is detected, the React Testing Library is in `devDependencies`. | Missing in a React project that ships tests. |
-| `@testing-library/user-event` installed | Available for interaction simulation. The interaction-and-async layer prefers `userEvent` over `fireEvent`. | Missing. |
-| `@testing-library/jest-dom` installed | Provides DOM-aware matchers (`toBeInTheDocument`, `toBeDisabled`, `toHaveClass`) so assertions can describe user-visible state rather than DOM-property internals. | Missing. |
-| `eslint-plugin-testing-library` configured | The plugin is installed and enabled. (Overlap with `/linting-audit`; both surface so a single fix passes both.) | Plugin missing or not enabled. |
-| `eslint-plugin-jest-dom` configured | The plugin is installed and enabled. (Overlap with `/linting-audit`.) | Plugin missing or not enabled. |
-| jest-dom matchers loaded in setup file | The runner's setup file imports `@testing-library/jest-dom`. | No setup file, or setup file does not import jest-dom. |
-| Coverage tool configured with thresholds | The test runner has a coverage configuration with explicit thresholds (line, statement, branch, function). | Coverage configured but thresholds absent, or no coverage configuration at all. |
-| End-to-end framework present | Playwright or Cypress in `devDependencies`. Soft check — reported as `partial` for projects that legitimately may not need end-to-end tests. | Neither present in a user-facing application. |
+### Layer 1 — Test infrastructure
 
-### Layer 2 — Query priority and selector hygiene
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Tests run under a configured runner | high | tool | Test files exist, a runner is declared, and a package script runs it. | No tests, tests with no runner, or no script that runs them (partial). |
+| No focused or skipped tests committed | medium | tool | No `.only`, `fit`, or `fdescribe`; no `.skip`, `xit`, `.todo`, or `.fixme` left behind. | A focused test (violation); skipped or to-do tests (partial). |
+| Coverage thresholds configured | medium | tool | The unit or integration runner sets thresholds, and something collects coverage so they can fail. | No thresholds (missing), or thresholds nothing enforces (partial). |
 
-This layer encodes the priority ladder and the most common selector-related pitfalls.
+### Layer 2 — Test effectiveness
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Query distribution favours Priority 1 | At least the threshold percentage (default 70%; tunable via `--threshold-priority-one-ratio`) of all `*By*` queries are Priority 1 queries. | Distribution below the threshold. |
-| `getByTestId` usage is rare | At most the threshold percentage (default 10%; tunable via `--threshold-testid-ratio`) of all queries use `getByTestId`. | Distribution above the threshold. |
-| No `container.querySelector` for finding elements | Tests use Testing Library queries, not `container.querySelector` or `document.querySelector`. | `querySelector` calls in tests for element lookup. |
-| Queries via `screen`, not destructured | Queries come from `screen.getBy*`, not destructured from the `render` return value. `screen` works everywhere and keeps debugging tools (`screen.debug()`) consistent. | `const { getByRole } = render(...)` patterns. |
-| `render` return named `view`, not `wrapper` | When the render return is captured, it is named `view` (or destructured for what's needed). The render return is not wrapping anything; the `wrapper` name is a holdover from older testing libraries. Soft check — reported as `partial`. | `const wrapper = render(...)`. |
-| `*ByRole` is the dominant Priority 1 query | Of the Priority 1 queries, at least the threshold percentage (default 50%; tunable via `--threshold-by-role-ratio`) are `getByRole` (with the `name` option). Soft check — reported as `partial`. | Priority 1 use without meaningful `getByRole` adoption. |
-| No redundant ARIA roles in test assertions | Tests do not assert on `role` attributes that are already implicit (`<button role="button">`). The principle is the same one `/accessibility-audit` applies to source: do not pile on accessibility attributes that the semantic element already provides. | Test assertions matching `[role="button"]` on a `<button>`. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Tests would fail if the behaviour broke | high | model | A plausible bug in the behaviour each test names turns it red. | Hollow tests on risky code: no assertion, an expected value computed by the code, a Given that never reaches the case, or assertions that pass when imports return undefined. |
+| Mocking only at boundaries | high | model | Only the network, clock, randomness, and third parties are faked; call assertions check content sent across a boundary. | Mocks of the repository's own modules, or tests that assert only on mocks they set up. |
+| Tests are deterministic | medium | model | Time, randomness, and shared state are controlled; tests wait for conditions, not delays. | Fixed sleeps, the real clock or randomness in assertions, order-dependent tests. |
+| Test titles state the behaviour checked | low | model | Each title names an observable outcome. Soft check — mixed adherence is reported as partial. | Titles that name functions or steps, or promise what the test does not check. |
+| Mutations in the riskiest files are caught | medium | tool | With `--with-mutation`, at least 80 percent of mutants in the five riskiest files are detected. | Score below 80 percent (partial) or below 60 percent (violation). |
 
-### Layer 3 — Interaction and async patterns
+### Layer 3 — Test levels and critical paths
 
-This layer encodes the well-known pitfalls in interaction style, async handling, and `waitFor` discipline.
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Critical paths covered by integration or end-to-end tests | high | model | Each critical path runs through its real wiring in an integration or end-to-end test. | A critical path, or a top-ranked risky module on one, with no test above the unit level. |
+| Data access tested against a real database | medium | model | Queries and migrations run against the production engine, for example with Testcontainers. Not applicable without a database client. | Data access tested only through a mocked client, or not at all. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| `userEvent` preferred over `fireEvent` | At least the threshold percentage (default 80%; tunable via `--threshold-user-event-ratio`) of interaction calls use `userEvent` rather than `fireEvent`. `userEvent` simulates the full sequence of events a real user produces (focus, keydown, input, change), where `fireEvent` fires only one. | Ratio below the threshold. |
-| `find*` used for elements not yet present | When waiting for an element to appear, tests use `findBy*`, not `waitFor(() => getBy*())`. `findBy*` already retries until a timeout and produces clearer error messages. | `waitFor` callbacks containing only a `getBy*` lookup. |
-| `query*` only for absence assertions | `queryBy*` is used only with `not.toBeInTheDocument()` or analogous absence checks. `queryBy*` returns `null` instead of throwing, which is the only behaviour that makes "is this element absent?" assertable; using it for presence assertions can pass without proving presence. | `queryBy*` used in a positive-presence assertion. |
-| `waitFor` callback contains a single assertion | Each `waitFor` call wraps exactly one `expect`. With several assertions in one callback, the first failure causes a re-run of all of them, slowing the suite and obscuring which one actually failed. | `waitFor` callbacks with multiple `expect` calls. |
-| `waitFor` callback is not empty | `waitFor(() => {})` followed by an assertion outside is wrong; the assertion belongs inside the callback so `waitFor` knows what it is waiting for. | Empty `waitFor` callbacks. |
-| No side effects in `waitFor` | The `waitFor` callback contains only assertions — no `fireEvent`, `userEvent`, or other state mutation. `waitFor` re-runs its callback until it succeeds, so any side effect inside fires repeatedly. | `fireEvent` or `userEvent` calls inside `waitFor`. |
-| No unnecessary `act` wrapping | `render` and `fireEvent` calls are not wrapped in `act(...)`; both are already wrapped internally. Hand-rolled `act` only adds noise (and sometimes silences warnings that should have been visible). | `act(() => { render(...) })` or `act(() => { fireEvent.click(...) })` patterns. |
-| No manual `cleanup()` calls | Tests do not import or call `cleanup` from `@testing-library/react`. Modern test runners auto-cleanup after each test. | `cleanup` imported or called. |
-| Assertions are explicit | Tests do not rely on `getBy*` throwing as the assertion; they wrap with `expect(...).toBeInTheDocument()` (or analogous). The intent of the test should be readable at a glance. | `getBy*` calls appearing on a line by themselves with no `expect`. |
+### Layer 4 — Component tests
 
-### Layer 4 — Test design and coverage
+The collector records these checks as not applicable when the project has no user-interface framework, Testing Library, or jest-dom, as each requires.
 
-This layer encodes the testing philosophy stated above.
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Testing Library lint rules enforced | medium | tool | eslint-plugin-testing-library's framework configuration plus `prefer-user-event` and `prefer-explicit-assert`, covering the twelve rules in the detection notes. | Plugin not enabled (missing), or some rules off (partial). |
+| jest-dom lint rules enforced | low | tool | eslint-plugin-jest-dom's recommended rules are on. | Plugin not enabled (missing), or some rules off (partial). |
+| Components tested through what users perceive | medium | model | Queries by role, label, or text; user-event or a real browser; assertions on what users see. | Test IDs or selectors as the norm, assertions on state, props, or raw utility classes, or snapshots in place of assertions. |
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Tests describe user behaviour | Test names describe the user-visible behaviour (`it('disables submit while saving', ...)`), not the implementation (`it('calls saveMutation when isLoading is true', ...)`). Heuristic detection but a first-class principle of this audit; the implementation plan addresses drift here before any other layer-4 work. Soft check — reported as `partial` when adherence is mixed. | Test names that describe internal state changes rather than user-observable outcomes. |
-| No assertions against hard-coded utility classes | Class assertions use semantic theme tokens (`bg-primary`, `text-brand`, `border-destructive`) — never raw utility classes (`bg-gray-100`, `text-slate-500`). Better still, assert on role, label, or text and skip the class assertion entirely. **Reported as `violation` when raw utility classes appear in `toHaveClass` assertions.** | `expect(...).toHaveClass('bg-gray-100')` (or any utility-class form: numeric Tailwind colour scales, raw spacing utilities like `p-4`, raw layout utilities like `flex`). The audit recognises a token via heuristic: a token has no numeric suffix and matches `[bg|text|border|ring|fill|stroke]-[a-z]+` but not the Tailwind palette names. |
-| Snapshots are bounded and intentional | Snapshot tests cover small, intentional, named outputs. **Reported as `violation` when a snapshot exceeds the threshold lines (default 100; tunable via `--threshold-snapshot-lines`) OR when the snapshot is obviously implementation-coupled (whole-component output, internal-component-tree shape).** Small, focused, named snapshots are reported as `partial` — the skill's stated position is that snapshots are a smell, but bounded ones can be defensible. | Auto-snapshots of full component output, snapshots larger than the threshold, or many snapshot tests in a single file (suggesting snapshot-as-default rather than considered choice). |
-| Coverage thresholds enforced in continuous integration | The continuous-integration test step is configured to fail when coverage drops below the configured threshold. Soft check — reported as `partial` if thresholds exist but are not enforced. | Coverage configured but continuous integration does not fail on regression. |
-| Critical-path end-to-end coverage | The project has at least one Playwright or Cypress spec covering the primary user journey (sign-in, primary action, sign-out, or the equivalent). Soft check. | No end-to-end specs at all in a user-facing application. |
-| No flaky-pattern signals | Tests do not use fixed `setTimeout`/`setInterval` waits, do not depend on test ordering, and do not share mutable state across tests. | Detected fixed waits or ordering-dependent patterns. |
-| Mocking at module boundaries | Mocks are placed at module or network boundaries (`vi.mock('axios', ...)`, MSW handlers), not inside internal implementations of the system under test. Soft check — reported as `partial`. | Mocks of internal helpers used by the component under test, indicating implementation-coupled tests. |
-| Components have at least minimal coverage | Every component identified by Graphify (when present) as user-facing has at least one test file referencing it. Without the graph, the check falls back to a per-folder heuristic. Soft check — reported as `partial`. | Components without any associated test. |
+## Judging a test
+
+This is the core of the audit. For each test you read:
+
+1. **Read the title, then the Given, then where the expected value comes from.**
+2. **Could the expected value be wrong in the same way as the code?** It could if it is computed by the code under test, by a copy of its logic, or read back from the result. A literal from a specification or a worked example is independent.
+3. **Which bug turns it red?** Name the smallest plausible bug in the behaviour the title names, such as a dropped condition, a filter removed, or an off-by-one at a boundary. If no such bug fails the test, it is hollow. Never judge by "replace the code with the right answer"; every concrete test passes that.
+4. **Does the Given reach the case?** The commonest hollow test asserts real things about an input that never exercises the named case: data already sorted, nothing for the filter to remove, a value equal to the default, or input rejected earlier for another reason.
+
+Classify each candidate as **real**, **hollow**, **mirror** (it asserts that an internal collaborator was called), **duplicate**, or **snapshot-only**, with one sentence and a `path:line` citation that quotes the line. Keep the look-alikes in the detection notes: idempotence, round trips, comparisons, and a mock that is only the Given are real tests.
 
 ## What this skill does
 
-1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit cross-references graph nodes against test-file imports to identify components with no test, and ranks coverage gaps by graph centrality. Without the graph, the check falls back to per-folder heuristics with reduced precision.
-2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. When TypeScript or React is absent, it writes a canonical not-applicable audit with every catalog check present once, explicitly `not-applicable`/`not-evaluated`, and a null status.
-3. **Detects the test runner, component testing library, and end-to-end framework** for the diagnostic snapshot and for layer-1 and layer-4 checks.
-4. **When `--with-run` is set**, invokes the detected unit-test runner in coverage mode (`vitest run --coverage --reporter=json` or `jest --coverage --json`), captures the JSON output, and folds it into the snapshot. Never runs Playwright or Cypress.
-5. **Walks every test file** to compute the diagnostic distributions (query priority breakdown, `userEvent`/`fireEvent` ratio, `getByTestId` count, `container.querySelector` count, snapshot count and sizes, flaky-pattern signal counts).
-6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/testing-audit/snapshot.md` and prepends the same content to `findings.md`.
-7. **Walks each check in the active layer list**, applying any `--include`, `--exclude`, and threshold overrides. Records a status, evidence, and (where relevant) sample file references per check.
-8. **Writes phase 1 outputs** to `.architect-audits/testing-audit/`:
-   - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
-   - `findings.json` — machine-readable.
-   - `snapshot.md` — diagnostic snapshot on its own.
-   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), test runner and version, end-to-end framework, applied thresholds, applied filters, run-mode flag.
-9. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
-
-   > "Generate an implementation plan for the testing gaps? (yes/no)"
-
-   On `yes`, writes `.architect-audits/testing-audit/implementation-plan.md` describing the rewrites, refactors, and configuration changes needed — ordered by **testing philosophy impact** (behaviour-vs-implementation drift first, snapshot smells next, utility-class assertions next), then by layer. The plan does not modify any project files.
-
-   On `no`, exits cleanly.
+1. Stages a run through the shared audit protocol. The collector decides the tool checks, marks what does not apply, and records the risk ranking and pre-filter.
+2. Reads tests in risk order within a discovery budget, rather than walking every file.
+3. Judges each candidate with the method above. Every finding cites the lines it rests on.
+4. Publishes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` through the protocol, and summarises the act-on findings.
+5. Offers an implementation plan with a retirement card for each low-value test.
 
 ## Implementation steps
 
-### Step 1 — Confirm the prerequisites
+1. **Begin.** Follow [the run protocol](../audit-protocol/references/run-protocol.md). With `--worktree`, create the worktree as it describes.
 
-```bash
-test -f package.json || { echo "testing-audit: no package.json detected; change directory to the project root."; exit 1; }
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin testing-audit
+   ```
+
+   - Pass `--since <ref>` for a diff-scoped run, and `--threshold months=<n>` for `--months`.
+   - Pass `--enrichment with-mutation` for `--with-mutation`. The collector then runs Stryker itself, writing only under `.architect-audits/testing-audit/mutation/`, and records the mutation check. If Stryker is missing, fails, or times out, the check is not evaluated with the reason.
+2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/testing-audit/.staging/run.json`: `riskRanking`, `untestedRiskyFiles`, `preFilter`, `moduleMocks`, `flakeSignals`, and `firstClassTooling`. Identify the critical paths from routes, handlers, and the risk ranking, and record them with `snapshot --set criticalPaths=<json>`.
+3. **Read within the discovery budget.** Read the tests of the five highest-ranked modules, then the first 25 pre-filter candidates in their ranked order. Widen by another 25 only while more than a third of what you read is hollow or a mirror. Record what you sampled with `snapshot --set sampled=<json>`.
+4. **Evaluate every model check.**
+   - Apply "Judging a test" and the detection notes.
+   - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
+   - A pre-filter flag is a place to look, never evidence on its own; cite the test you read.
+   - Use `hypothesis` for suspicions you cannot verify, and `not-evaluated` with a reason when the repository gives you no basis.
+5. **Judge.** Keep at most about five findings `act-on`, ranked by severity and then by risk rank. Dismiss with a reason any flagged test you judged real.
+6. **Finish.** Run `audit_run.py finish testing-audit`, fix anything it rejects, and present the chat summary the protocol defines.
+7. **Offer the plan.** Ask: "Generate an implementation plan for the act-on findings? (yes/no)"
+
+## Phase 2: the implementation plan
+
+On yes, write `.architect-audits/testing-audit/implementation-plan.md` with the task briefs the protocol defines. Order them: critical paths with no test above the unit level, then hollow tests on the riskiest modules, then mocking, then infrastructure and lint rules.
+
+End the plan with a **Retirement cards** section: one card for every test you judged hollow, a mirror, a duplicate, or snapshot-only.
+
+```markdown
+#### <test title> (`path/to/file.test.ts:42`)
+
+- Verdict: hollow | mirror | duplicate | snapshot-only
+- Why it cannot fail: <the bug in the named behaviour that leaves it green>
+- What it costs: <false confidence, runtime, or churn on refactors>
+- Action: delete | rewrite | merge into <test>
+- Replacement: <a Given that could go the other way, and a literal expected value>
+- Proof: <the planted bug the replacement must turn red>
 ```
 
-Confirm TypeScript and React (`react` directly or via Next.js, Remix, etc.). When either domain prerequisite is absent, do not omit the audit: write all four canonical output files, set `auditApplicability.status` to `not-applicable`, use a stable reason such as `typescript-react-project-not-detected`, and emit every `checks.json` entry once as `not-applicable`/`not-evaluated` with `status: null`.
-
-### Step 2 — Detect the test runner and surrounding tools
-
-Read `package.json` `devDependencies`:
-
-- `vitest` → Vitest. Resolve version from the lockfile.
-- `jest` → Jest. Resolve version from the lockfile.
-- Both → record both, run the audit against whichever has a configuration file. The "single test runner" check reports `violation`.
-- Neither → continue. Mark the test-runner foundation check `missing`; mark only runner-dependent execution and coverage checks applicable but `not-evaluated` with reason `test-runner-not-detected`; continue evaluating source-level test-design checks when test files exist. Recommend Vitest or Jest in the findings.
-
-Detect `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `eslint-plugin-testing-library`, `eslint-plugin-jest-dom`, `playwright`, `@playwright/test`, `cypress`.
-
-### Step 3 — Optionally run the test runner
-
-When `--with-run` is set, invoke the detected runner:
-
-- Vitest: `npx vitest run --coverage --reporter=json` (capture stdout, parse JSON).
-- Jest: `npx jest --coverage --json` (capture stdout, parse JSON).
-
-If the runner fails to start (binary missing, configuration invalid), record the failure, print to the chat and prepend to `findings.md`: "`--with-run` was requested but the test runner is not installed. Run `/preflight --audit=testing --install` to install `vitest` or `jest`, then re-run this audit. The static analysis has been completed; only the run-dependent enrichment degraded to `partial`." Record `recoveryHint: "/preflight --audit=testing --install"` on each run-dependent check that degraded in `findings.json`. Continue. Run-dependent enrichment of the diagnostic snapshot and a small number of coverage-related checks degrades to `partial`.
-
-### Step 4 — Walk the test files
-
-Enumerate test files. Detection patterns:
-
-- File names matching `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx`.
-- Files inside `__tests__/` directories.
-- Files declared by the runner's configuration `include` patterns.
-
-For each file, collect:
-
-- Query call counts per priority tier and per query name.
-- `userEvent` and `fireEvent` call counts.
-- `container.querySelector` and `document.querySelector` call counts.
-- `screen` adoption (do queries come from `screen` or from a destructured render return).
-- `wrapper`-named render returns.
-- Snapshot counts and sizes.
-- `waitFor` patterns (callback contents, assertion counts, side effects).
-- `act` wrappings.
-- `cleanup` imports and calls.
-- Test names (for the behaviour-vs-implementation heuristic).
-- Class assertions (`toHaveClass`) — categorise as semantic-token or raw-utility-class via the heuristic above.
-- Mock targets (module-boundary vs internal).
-- Flaky-pattern signals (fixed waits, ordering dependencies, shared mutable state).
-
-### Step 5 — Build the diagnostic snapshot
-
-Aggregate the per-file data into the items listed in Layer 0. Write `snapshot.md` and prepend the same content to `findings.md`.
-
-### Step 6 — Resolve each check
-
-For each check in the active layer list, walk its detection logic. Threshold-bearing checks compare the aggregate to the configured threshold. Heuristic checks (behaviour-vs-implementation, mocking-at-boundaries) report `partial` rather than `violation` even when adherence is poor, because the heuristics are imperfect.
-
-For each check, record evidence and up to ten representative samples plus a total count.
-
-### Step 7 — Write phase 1 outputs
-
-Create `.architect-audits/testing-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
-
-### Step 8 — Print the concise chat summary and offer phase 2
-
-Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 7. The chat output has exactly this shape:
-
-1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
-2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
-   - **Title** (one clear line).
-   - **Why it matters** (explain the principle in 1–2 sentences).
-   - **Real consequences if ignored** (honest downside for the team or project).
-   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
-   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
-3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/testing-audit/findings.md`
-
-When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
-- For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
-- Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
-- Include a short "What you'll learn from fixing this" section for each recommendation.
-- Keep the numbered/lettered structure so the user can still reply with "2b" or "1 and 3".
-- End with the same bottom-line link to the full report.
-
-After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
-
-### Step 9 — Phase 2: generate the implementation plan
-
-When the user agrees, build `implementation-plan.md`, ordered by testing-philosophy impact:
-
-1. **Header** — repository name, baseline version, test runner, end-to-end framework, timestamp, total counts per layer.
-2. **Behaviour-over-implementation fixes** — rewrites of test names and assertions that test internal state instead of user behaviour.
-3. **Snapshot cleanup** — oversized or implementation-coupled snapshots to remove or replace with explicit assertions; bounded snapshots to keep and rationalise.
-4. **Utility-class-assertion replacements** — every `toHaveClass('bg-gray-100')` (and similar) replaced with semantic-token assertions or, where possible, role/label/text assertions.
-5. **Query-priority migrations** — `getByTestId` and `container.querySelector` sites rewritten in priority order: try `getByRole` first, then `getByLabelText`, then text-based queries.
-6. **Async-pattern fixes** — `waitFor` discipline, `find*` adoption, `query*` confined to absence checks, `act` and `cleanup` cleanups.
-7. **Tooling fixes** — missing testing-library packages, jest-dom matcher loading, eslint plugin configuration.
-8. **Coverage and end-to-end fixes** — coverage threshold introduction, end-to-end framework adoption when missing, components-without-tests gap closure prioritised by graph centrality when Graphify is present.
-9. **Closing checklist** — flat checkbox list mirroring the gaps, suitable for pasting into a pull-request description.
-
-The plan is descriptive, not executable. It does not edit tests, install packages, or modify configuration.
+A rewrite is done only when the replacement fails with the planted bug and passes without it. If a rewrite fails on unchanged code, the hollow test may have hidden a product bug: report it rather than weakening the assertion.
 
 ## Repository Quality Score findings contract
 
-`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
-top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
-`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
-`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
-repository, exact Git commit, and whether the audited source tree was clean.
-`execution` records `filtersApplied`, `filterArguments`, threshold and policy
-overrides, `enrichmentArguments`, and graph availability.
-
-Emit every entry from `checks.json` exactly once and use its full `checkId` and
-layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
-`classification`, canonical `status`, and `evidence`. A check that does not apply
-is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
-unresolved applicable check is `applicable`/`not-evaluated` with a null status;
-never guess a pass or failure. `metadata.json` repeats the common run, target,
-catalog, and execution identity. The complete contract is
-`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
-
-## Findings file shape
-
-`findings.json` (the example shows one representative check; emitted output
-contains every catalog check exactly once):
-
-```json
-{
-  "schemaVersion": "2.0.0",
-  "runIdentifier": "<uuid>",
-  "skillName": "testing-audit",
-  "skillVersion": "1.0.0",
-  "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.0.0",
-  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
-  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
-  "runStartedAt": "2026-04-26T13:47:00Z",
-  "runFinishedAt": "2026-04-26T13:47:14Z",
-  "testRunner": { "name": "vitest", "version": "1.6.0" },
-  "endToEndFramework": "playwright",
-  "withRun": true,
-  "thresholds": {
-    "priorityOneRatio": 70,
-    "testidRatio": 10,
-    "byRoleRatio": 50,
-    "userEventRatio": 80,
-    "snapshotLines": 100
-  },
-  "snapshot": {
-    "testFileCount": 187,
-    "testCount": 624,
-    "queryDistribution": {
-      "priorityOne": { "ratio": 0.78, "byRole": 0.62, "byLabelText": 0.09, "byPlaceholderText": 0.02, "byText": 0.04, "byDisplayValue": 0.01 },
-      "priorityTwo": { "ratio": 0.05, "byAltText": 0.04, "byTitle": 0.01 },
-      "priorityThree": { "ratio": 0.17, "byTestId": 0.17 }
-    },
-    "userEventRatio": 0.71,
-    "containerQuerySelectorCount": 14,
-    "snapshots": { "count": 22, "averageLines": 142, "oversized": 9 },
-    "componentsWithoutTests": 31,
-    "coverage": { "lines": 0.74, "statements": 0.73, "branches": 0.61, "functions": 0.78 },
-    "flakyPatternSignals": { "fixedWaits": 6, "orderingDependent": 0, "sharedMutableState": 2 }
-  },
-  "summary": {
-    "testRunnerAndTooling":             { "present": 6, "partial": 1, "missing": 1, "violation": 1 },
-    "queryPriorityAndSelectorHygiene":  { "present": 4, "partial": 2, "missing": 0, "violation": 1 },
-    "interactionAndAsyncPatterns":      { "present": 5, "partial": 1, "missing": 0, "violation": 3 },
-    "testDesignAndCoverage":            { "present": 2, "partial": 3, "missing": 0, "violation": 3 }
-  },
-  "checks": [
-    {
-      "layer": "test-design-and-coverage",
-      "checkId": "testing-audit.no-hard-coded-utility-class-assertions",
-      "applicability": "applicable",
-      "applicabilityReason": null,
-      "evaluationState": "evaluated",
-      "evaluationReason": null,
-      "evidenceQuality": "complete",
-      "classification": "brittle-assertion",
-      "status": "violation",
-      "evidence": [],
-      "samples": [
-        { "path": "src/components/Button.test.tsx", "line": 28, "match": "expect(button).toHaveClass('bg-gray-100')" },
-        { "path": "src/components/Card.test.tsx", "line": 41, "match": "expect(card).toHaveClass('p-4 text-slate-500')" }
-      ],
-      "totalCount": 17,
-      "expectation": "Class assertions use semantic theme tokens (bg-primary, text-brand) — never raw utility classes. Better still, assert on role, label, or text.",
-      "gap": "17 toHaveClass assertions reference raw Tailwind utility classes that will break on theme changes.",
-      "remediation": "Replace utility-class assertions with semantic-token assertions (bg-primary, text-destructive) or, preferably, with role/label/text assertions that describe the user-visible behaviour."
-    }
-  ]
-}
-```
-
-`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top and one section per check, grouped by layer. `snapshot.md` contains only the snapshot. `metadata.json` carries skill identity, timestamps, Graphify revision (when present), the test runner and version, the end-to-end framework, applied thresholds, applied filters, and the `withRun` flag plus any captured exit-status from the runner.
-
-## Idempotency rules
-
-- Re-running with no flags overwrites `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` in place.
-- `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it.
-- Filter flags, threshold overrides, and the `--with-run` flag are recorded in `metadata.json` so a partial run can be reproduced.
-- Run-derived data (coverage, real test count) is timestamp-tagged in metadata; staleness is the user's responsibility to manage by re-running.
-
-## Failure modes and remediation
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
-| React not detected | The project does not depend on `react` directly or via a meta-framework. | Write the same canonical not-applicable audit result; do not silently omit testing from RQS coverage. |
-| Neither Vitest nor Jest installed | The project has no recognised test runner. | Continue. Record the runner foundation check as `missing`, runner-dependent checks as applicable but `not-evaluated`, and evaluate independent source checks. Recommend `/quality-gates-audit` and Vitest or Jest. |
-| Both Vitest and Jest installed | Mid-migration or accidental dual install. | Continue. Run the audit against whichever has a configuration file. Surface dual-installation as a `violation` on the layer 1 "single test runner" check. |
-| `--with-run` set but runner fails to start | Binary missing, configuration invalid, monorepo path-resolution issue. | Record the failure and the captured stderr in metadata. Run-dependent checks degrade to `partial`. Continue with the static analysis. **Recovery:** run `/preflight --audit=testing --install` to install `vitest` or `jest`, then re-run with `--with-run`. |
-| Test files exist but match no recognised pattern | Custom test file naming. | Run with the patterns declared in the runner configuration. When that fails, fall back to scanning files that import `@testing-library/react`. |
-| Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The components-without-tests check falls back to per-folder heuristics; the implementation plan loses centrality-based prioritisation. |
-| Snapshot files exceed the threshold but were intentionally bounded by the author | False positive on the heuristic. | The implementation plan recommends the user document a per-snapshot rationale (a comment near the snapshot reference, or moving the snapshot to a separately-named file) before deciding to keep or replace. |
-| Class assertion uses a custom design token that the heuristic does not recognise | Project-specific token naming. | The check reports `partial` rather than `violation` when the heuristic is unsure. The user can extend the recognised-token pattern in a future iteration via `/system-self-improve`. |
+The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `runStartedAt` and `runFinishedAt`, and the `checkCatalogVersion`. It records `applicability`, `evaluationState`, and `evidenceQuality` for every catalog check, and repeats the run identity in `metadata.json`. See `.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
 
 ## What this skill explicitly does NOT do
 
-- Modify any test, configuration file, or source file.
-- Run Playwright, Cypress, or any other end-to-end test runner. End-to-end runs serve real browsers and have side effects.
-- Install any package or dependency.
-- Open pull requests or commit anything to git.
-- Audit JavaScript-only projects.
-- Audit non-React frontends. The query-priority and interaction layers use React Testing Library conventions; Vue Testing Library and others are out of scope.
-- Audit Mocha, AVA, Tap, or Node's built-in test runner. Vitest and Jest are the only supported runners.
-- Audit utility-first CSS itself. Tailwind, UnoCSS, and similar frameworks are perfectly fine in components — the audit's only stance on utility classes is in *test assertions*, where they make tests brittle. Component code is `/architecture-audit`'s and `/react-audit`'s domain.
-- Replace human review of nuanced test design decisions. The audit catches structural patterns; trade-offs like "should this be a unit test or an integration test" still require judgement.
-
-## References
-
-- Testing Library, [About Queries — Priority](https://testing-library.com/docs/queries/about/#priority) — the canonical source for the priority ladder.
+- Modify, add, or delete any test, configuration, or source file. The only writes are under `.architect-audits/testing-audit/`, through the protocol and, with `--with-mutation`, Stryker.
+- Install packages, or run ESLint. Lint rules are read from the configuration as text.
+- Run the test suite, end-to-end suites, or a browser, except Stryker's sandboxed runs with `--with-mutation`.
+- Require a test file per component or module. One integration test can cover a page of components.
+- Treat coverage as proof of effectiveness, or grade a test by its shape alone. The pre-filter only chooses what to read.
+- Audit languages other than JavaScript and TypeScript.
