@@ -1,0 +1,9 @@
+Unsupported audit + valid audit
+exit=0; status=official; score=100
+auditsSelected=2; checksEvaluated=3
+excludedCandidates=0
+
+Only unsupported audit
+exit=0; status=provisional; score=100
+auditsSelected=1; checksEvaluated=2
+excludedCandidates=0
