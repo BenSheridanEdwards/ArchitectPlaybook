@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.2.0",
-  "catalogVersion": "2.0.0",
+  "catalogVersion": "2.1.0",
   "skillName": "testing-audit",
   "humanCanonicalSource": "SKILL.md",
   "description": "Machine-readable inventory of testing audit checks: test infrastructure, test effectiveness, test levels and critical paths, and component tests.",
@@ -52,7 +52,7 @@
       "severity": "high",
       "method": "tool",
       "rationale": "Without a runner and a command that starts it, no test can fail when the product breaks.",
-      "lastVerified": "2026-10-09",
+      "lastVerified": "2026-10-12",
       "expectation": "Test files exist, a runner is declared (Vitest, Jest, Create React App's react-scripts, node:test, Bun, Angular CLI with Karma or Jasmine, Playwright, Cypress, Storybook test-runner, Mocha, AVA, tap, or uvu), and a package script runs it. A test script the collector does not recognise leaves the check not evaluated.",
       "violationSignal": "No test files, test files with no runner to run them, or no package script that runs the suite.",
       "allowedStatuses": [
@@ -155,7 +155,7 @@
       "severity": "medium",
       "method": "tool",
       "rationale": "A mutation score shows directly whether the suite notices small changes to the code it covers, which coverage cannot.",
-      "lastVerified": "2026-10-09",
+      "lastVerified": "2026-10-12",
       "expectation": "With --with-mutation and Stryker installed, at least 80 percent of the mutants Stryker makes in a sandbox copy of the five riskiest files are detected. Without the flag or the tool, or when the protocol's collector time limit leaves too little time, the check is not evaluated.",
       "violationSignal": "A mutation score below 80 percent (partial) or below 60 percent (violation) on the riskiest files.",
       "allowedStatuses": [
@@ -196,7 +196,7 @@
       "severity": "medium",
       "method": "tool",
       "rationale": "The rules catch Testing Library mistakes that make tests pass without waiting for, or finding, what users see.",
-      "lastVerified": "2026-10-09",
+      "lastVerified": "2026-10-12",
       "expectation": "The ESLint configuration that applies to the component test files enables eslint-plugin-testing-library's framework configuration plus prefer-user-event and prefer-explicit-assert, so these rules are on: prefer-screen-queries, render-result-naming-convention, no-container, no-node-access, prefer-find-by, prefer-presence-queries, no-wait-for-multiple-assertions, no-wait-for-side-effects, no-unnecessary-act, no-manual-cleanup, prefer-user-event, and prefer-explicit-assert. Not applicable without Testing Library; not evaluated when a shared configuration the collector cannot read could change the result.",
       "violationSignal": "The plugin is not enabled (missing), or some of the rules are off (partial).",
       "allowedStatuses": [
@@ -212,7 +212,7 @@
       "severity": "low",
       "method": "tool",
       "rationale": "The rules replace raw DOM-property checks with matchers whose failures say what the user would see.",
-      "lastVerified": "2026-10-09",
+      "lastVerified": "2026-10-12",
       "expectation": "The ESLint configuration that applies to the component test files enables eslint-plugin-jest-dom's recommended rules. Not applicable without @testing-library/jest-dom; not evaluated when a shared configuration the collector cannot read could change the result.",
       "violationSignal": "The plugin is not enabled (missing), or some recommended rules are off (partial).",
       "allowedStatuses": [
