@@ -5,9 +5,12 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -340,6 +343,12 @@ class CoverageTests(CollectorTestCase):
     def test_commented_thresholds_do_not_count(self) -> None:
         self.package(VITEST_PACKAGE)
         self.write("vitest.config.ts", "export default { test: { coverage: { provider: 'v8' /* thresholds: { lines: 80 } */ } } };\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "coverage-thresholds-configured")["status"], "missing")
+
+    def test_empty_thresholds_are_not_a_floor(self) -> None:
+        self.package(VITEST_PACKAGE)
+        self.write("vitest.config.ts", "export default { test: { coverage: { enabled: true, thresholds: {} /* lines: 80 */ } } };\n")
         self.commit()
         self.assertEqual(self.check(self.collect(), "coverage-thresholds-configured")["status"], "missing")
 
@@ -686,7 +695,7 @@ class MutationTests(CollectorTestCase):
         self.install_stryker()
 
         def timeout(command: list[str], **options: Any) -> Any:
-            raise subprocess.TimeoutExpired(command, collector.MUTATION_TIMEOUT_SECONDS)
+            raise subprocess.TimeoutExpired(command, options["timeout"])
 
         check = self.check(self.collect(with_mutation=True, run=timeout), "mutations-in-riskiest-files-caught")
         self.assertEqual(check["evaluationState"], "not-evaluated")
@@ -706,6 +715,307 @@ class MutationTests(CollectorTestCase):
         result = json.loads(output.getvalue())
         self.assertIn("Stryker is not installed", result["checks"][CHECK + "mutations-in-riskiest-files-caught"]["reason"])
         self.assertEqual(result["snapshot"]["historyWindowMonths"], 3)
+
+
+class ReviewRegressionTests(CollectorTestCase):
+    """Regression tests for the review of the rewrite; each fails on the collector before its fix."""
+
+    # 1. Stryker must mutate a sandbox copy and write only under the audit's folder.
+    def generated_configuration(self, project: str) -> str:
+        self.write("stryker.config.json", project)
+        return collector.mutation_configuration(self.root, ["src/refunds.ts"])
+
+    def test_the_mutation_configuration_overrides_options_that_write_into_the_repository(self) -> None:
+        text = self.generated_configuration('{"testRunner": "vitest", "inPlace": true, "fileLogLevel": "trace", "reporters": ["html", "dashboard"]}')
+        overrides = json.loads(re.search(r"const overrides = (\{.*\});", text).group(1))
+        self.assertIs(overrides["inPlace"], False)
+        self.assertEqual(overrides["fileLogLevel"], "off")
+        self.assertEqual(overrides["reporters"], ["json"])
+        for key in ("tempDirName", "incrementalFile"):
+            self.assertTrue(overrides[key].startswith(".architect-audits/testing-audit/mutation/"), key)
+        self.assertTrue(overrides["jsonReporter"]["fileName"].startswith(".architect-audits/testing-audit/mutation/"))
+        self.assertIn("{ ...base, ...overrides,", text, "overrides must come after the project's settings")
+
+    @unittest.skipUnless(shutil.which("node"), "node is needed to evaluate the generated configuration")
+    def test_node_reads_the_generated_configuration_with_the_sandbox_forced(self) -> None:
+        self.write("stryker.config.mjs", "export default { testRunner: 'vitest', inPlace: true, fileLogLevel: 'trace', concurrency: 2 };\n")
+        config = self.root / "generated.mjs"
+        config.write_text(collector.mutation_configuration(self.root, ["src/refunds.ts"]), encoding="utf-8")
+        loaded = subprocess.run(
+            ["node", "--input-type=module", "-e", f"import c from {json.dumps(config.as_uri())}; console.log(JSON.stringify(c));"],
+            capture_output=True, text=True, check=True,
+        )
+        effective = json.loads(loaded.stdout)
+        self.assertIs(effective["inPlace"], False)
+        self.assertEqual(effective["fileLogLevel"], "off")
+        self.assertEqual(effective["testRunner"], "vitest")
+        self.assertEqual(effective["concurrency"], 2)
+
+    # 2. Runner recognition.
+    def test_bun_create_react_app_angular_tap_and_uvu_are_recognised(self) -> None:
+        cases = [
+            ({"scripts": {"test": "bun test"}}, "src/a.test.ts", "import { test, expect } from 'bun:test';\ntest('adds', () => { expect(1 + 1).toBe(2); });\n", "bun:test"),
+            ({"scripts": {"test": "react-scripts test"}, "dependencies": {"react-scripts": "5.0.1"}}, "src/App.test.js", "it('adds', () => { expect(1 + 1).toBe(2); });\n", "react-scripts"),
+            ({"scripts": {"test": "ng test"}, "devDependencies": {"karma": "6.4.0", "jasmine-core": "5.0.0"}}, "src/app/app.spec.ts", "describe('app', () => { it('adds', () => { expect(1 + 1).toBe(2); }); });\n", "angular-cli"),
+            ({"scripts": {"test": "tap"}, "devDependencies": {"tap": "21.0.0"}}, "test/math.ts", "import t from 'tap';\nt.test('adds', (t) => { t.equal(1 + 1, 2); t.end(); });\n", "tap"),
+            ({"scripts": {"test": "uvu tests"}, "devDependencies": {"uvu": "0.5.6"}}, "tests/math.js", "import { test } from 'uvu';\nimport * as assert from 'uvu/assert';\ntest('adds', () => { assert.is(1 + 1, 2); });\ntest.run();\n", "uvu"),
+        ]
+        for manifest, path, text, runner in cases:
+            with self.subTest(runner=runner):
+                for existing in list(self.root.iterdir()):
+                    if existing.name != ".git":
+                        shutil.rmtree(existing) if existing.is_dir() else existing.unlink()
+                self.package({"name": "app", **manifest})
+                self.write(path, text)
+                self.write("src/index.ts", "export const one = 1;\n")
+                self.commit(runner)
+                result = self.collect()
+                self.assertIn(runner, result["snapshot"]["runners"])
+                self.assertEqual(self.check(result, "tests-run-under-configured-runner")["status"], "present")
+
+    def test_node_test_files_are_found_outside_test_folders(self) -> None:
+        self.package({"name": "lib", "scripts": {"test": "node --test"}})
+        self.write("src/math.js", "export const add = (a, b) => a + b;\n")
+        self.write("src/math.check.js", "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { add } from './math.js';\ntest('adds', () => { assert.equal(add(1, 2), 3); });\n")
+        self.write("lib/parse_test.js", "import { test } from 'node:test';\ntest('parses', () => {});\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["snapshot"]["testFiles"]["total"], 2)
+        self.assertEqual(self.check(result, "tests-run-under-configured-runner")["status"], "present")
+
+    def test_an_unrecognised_test_script_is_not_evaluated_rather_than_missing(self) -> None:
+        self.package({"name": "app", "scripts": {"test": "./scripts/run-suite.sh --all"}})
+        self.write("src/index.ts", "export const one = 1;\n")
+        self.commit()
+        check = self.check(self.collect(), "tests-run-under-configured-runner")
+        self.assertEqual(check["evaluationState"], "not-evaluated")
+        self.assertIn("./scripts/run-suite.sh --all", check["reason"])
+        self.package({"name": "app", "scripts": {"test": "echo \"Error: no test specified\" && exit 1"}})
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "tests-run-under-configured-runner")["status"], "missing")
+
+    # 3. Repositories in other languages.
+    def test_a_tooling_only_package_json_makes_the_audit_not_applicable(self) -> None:
+        self.package({"name": "service", "private": True, "devDependencies": {"husky": "9.0.0", "@commitlint/cli": "19.0.0"}})
+        self.write("commitlint.config.js", "module.exports = { extends: ['@commitlint/config-conventional'] };\n")
+        self.write(".husky/commit-msg.js", "console.log('hook');\n")
+        self.write("app/service.py", "def add(a, b):\n    return a + b\n")
+        self.write("tests/test_service.py", "def test_add():\n    assert 1 + 1 == 2\n")
+        self.commit()
+        result = self.collect()
+        self.assertTrue(all(item["applicability"] == "not-applicable" for item in result["checks"].values()))
+        self.assertIn("audit-not-applicable", self.check(result, "tests-run-under-configured-runner")["reason"])
+
+    # 4. Chai chains.
+    def test_chai_assertions_are_read_as_matchers(self) -> None:
+        text = (
+            "import { expect } from 'chai';\n"
+            "import { add, find, notify } from '../src/math.js';\n"
+            "it('adds', () => { expect(add(2, 3)).to.equal(5); });\n"
+            "it('is positive', () => { expect(add(2, 3) > 0).to.be.true; });\n"
+            "it('deep equals', () => { expect(add(1, 1)).to.deep.equal(2); });\n"
+            "it('should style', () => { add(2, 3).should.equal(5); });\n"
+            "it('finds nothing', () => { expect(find('x')).to.be.undefined; });\n"
+            "it('does not exist', () => { expect(find('x')).to.not.exist; });\n"
+            "it('notifies', () => { notify(); expect(spy).to.have.been.calledWith('x'); });\n"
+        )
+        flags = flags_of("test/math.test.js", text)
+        for title in ("adds", "is positive", "deep equals", "should style"):
+            self.assertEqual(flags[title], [], title)
+        self.assertEqual(flags["finds nothing"], ["passes-if-undefined"])
+        self.assertEqual(flags["does not exist"], ["passes-if-undefined"])
+        self.assertEqual(flags["notifies"], ["mock-only"])
+
+    # 5, A, B. The ESLint reader.
+    def lint_project(self) -> None:
+        self.package({
+            **VITEST_PACKAGE, "dependencies": {"react": "19.0.0"},
+            "devDependencies": {"vitest": "4.0.0", "@testing-library/react": "16.0.0", "@testing-library/jest-dom": "6.0.0"},
+        })
+        self.write("src/ui/Button.test.tsx", "import { render, screen } from '@testing-library/react';\nit('shows', () => { render(<b />); expect(screen.getByRole('button')).toBeTruthy(); });\n")
+
+    def lint_results(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        self.commit()
+        result = self.collect()
+        return self.check(result, "testing-library-lint-rules-enforced"), self.check(result, "jest-dom-lint-rules-enforced")
+
+    def test_unquoted_yaml_configuration_is_read(self) -> None:
+        self.lint_project()
+        self.write(
+            ".eslintrc.yml",
+            "extends:\n  - eslint:recommended\n  - plugin:testing-library/react\n  - plugin:jest-dom/recommended\n"
+            "rules:\n  testing-library/prefer-user-event: error\n  testing-library/prefer-explicit-assert: warn  # explicit\n",
+        )
+        testing_library, jest_dom = self.lint_results()
+        self.assertEqual(testing_library["status"], "present")
+        self.assertEqual(jest_dom["status"], "present")
+
+    def test_an_unreadable_shared_configuration_is_not_evaluated(self) -> None:
+        self.lint_project()
+        package = json.loads((self.root / "package.json").read_text())
+        package["eslintConfig"] = {"extends": ["react-app", "react-app/jest"]}
+        self.package(package)
+        testing_library, jest_dom = self.lint_results()
+        self.assertEqual(testing_library["evaluationState"], "not-evaluated")
+        self.assertIn("react-app/jest", testing_library["reason"])
+        self.assertEqual(jest_dom["evaluationState"], "not-evaluated")
+
+    def test_presets_scoped_away_from_test_files_or_left_unused_do_not_count(self) -> None:
+        self.lint_project()
+        self.write(
+            "eslint.config.js",
+            "import testingLibrary from 'eslint-plugin-testing-library';\n"
+            "import jestDom from 'eslint-plugin-jest-dom';\n"
+            "const unused = testingLibrary.configs['flat/react'];\n"
+            "export default [{ files: ['scripts/**/*.js'], ...jestDom.configs['flat/recommended'] }];\n",
+        )
+        testing_library, jest_dom = self.lint_results()
+        self.assertEqual(testing_library["status"], "missing")
+        self.assertEqual(jest_dom["status"], "missing")
+
+    def test_settings_apply_in_configuration_order(self) -> None:
+        self.lint_project()
+        self.write(
+            "eslint.config.js",
+            "import jestDom from 'eslint-plugin-jest-dom';\n"
+            "export default [{ rules: { 'jest-dom/prefer-checked': 'off' } }, jestDom.configs['flat/recommended']];\n",
+        )
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "present", "a later preset turns the rule back on")
+        self.write(
+            "eslint.config.js",
+            "import jestDom from 'eslint-plugin-jest-dom';\n"
+            "export default [jestDom.configs['flat/recommended'], { rules: { 'jest-dom/prefer-checked': 'off' } }];\n",
+        )
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "partial")
+        self.assertIn("jest-dom/prefer-checked", jest_dom["gap"])
+
+    def test_an_own_rules_key_replaces_a_spread_presets_rules(self) -> None:
+        self.lint_project()
+        self.write(
+            "eslint.config.js",
+            "import jestDom from 'eslint-plugin-jest-dom';\n"
+            "export default [{ ...jestDom.configs['flat/recommended'], rules: { 'jest-dom/prefer-checked': 'error' } }];\n",
+        )
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "partial")
+        self.assertIn("jest-dom/prefer-empty", jest_dom["gap"])
+
+    def test_an_imported_shared_configuration_is_not_evaluated(self) -> None:
+        self.lint_project()
+        self.write("eslint.config.js", "import company from '@acme/eslint-config';\nexport default [...company];\n")
+        testing_library, _ = self.lint_results()
+        self.assertEqual(testing_library["evaluationState"], "not-evaluated")
+        self.assertIn("company", testing_library["reason"])
+
+    # 6. Evidence must survive the protocol when scripts contain escaped quotes.
+    def test_scripts_with_escaped_quotes_survive_audit_run_begin(self) -> None:
+        self.write("package.json", '{\n  "name": "monorepo",\n  "private": true,\n  "scripts": {\n'
+                   '    "test": "pnpm -r --filter \\"./packages/**\\" test",\n'
+                   '    "test:node": "node --import \\"tsx\\" --test"\n  }\n}\n')
+        self.write("pnpm-workspace.yaml", "packages:\n  - packages/*\n")
+        self.write("packages/core/package.json", json.dumps({"name": "@acme/core", "scripts": {"test": "node --import \"tsx\" --test"}}))
+        self.write("packages/core/src/index.ts", "export const one = 1;\n")
+        self.write("packages/core/src/index.test.ts", "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { one } from './index';\ntest('one', () => { assert.equal(one, 1); });\n")
+        self.commit()
+        protocol_spec = importlib.util.spec_from_file_location("audit_run_for_escaped_quotes", ROOT / "audit-protocol" / "scripts" / "audit_run.py")
+        assert protocol_spec and protocol_spec.loader
+        protocol = importlib.util.module_from_spec(protocol_spec)
+        sys.modules[protocol_spec.name] = protocol
+        protocol_spec.loader.exec_module(protocol)
+        for entry in self.check(self.collect(), "tests-run-under-configured-runner")["evidence"]:
+            protocol.verify_evidence(self.root, entry)
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "audit-protocol" / "scripts" / "audit_run.py"), "--repository", str(self.root), "begin", "testing-audit"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertNotIn("rejected", completed.stdout)
+        staged = json.loads((self.root / ".architect-audits" / "testing-audit" / ".staging" / "run.json").read_text())
+        runner = next(check for check in staged["checks"] if check["checkId"] == CHECK + "tests-run-under-configured-runner")
+        self.assertEqual(runner["status"], "present")
+        self.assertEqual(runner["recordedBy"], "collector")
+
+    # 7. The pre-filter is linear, and Stryker's budget fits the protocol's timeout.
+    def test_a_huge_test_is_scanned_quickly_and_capped(self) -> None:
+        body = "".join(f"  expect(square({index})).toBe({index * index});\n" for index in range(6000))
+        text = "import { square } from './square';\nit('squares', () => {\n" + body + "});\n"
+        began = time.monotonic()
+        blocks, _ = collector.prefilter("src/square.test.ts", text, collector.mask(text))
+        self.assertLess(time.monotonic() - began, 5)
+        self.assertEqual(blocks[0].flags, [])
+
+    def test_the_mutation_budget_leaves_room_inside_the_protocol_timeout(self) -> None:
+        self.assertEqual(collector.mutation_budget(5), collector.MUTATION_TIMEOUT_CAP_SECONDS)
+        self.assertLessEqual(collector.mutation_budget(200) + 200 + collector.MUTATION_MARGIN_SECONDS, collector.PROTOCOL_COLLECTOR_TIMEOUT_SECONDS)
+        self.write("node_modules/.bin/stryker", "#!/bin/sh\n")
+        check = collector.mutation_check(self.root, True, ["src/a.ts"], budget=collector.mutation_budget(480))
+        self.assertEqual(check["evaluationState"], "not-evaluated")
+        self.assertIn("too little for Stryker", check["reason"])
+
+    # 8. Monorepo resolution.
+    def test_workspace_packages_and_inherited_aliases_resolve(self) -> None:
+        self.package({"name": "monorepo", "private": True, "workspaces": ["packages/*"], "scripts": {"test": "vitest run"}, "devDependencies": {"vitest": "4.0.0"}})
+        self.write("tsconfig.base.json", '{"compilerOptions": {"baseUrl": ".", "paths": {"@shared/*": ["packages/shared/src/*"]}}}\n')
+        self.write("packages/app/tsconfig.json", '{"extends": "../../tsconfig.base.json"}\n')
+        self.write("packages/core/package.json", json.dumps({"name": "@acme/core", "main": "dist/index.js"}))
+        self.write("packages/core/src/index.ts", "export const core = 1;\n")
+        self.write("packages/shared/package.json", json.dumps({"name": "@acme/shared"}))
+        self.write("packages/shared/src/money.ts", "export const money = 1;\n")
+        self.write("packages/app/package.json", json.dumps({"name": "@acme/app"}))
+        self.write("packages/app/src/main.ts", "import { core } from '@acme/core';\nimport { money } from '@shared/money';\nexport const app = core + money;\n")
+        self.write("packages/app/src/main.test.ts", "import { core } from '@acme/core';\nimport { money } from '@shared/money';\nit('adds', () => { expect(core + money).toBe(2); });\n")
+        self.commit()
+        ranking = {item["path"]: item for item in self.collect()["snapshot"]["riskRanking"]}
+        self.assertEqual(ranking["packages/core/src/index.ts"]["fanIn"], 1)
+        self.assertEqual(ranking["packages/core/src/index.ts"]["importedByTests"], ["packages/app/src/main.test.ts"])
+        self.assertEqual(ranking["packages/shared/src/money.ts"]["importedByTests"], ["packages/app/src/main.test.ts"])
+
+    # Notes: workspace globs, the discovery budget, large files, and mutation reporting.
+    def test_bad_workspace_globs_are_ignored_without_escaping_the_repository(self) -> None:
+        outside = self.root.parent / "outside"
+        (outside / "pkg").mkdir(parents=True)
+        (outside / "pkg" / "package.json").write_text('{"name": "outside", "devDependencies": {"jest": "30.0.0"}}', encoding="utf-8")
+        self.package({"name": "monorepo", "workspaces": ["", "/tmp/*", "../outside/*", "C:/x/*", "packages/*"]})
+        self.write("packages/a/package.json", json.dumps({"name": "a", "scripts": {"test": "vitest run"}, "devDependencies": {"vitest": "4.0.0"}}))
+        self.write("packages/a/src/a.test.ts", "it('adds', () => { expect(1 + 1).toBe(2); });\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["snapshot"]["runners"], ["vitest"])
+
+    def test_the_candidate_list_holds_the_whole_discovery_budget(self) -> None:
+        self.assertGreaterEqual(collector.MAX_CANDIDATES, 100)
+        detection = (ROOT / "testing-audit" / "references" / "detection.md").read_text(encoding="utf-8")
+        self.assertIn(f"up to the {collector.MAX_CANDIDATES}", detection)
+
+    def test_large_files_degrade_the_focus_check_and_are_listed(self) -> None:
+        self.package(VITEST_PACKAGE)
+        self.write("src/a.test.ts", "it('adds', () => { expect(1 + 1).toBe(2); });\n")
+        self.write("src/huge.test.ts", "it.only('hidden', () => {});\n" + "// filler\n" * 250_000)
+        self.commit()
+        result = self.collect()
+        check = self.check(result, "no-focused-or-skipped-tests")
+        self.assertIn("src/huge.test.ts", check["degradedReason"])
+        self.assertEqual(result["snapshot"]["skippedLargeFiles"]["examples"], ["src/huge.test.ts"])
+
+    def test_mutation_failures_prefer_the_error_line_and_cite_survivors_first(self) -> None:
+        self.assertEqual(collector.failure_line("starting\nERROR Cannot find package 'typescript'\nNode.js v26.7.0\n"), "ERROR Cannot find package 'typescript'")
+        report = {"files": {"src/a.ts": {"mutants": [
+            {"mutatorName": "A", "status": "NoCoverage", "location": {"start": {"line": 1}}},
+            {"mutatorName": "B", "status": "Survived", "location": {"start": {"line": 2}}},
+        ]}}}
+        _, _, survivors = collector.mutation_score(report, self.root)
+        self.assertEqual([line for _, line, _ in survivors], [2, 1])
+
+
+class FixtureTests(unittest.TestCase):
+    def test_component_test_fixtures_clean_up_between_tests(self) -> None:
+        """Without Vitest globals, Testing Library never unmounts, and later tests find earlier renders."""
+        for case in ("hollow-suite", "sound-suite"):
+            script = (ROOT / "evals" / "testing-audit" / case / "fixture.sh").read_text(encoding="utf-8")
+            setup = re.search(r"w src/test/setup\.ts <<'EOF'\n(.*?)\nEOF\n", script, re.S)
+            assert setup is not None
+            self.assertTrue("globals: true" in script or re.search(r"afterEach\(\(\) => \{\s*cleanup\(\);", setup.group(1)), case)
 
 
 class ProtocolTests(CollectorTestCase):

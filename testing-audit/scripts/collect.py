@@ -34,7 +34,10 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+from bisect import bisect_left
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -48,9 +51,15 @@ SKIPPED_DIRECTORIES = {
 }
 MAX_FILES = 50_000
 MAX_FILE_BYTES = 2_000_000
-MAX_CANDIDATES = 40
+MAX_CANDIDATES = 100
+MAX_ASSERTIONS_PER_TEST = 100
 MUTATION_TARGETS = 5
-MUTATION_TIMEOUT_SECONDS = 480
+# The audit protocol stops a collector after 600 seconds (audit_run.py, apply_collector). Stryker gets
+# what is left after the scan, less a margin for reading its report, and never more than the cap.
+PROTOCOL_COLLECTOR_TIMEOUT_SECONDS = 600
+MUTATION_MARGIN_SECONDS = 90
+MUTATION_TIMEOUT_CAP_SECONDS = 420
+MUTATION_MINIMUM_SECONDS = 60
 MUTATION_DIRECTORY = Path(".architect-audits") / AUDIT / "mutation"
 
 
@@ -134,7 +143,13 @@ STRYKER_CONFIG_NAMES = tuple(
     for suffix in ("mjs", "js", "cjs", "json")
 )
 
-TEST_NAME_PATTERN = re.compile(r"\.(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$")
+TEST_NAME_PATTERN = re.compile(r"\.(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$|[_-]test\.[cm]?[jt]sx?$|(^|/)test-[^/]*\.[cm]?[jt]sx?$")
+# Test APIs a file can import; such a file is a test wherever it lives (node --test and bun test find them anywhere).
+TEST_API_IMPORT = re.compile(r"""(?:from|require\s*\()\s*['"](?:node:test|bun:test|vitest|@jest/globals|uvu|tap|ava|@playwright/test)['"]""")
+TOOLING_PATTERN = re.compile(
+    r"(^|/)\.|(^|/)[^/]*\.config\.[cm]?[jt]s$|(^|/)[^/]*rc\.[cm]?[jt]s$|(^|/)(?:scripts|tools|tooling)/"
+    r"|(^|/)(?:gulpfile|gruntfile|Gruntfile|dangerfile|Jakefile)\.[cm]?[jt]s$"
+)
 TEST_DIRECTORY_PATTERN = re.compile(r"(^|/)(__tests__|tests?|e2e|cypress|playwright|integration)/")
 STORY_PATTERN = re.compile(r"\.stories\.[cm]?[jt]sx?$")
 NON_SOURCE_PATTERN = re.compile(
@@ -147,16 +162,29 @@ IMPORT_PATTERN = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^[ \t]*import\s*)(['"])(?P<specifier>[^'"\n]+)\1""",
     re.M,
 )
+# Runners that execute unit or integration tests, so a coverage floor can apply to them.
+UNIT_RUNNERS = frozenset({
+    "vitest", "jest", "react-scripts", "node:test", "bun:test", "angular-cli", "karma", "jasmine",
+    "mocha", "ava", "tap", "uvu",
+})
 RUNNER_COMMANDS = {
     "vitest": re.compile(r"(?<![\w-])vitest\b"),
     "jest": re.compile(r"(?<![\w-])jest\b(?![\w-])"),
-    "node:test": re.compile(r"\b(?:node|tsx|bun)\b[^&|;\n]*\s--test\b"),
+    "react-scripts": re.compile(r"\breact-scripts\s+test\b"),
+    "node:test": re.compile(r"\b(?:node|tsx)\b[^&|;\n]*\s--test\b"),
+    "bun:test": re.compile(r"\bbun\s+test\b"),
+    "angular-cli": re.compile(r"(?<![\w-])ng\s+test\b"),
+    "karma": re.compile(r"(?<![\w-])karma\s+start\b"),
+    "jasmine": re.compile(r"(?<![\w-])jasmine\b(?![\w-])"),
+    "tap": re.compile(r"(?<![\w=/-])tap(?=\s|$)"),
+    "uvu": re.compile(r"(?<![\w-])uvu\b"),
     "playwright": re.compile(r"\bplaywright\s+test\b"),
     "cypress": re.compile(r"\bcypress\s+run\b"),
     "storybook-test-runner": re.compile(r"\btest-storybook\b"),
     "mocha": re.compile(r"(?<![\w-])mocha\b"),
     "ava": re.compile(r"(?<![\w-])ava\b(?![\w-])"),
 }
+PLACEHOLDER_TEST_SCRIPT = re.compile(r"no test specified")
 DELEGATING_TEST_COMMAND = re.compile(
     r"\b(?:turbo(?:\s+run)?|nx\s+(?:run-many|affected|run)|lerna\s+run|(?:pnpm|npm|yarn|bun)\s+(?:-r\s+|--recursive\s+|--workspaces\s+|workspaces\s+(?:foreach\s+)?)?(?:run\s+)?)[^&|;\n]*\btest\b"
 )
@@ -289,8 +317,13 @@ def cite_file(path: str, fragment: str | None = None, note: str | None = None) -
     return text
 
 
+@lru_cache(maxsize=32)
+def newline_offsets(text: str) -> list[int]:
+    return [index for index, character in enumerate(text) if character == "\n"]
+
+
 def line_of(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
+    return bisect_left(newline_offsets(text), index) + 1
 
 
 def line_text(text: str, line: int) -> str:
@@ -465,12 +498,22 @@ def workspaces(root: Path) -> list[Path]:
     if pnpm.is_file():
         globs += re.findall(r"^\s*-\s*['\"]?([^'\"\n]+)['\"]?\s*$", read_text(pnpm), flags=re.M)
     found: list[Path] = []
+    resolved_root = root.resolve()
     for pattern in globs:
-        if not isinstance(pattern, str) or pattern.startswith("!"):
+        pattern = pattern.strip() if isinstance(pattern, str) else ""
+        # Only relative patterns inside the repository: no empty, negated, absolute, or parent patterns.
+        if not pattern or pattern.startswith(("!", "/", "~")) or ".." in pattern.split("/") or re.match(r"^[A-Za-z]:", pattern):
             continue
-        for directory in sorted(root.glob(pattern)):
+        try:
+            matches = sorted(root.glob(pattern.rstrip("/")))
+        except (ValueError, NotImplementedError, OSError):
+            continue
+        for directory in matches:
+            resolved = directory.resolve()
+            if resolved != resolved_root and resolved_root not in resolved.parents:
+                continue
             if (directory / "package.json").is_file() and "node_modules" not in directory.parts:
-                found.append(directory.resolve())
+                found.append(resolved)
     return sorted(set(found))
 
 
@@ -528,13 +571,14 @@ def continuous_integration_test_runs(root: Path, files: list[str]) -> list[str]:
 # Test files
 
 
-def is_test_file(path: str, masked: str | None) -> bool:
+def is_test_file(path: str, masked: str | None, imports_test_api: bool = False) -> bool:
     if not path.endswith(SOURCE_SUFFIXES) or path.endswith(".d.ts"):
         return False
     if TEST_NAME_PATTERN.search(path) or "/__tests__/" in f"/{path}":
         return True
-    if TEST_DIRECTORY_PATTERN.search(path) and masked is not None:
-        return bool(TEST_API_PATTERN.search(masked))
+    if (TEST_DIRECTORY_PATTERN.search(path) or imports_test_api) and masked is not None:
+        # tap writes `t.test(...)`; count that form only in files that import a test API.
+        return bool(TEST_API_PATTERN.search(masked) or (imports_test_api and re.search(r"\b[A-Za-z_$][\w$]*\s*\.\s*test\s*\(", masked)))
     return False
 
 
@@ -609,7 +653,7 @@ SECOND_CALL_MODIFIERS = {"each", "for", "skipIf", "runIf"}
 EXPECT_CALL = re.compile(r"(?<![\w$.])expect\s*(?:\.\s*(?:soft|poll)\s*)?\(")
 ASSERT_CALL = re.compile(r"(?<![\w$.])(?:t\s*\.\s*)?assert(?:\s*\.\s*(?P<method>\w+))?\s*\(")
 IMPLICIT_ASSERTION = re.compile(
-    r"\.\s*should\s*\(|\bcy\s*\.\s*contains\s*\(|(?<![\w$.])(?:(?:screen|canvas)\s*\.\s*)?(?:get|find)(?:All)?By[A-Z]\w*\s*\("
+    r"\.\s*should\s*[(.]|\bcy\s*\.\s*contains\s*\(|(?<![\w$.])(?:(?:screen|canvas)\s*\.\s*)?(?:get|find)(?:All)?By[A-Z]\w*\s*\("
     r"|\bexpect\s*\.\s*(?:assertions|hasAssertions)\s*\(|\bt\s*\.\s*(?:is|not|deepEqual|true|false|truthy|falsy|throws|snapshot|plan)\s*\("
 )
 MOCK_MATCHERS = {
@@ -617,12 +661,25 @@ MOCK_MATCHERS = {
     "toHaveBeenNthCalledWith", "toBeCalled", "toBeCalledWith", "toBeCalledTimes", "lastCalledWith",
     "nthCalledWith", "toHaveReturned", "toHaveReturnedWith", "toHaveReturnedTimes", "toHaveLastReturnedWith",
     "toHaveNthReturnedWith", "toHaveBeenCalledOnce", "toHaveBeenCalledExactlyOnceWith",
+    # sinon-chai
+    "called", "calledOnce", "calledTwice", "calledThrice", "calledWith", "calledOnceWith", "calledWithExactly",
+    "calledOnceWithExactly", "calledWithMatch", "callCount", "calledBefore", "calledAfter", "returned",
 }
 SNAPSHOT_MATCHERS = {
     "toMatchSnapshot", "toMatchInlineSnapshot", "toMatchFileSnapshot", "toThrowErrorMatchingSnapshot",
     "toThrowErrorMatchingInlineSnapshot",
 }
-EQUALITY_MATCHERS = {"toBe", "toEqual", "toStrictEqual", "toMatchObject"}
+EQUALITY_MATCHERS = {"toBe", "toEqual", "toStrictEqual", "toMatchObject", "equal", "equals", "eq", "eql"}
+# Words Chai chains between `expect(value)` and its assertion; `not` negates, and the async words defer it.
+CHAIN_WORDS = (
+    "to", "be", "been", "is", "that", "which", "and", "has", "have", "with", "at", "of", "same", "but", "does",
+    "still", "also", "deep", "nested", "own", "ordered", "any", "all", "itself", "not", "resolves", "rejects", "eventually",
+)
+EXPECT_CHAIN = re.compile(
+    r"(?P<chain>(?:\s*\.\s*(?:" + "|".join(CHAIN_WORDS) + r")\b(?!\s*\())*)\s*\.\s*(?P<matcher>[A-Za-z_$][\w$]*)(?P<call>\s*\()?"
+)
+# Matchers, Jest's and Chai's, that pass when the value is undefined.
+UNDEFINED_PASSING = {"toBeUndefined", "toBeFalsy", "undefined"}
 MOCK_VALUE = re.compile(
     r"\.\s*mock(?:Resolved|Returned|Rejected)Value(?:Once)?\s*\(|\.\s*mockImplementation(?:Once)?\s*\(|"
     r"(?<![\w$.])(?:vi|jest)\s*\.\s*fn\s*\(|\bmock\s*\.\s*fn\s*\("
@@ -717,37 +774,70 @@ def mock_values(text: str, masked: str) -> set[str]:
     return values
 
 
-def guarded(masked: str, body_start: int, position: int) -> bool:
+DECLARATION = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=(?!=)")
+
+
+def declarations(text: str, masked: str, start: int, end: int) -> dict[str, str]:
+    """Each variable declared between `start` and `end`, with its initializer's first line; the first one wins."""
+    found: dict[str, str] = {}
+    for match in DECLARATION.finditer(masked, start, end):
+        if match.group(1) not in found:
+            line_end = masked.find("\n", match.end())
+            found[match.group(1)] = text[match.end():line_end if line_end != -1 else len(text)]
+    return found
+
+
+def product_derived(expression: str, names_pattern: re.Pattern[str] | None, local: dict[str, str], file: dict[str, str]) -> bool:
+    """Whether an expression is, or names a variable set to, a call into the code under test."""
+    if names_pattern is None:
+        return False
+    expression = expression.strip()
+    if names_pattern.match(expression):
+        return True
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*", expression):
+        return False
+    initializer = local.get(expression, file.get(expression))
+    return initializer is not None and bool(names_pattern.match(initializer))
+
+
+def opener_stacks(masked: str, start: int, end: int, positions: list[int]) -> dict[int, list[int]]:
+    """The open brackets enclosing each position, from one pass over the block."""
+    stacks: dict[int, list[int]] = {}
+    wanted = sorted(set(positions))
+    stack: list[int] = []
+    cursor = 0
+    for index in range(start, end):
+        while cursor < len(wanted) and wanted[cursor] == index:
+            stacks[index] = list(stack)
+            cursor += 1
+        if cursor >= len(wanted):
+            break
+        character = masked[index]
+        if character in "({[":
+            stack.append(index)
+        elif character in ")}]" and stack:
+            stack.pop()
+    return stacks
+
+
+def guarded(masked: str, body_start: int, position: int, openers: list[int]) -> bool:
     """Whether the assertion at `position` runs only on some paths: in an if, loop, callback, or catch."""
     statement_start = max(masked.rfind(";", body_start, position), masked.rfind("{", body_start, position), masked.rfind("}", body_start, position))
     if GUARD_STATEMENT.search(masked[statement_start + 1:position]):
         return True
-    openers: list[int] = []
-    for index in range(body_start, position):
-        character = masked[index]
-        if character in "({[":
-            openers.append(index)
-        elif character in ")}]" and openers:
-            openers.pop()
     for opener in openers:
-        before = masked[max(body_start, opener - 120):opener]
-        if masked[opener] == "{" and GUARD_BEFORE_BRACE.search(before):
+        window = max(body_start, opener - 120)
+        if masked[opener] == "{" and GUARD_BEFORE_BRACE.search(masked[window:opener]):
             return True
-        if masked[opener] == "(" and GUARD_BEFORE_PARENTHESIS.search(before):
+        if masked[opener] == "(" and GUARD_BEFORE_PARENTHESIS.search(masked[window:opener]):
             return True
-        if masked[opener] == "{" and re.search(r"=>\s*$", before):
-            # An arrow function body: guarded when the arrow is an argument to a guarding call.
-            arrow_start = masked.rfind("(", body_start, opener)
-            if arrow_start != -1 and GUARD_BEFORE_PARENTHESIS.search(masked[max(body_start, arrow_start - 60):arrow_start]):
-                return True
     return False
 
 
 def awaited(masked: str, body_start: int, position: int) -> bool:
     statement_start = max(masked.rfind(";", body_start, position), masked.rfind("{", body_start, position), masked.rfind("}", body_start, position), masked.rfind("\n", body_start, position))
-    return bool(re.search(r"\b(?:await|return)\b", masked[statement_start + 1:position])) or bool(
-        re.search(r"=>\s*$", masked[body_start:position])
-    )
+    prefix = masked[statement_start + 1:position]
+    return bool(re.search(r"\b(?:await|return)\b", prefix)) or bool(re.search(r"=>\s*$", masked[max(body_start, position - 40):position]))
 
 
 class Assertion:
@@ -781,8 +871,8 @@ class Assertion:
             if not self.matcher:
                 return True  # `expect(value)` with no matcher asserts nothing
             if self.negated:
-                return self.matcher not in ("toBeUndefined", "toBeFalsy")
-            if self.matcher in ("toBeUndefined", "toBeFalsy"):
+                return self.matcher not in UNDEFINED_PASSING
+            if self.matcher in UNDEFINED_PASSING:
                 return True
             if self.matcher in EQUALITY_MATCHERS and expected == "undefined":
                 return True
@@ -796,72 +886,55 @@ class Assertion:
         return False
 
 
-def product_derived(expression: str, text: str, masked: str, start: int, end: int, names: set[str]) -> bool:
-    """Whether an expression is, or names a variable set to, a call into the code under test."""
-    if not names:
-        return False
-    call = re.compile(rf"^\s*(?:await\s+)?(?:new\s+)?(?:{'|'.join(re.escape(name) for name in sorted(names))})\b[\w$.]*\s*\(")
-    expression = expression.strip()
-    if call.match(expression):
-        return True
-    if not re.fullmatch(r"[A-Za-z_$][\w$]*", expression):
-        return False
-    for scope_start, scope_end in ((start, end), (0, len(masked))):
-        declaration = re.search(rf"\b(?:const|let|var)\s+{re.escape(expression)}\s*(?::[^=;]+)?=(?!=)", masked[scope_start:scope_end])
-        if declaration:
-            initializer_start = scope_start + declaration.end()
-            initializer_end = masked.find("\n", initializer_start)
-            return bool(call.match(text[initializer_start:initializer_end if initializer_end != -1 else len(text)]))
-    return False
-
-
-def assertions_in(text: str, masked: str, start: int, end: int, web_first: bool = False, names: set[str] | None = None) -> list[Assertion]:
+def assertions_in(text: str, masked: str, start: int, end: int, web_first: bool = False, names: set[str] | None = None,
+                  file_declarations: dict[str, str] | None = None) -> list[Assertion]:
+    """The assertions in one test, at most MAX_ASSERTIONS_PER_TEST of them, read in one pass over the block."""
+    calls = [("expect", match) for match in EXPECT_CALL.finditer(masked, start, end)]
+    calls += [("assert", match) for match in ASSERT_CALL.finditer(masked, start, end)]
+    calls = sorted(calls, key=lambda item: item[1].start())[:MAX_ASSERTIONS_PER_TEST]
+    stacks = opener_stacks(masked, start, end, [match.start() for _, match in calls])
+    names_pattern = re.compile(rf"^\s*(?:await\s+)?(?:new\s+)?(?:{'|'.join(re.escape(name) for name in sorted(names))})\b[\w$.]*\s*\(") if names else None
+    local = declarations(text, masked, start, end) if names else {}
+    file = file_declarations if file_declarations is not None else {}
     found: list[Assertion] = []
-    for match in EXPECT_CALL.finditer(masked, start, end):
+    for kind, match in calls:
         opening = match.end() - 1
         closing = matching(masked, opening)
         if closing == -1 or closing > end:
             continue
-        subject = text[opening + 1:closing]
-        chain = re.match(r"(?P<chain>(?:\s*\.\s*(?:not|resolves|rejects))*)\s*\.\s*(?P<matcher>\w+)\s*\(", masked[closing + 1:end])
-        matcher = ""
-        negated = False
-        expected = None
-        is_async = False
-        if chain:
-            matcher = chain.group("matcher")
-            negated = "not" in chain.group("chain")
-            is_async = bool(re.search(r"resolves|rejects", chain.group("chain")))
-            argument_open = closing + 1 + chain.end() - 1
-            argument_close = matching(masked, argument_open)
-            if argument_close != -1:
-                spans = split_arguments(masked, argument_open + 1, argument_close)
-                expected = text[spans[0][0]:spans[0][1]] if spans else None
-        line = line_of(masked, match.start())
-        asynchronous = is_async or "poll" in match.group(0) or (web_first and matcher in WEB_FIRST_MATCHERS)
-        assertion = Assertion(
-            line, "expect", matcher, negated, subject, expected,
-            guarded(masked, start, match.start()),
-            asynchronous and not awaited(masked, start, match.start()),
-        )
-        assertion.expected_from_product = bool(expected) and product_derived(expected, text, masked, start, end, names or set())
-        found.append(assertion)
-    for match in ASSERT_CALL.finditer(masked, start, end):
-        opening = match.end() - 1
-        closing = matching(masked, opening)
-        if closing == -1 or closing > end:
-            continue
-        spans = split_arguments(masked, opening + 1, closing)
-        subject = text[spans[0][0]:spans[0][1]] if spans else ""
-        expected = text[spans[1][0]:spans[1][1]] if len(spans) > 1 else None
-        method = match.group("method") or "ok"
-        is_async = method in ("rejects", "doesNotReject")
-        assertion = Assertion(
-            line_of(masked, match.start()), "assert", method, method.startswith("not") or method.startswith("doesNot"),
-            subject, expected, guarded(masked, start, match.start()),
-            is_async and not awaited(masked, start, match.start()),
-        )
-        assertion.expected_from_product = bool(expected) and product_derived(expected, text, masked, start, end, names or set())
+        openers = stacks.get(match.start(), [])
+        conditional = guarded(masked, start, match.start(), openers)
+        if kind == "expect":
+            subject = text[opening + 1:closing]
+            chain = EXPECT_CHAIN.match(masked, closing + 1, end)
+            matcher, negated, expected, asynchronous = "", False, None, "poll" in match.group(0)
+            if chain:
+                matcher = chain.group("matcher")
+                words = re.findall(r"\w+", chain.group("chain"))
+                negated = "not" in words
+                asynchronous = asynchronous or bool({"resolves", "rejects", "eventually"} & set(words))
+                if chain.group("call"):
+                    argument_open = chain.end() - 1
+                    argument_close = matching(masked, argument_open)
+                    if argument_close != -1:
+                        spans = split_arguments(masked, argument_open + 1, argument_close)
+                        expected = text[spans[0][0]:spans[0][1]] if spans else None
+            asynchronous = asynchronous or (web_first and matcher in WEB_FIRST_MATCHERS)
+            assertion = Assertion(
+                line_of(masked, match.start()), "expect", matcher, negated, subject, expected, conditional,
+                asynchronous and not awaited(masked, start, match.start()),
+            )
+        else:
+            spans = split_arguments(masked, opening + 1, closing)
+            subject = text[spans[0][0]:spans[0][1]] if spans else ""
+            expected = text[spans[1][0]:spans[1][1]] if len(spans) > 1 else None
+            method = match.group("method") or "ok"
+            assertion = Assertion(
+                line_of(masked, match.start()), "assert", method, method.startswith("not") or method.startswith("doesNot"),
+                subject, expected, conditional,
+                method in ("rejects", "doesNotReject") and not awaited(masked, start, match.start()),
+            )
+        assertion.expected_from_product = bool(assertion.expected) and product_derived(assertion.expected or "", names_pattern, local, file)
         found.append(assertion)
     return sorted(found, key=lambda item: item.line)
 
@@ -939,11 +1012,12 @@ def prefilter(
     names = imported_bindings(mask(text, strings=False), product)
     helpers = assertion_helpers(masked, names)
     fed = mock_values(text, masked)
+    file_declarations = declarations(text, masked, 0, len(masked)) if names else {}
     counts: Counter[str] = Counter()
-    equality = EQUALITY_MATCHERS | {"equal", "strictEqual", "deepEqual", "deepStrictEqual"}
+    equality = EQUALITY_MATCHERS | {"strictEqual", "deepEqual", "deepStrictEqual"}
     for block in blocks:
         segment = masked[block.start:block.end]
-        found = assertions_in(text, masked, block.start, block.end, web_first, names)
+        found = assertions_in(text, masked, block.start, block.end, web_first, names, file_declarations)
         helper_calls = [name for name in helpers if re.search(rf"(?<![\w$.]){re.escape(name)}\s*\(", segment)]
         implicit = bool(IMPLICIT_ASSERTION.search(segment))
         if not found and not helper_calls and not implicit:
@@ -973,10 +1047,10 @@ def near_duplicates(blocks: list[TestBlock], counts: Counter[str]) -> None:
         bodies.append(re.sub(r"\s+", " ", body).strip())
         asserted.append(sorted(re.sub(r"\s+", "", line) for line in body.split("\n") if re.search(r"\bexpect\b|\bassert\b", line)))
     for left in range(len(blocks)):
-        if len(bodies[left]) < 60:
+        if not 60 <= len(bodies[left]) <= 20_000:
             continue
         for right in range(left + 1, min(len(blocks), left + 200)):
-            if len(bodies[right]) < 60 or "each" in blocks[left].modifiers or "each" in blocks[right].modifiers:
+            if not 60 <= len(bodies[right]) <= 20_000 or "each" in blocks[left].modifiers or "each" in blocks[right].modifiers:
                 continue
             if not asserted[left] or asserted[left] != asserted[right]:
                 continue
@@ -993,21 +1067,87 @@ def near_duplicates(blocks: list[TestBlock], counts: Counter[str]) -> None:
 # Import graph, churn, and risk
 
 
-class Resolver:
-    """Resolve relative imports and the root tsconfig's path aliases to repository files."""
+def tsconfig_paths(config: Path, root: Path, depth: int = 0) -> tuple[list[tuple[str, list[str]]], bool]:
+    """A tsconfig's effective path aliases, following `extends`; targets are relative to the repository root.
 
-    def __init__(self, root: Path, files: set[str]) -> None:
+    Returns the aliases and whether this file or one it extends defines `paths` at all.
+    """
+    if depth > 5 or not config.is_file():
+        return [], False
+    data = load_jsonc(config)
+    aliases: list[tuple[str, list[str]]] = []
+    defined = False
+    base_url: Path | None = None
+    extends = data.get("extends")
+    for parent in [extends] if isinstance(extends, str) else extends if isinstance(extends, list) else []:
+        if not isinstance(parent, str):
+            continue
+        candidates = (
+            [(config.parent / parent)] if parent.startswith(".")
+            else [folder / "node_modules" / parent for folder in [config.parent, *config.parent.parents]]
+        )
+        for candidate in candidates:
+            target = next((item for item in (candidate, Path(f"{candidate}.json"), candidate / "tsconfig.json") if item.is_file()), None)
+            if target:
+                parent_aliases, parent_defined = tsconfig_paths(target, root, depth + 1)
+                if parent_defined:
+                    aliases, defined = parent_aliases, True
+                break
+    options = data.get("compilerOptions") or {}
+    if isinstance(options.get("baseUrl"), str):
+        base_url = (config.parent / options["baseUrl"]).resolve()
+    paths = options.get("paths")
+    if isinstance(paths, dict):
+        base = base_url or config.parent.resolve()
+        aliases, defined = [], True
+        for pattern, targets in paths.items():
+            if isinstance(targets, list):
+                resolved = []
+                for target in targets:
+                    if isinstance(target, str):
+                        try:
+                            resolved.append((base / target).resolve().relative_to(root.resolve()).as_posix())
+                        except ValueError:
+                            continue
+                aliases.append((pattern, resolved))
+    return aliases, defined
+
+
+class Resolver:
+    """Resolve relative imports, tsconfig path aliases, and workspace package names to repository files."""
+
+    def __init__(self, root: Path, files: set[str], packages: list[Path] | None = None) -> None:
         self.root = root
         self.files = files
-        self.aliases: list[tuple[str, list[str]]] = []
-        for name in ("tsconfig.json", "jsconfig.json"):
-            options = load_jsonc(root / name).get("compilerOptions") or {}
-            base = str(options.get("baseUrl") or ".")
-            paths = options.get("paths")
-            if isinstance(paths, dict):
-                for pattern, targets in paths.items():
-                    if isinstance(targets, list):
-                        self.aliases.append((pattern, [str(Path(base) / target) for target in targets if isinstance(target, str)]))
+        self.scopes: list[tuple[str, list[tuple[str, list[str]]]]] = []
+        folders = [root.resolve(), *(packages or [])]
+        for folder in folders:
+            for name in ("tsconfig.json", "tsconfig.base.json", "jsconfig.json"):
+                aliases, _ = tsconfig_paths(folder / name, root)
+                if aliases:
+                    self.scopes.append((relative(root, folder) if folder != root.resolve() else "", aliases))
+        self.scopes.sort(key=lambda scope: -len(scope[0]))
+        self.packages: dict[str, tuple[str, list[str]]] = {}
+        for folder in packages or []:
+            manifest = load_jsonc(folder / "package.json")
+            name = manifest.get("name")
+            if isinstance(name, str) and name:
+                directory = relative(root, folder)
+                entries = []
+                for field in ("source", "types", "module", "main"):
+                    value = manifest.get(field)
+                    if isinstance(value, str):
+                        entries.append(value)
+                exports = manifest.get("exports")
+                if isinstance(exports, str):
+                    entries.append(exports)
+                elif isinstance(exports, dict):
+                    main = exports.get(".", exports)
+                    if isinstance(main, str):
+                        entries.append(main)
+                    elif isinstance(main, dict):
+                        entries += [value for value in main.values() if isinstance(value, str)]
+                self.packages[name] = (directory, entries)
 
     def _first(self, base: str) -> str | None:
         base = str(Path(base).as_posix())
@@ -1028,24 +1168,43 @@ class Resolver:
             candidates += [bare + suffix for suffix in (".ts", ".tsx", ".mts", ".cts")]
         return next((candidate for candidate in candidates if candidate in self.files), None)
 
+    def _package(self, specifier: str) -> str | None:
+        for name, (directory, entries) in self.packages.items():
+            if specifier == name:
+                for entry in entries:
+                    entry = entry[2:] if entry.startswith("./") else entry
+                    found = self._first(f"{directory}/{entry}")
+                    if not found and entry.split("/")[0] in ("dist", "build", "lib", "out"):
+                        found = self._first(f"{directory}/src/{'/'.join(entry.split('/')[1:])}")
+                    if found:
+                        return found
+                return self._first(f"{directory}/src/index") or self._first(f"{directory}/index")
+            if specifier.startswith(name + "/"):
+                rest = specifier[len(name) + 1:]
+                return self._first(f"{directory}/src/{rest}") or self._first(f"{directory}/{rest}")
+        return None
+
     def resolve(self, importer: str, specifier: str) -> str | None:
         if specifier.startswith("."):
             return self._first(str(Path(importer).parent / specifier))
-        for pattern, targets in self.aliases:
-            if "*" in pattern:
-                prefix, _, suffix = pattern.partition("*")
-                if specifier.startswith(prefix) and specifier.endswith(suffix):
-                    middle = specifier[len(prefix): len(specifier) - len(suffix) if suffix else None]
+        for scope, aliases in self.scopes:
+            if scope and not importer.startswith(scope + "/"):
+                continue
+            for pattern, targets in aliases:
+                if "*" in pattern:
+                    prefix, _, suffix = pattern.partition("*")
+                    if specifier.startswith(prefix) and specifier.endswith(suffix):
+                        middle = specifier[len(prefix): len(specifier) - len(suffix) if suffix else None]
+                        for target in targets:
+                            found = self._first(target.replace("*", middle))
+                            if found:
+                                return found
+                elif specifier == pattern:
                     for target in targets:
-                        found = self._first(target.replace("*", middle))
+                        found = self._first(target)
                         if found:
                             return found
-            elif specifier == pattern:
-                for target in targets:
-                    found = self._first(target)
-                    if found:
-                        return found
-        return None
+        return self._package(specifier)
 
 
 def churn(root: Path, months: int) -> Counter[str]:
@@ -1057,17 +1216,25 @@ def churn(root: Path, months: int) -> Counter[str]:
 # Tool checks
 
 
+def command_token(text: str) -> str:
+    """The first word of a matched command, which appears verbatim in package.json even when the script has escaped quotes."""
+    match = re.match(r"[\w@:./-]+", text.strip())
+    return match.group(0) if match else text.strip().split()[0]
+
+
 def runner_facts(manifests: Manifests, files: list[str], test_imports: Counter[str]) -> dict[str, list[str]]:
     """Each detected runner, with verifiable evidence."""
     runners: dict[str, list[str]] = {}
 
     def add(name: str, entry: str) -> None:
-        runners.setdefault(name, []).append(entry)
+        if entry not in runners.get(name, []):
+            runners.setdefault(name, []).append(entry)
 
     for runner, package in (
         ("vitest", "vitest"), ("jest", "jest"), ("playwright", "@playwright/test"), ("cypress", "cypress"),
         ("storybook-test-runner", "@storybook/test-runner"), ("storybook-test-runner", "@storybook/addon-vitest"),
-        ("mocha", "mocha"), ("ava", "ava"),
+        ("mocha", "mocha"), ("ava", "ava"), ("karma", "karma"), ("jasmine", "jasmine"), ("jasmine", "jasmine-core"),
+        ("tap", "tap"), ("uvu", "uvu"),
     ):
         manifest = manifests.dependency(package)
         if manifest:
@@ -1077,29 +1244,44 @@ def runner_facts(manifests: Manifests, files: list[str], test_imports: Counter[s
         "jest": r"(^|/)jest\.config\.[cm]?[jt]s(?:on)?$",
         "playwright": r"(^|/)playwright(?:-ct)?\.config\.[cm]?[jt]s$",
         "cypress": r"(^|/)cypress\.config\.[cm]?[jt]s$",
+        "karma": r"(^|/)karma\.conf\.[cm]?[jt]s$",
     }
     for runner, pattern in config_patterns.items():
         for path in files:
             if re.search(pattern, path) and runner not in runners:
                 add(runner, cite_file(path))
-    if test_imports.get("node:test"):
-        add("node:test", f"command: `collect.py test-file scan` → {test_imports['node:test']} test files import node:test")
+    for module, runner in (("node:test", "node:test"), ("bun:test", "bun:test")):
+        if test_imports.get(module):
+            add(runner, f"command: `collect.py test-file scan` → {test_imports[module]} test files import {module}")
     for path, name, command in manifests.scripts():
-        match = RUNNER_COMMANDS["node:test"].search(command)
-        if match and "node:test" not in runners:
-            add("node:test", cite_file(path, match.group(0)))
+        for runner, pattern in RUNNER_COMMANDS.items():
+            match = pattern.search(command)
+            if match and runner not in runners:
+                add(runner, cite_file(path, command_token(match.group(0))))
     return runners
 
 
 def scripts_running_tests(manifests: Manifests) -> list[tuple[str, str, str]]:
-    """(manifest, script name, the fragment that runs tests) for each script that runs a test runner."""
+    """(manifest, script name, the command's first word) for each script that runs a test runner."""
     found = []
     for path, name, command in manifests.scripts():
         match = next((match for pattern in RUNNER_COMMANDS.values() for match in [pattern.search(command)] if match), None)
         if match is None and name == "test":
             match = DELEGATING_TEST_COMMAND.search(command)
         if match:
-            found.append((path, name, match.group(0).strip()))
+            found.append((path, name, command_token(match.group(0))))
+    return found
+
+
+def unrecognised_test_scripts(manifests: Manifests) -> list[tuple[str, str]]:
+    """`test` scripts that run something the collector does not recognise, so it cannot say whether tests run."""
+    found = []
+    for path, name, command in manifests.scripts():
+        if name != "test" or not command.strip() or PLACEHOLDER_TEST_SCRIPT.search(command):
+            continue
+        if any(pattern.search(command) for pattern in RUNNER_COMMANDS.values()) or DELEGATING_TEST_COMMAND.search(command):
+            continue
+        found.append((path, command.strip()))
     return found
 
 
@@ -1165,7 +1347,8 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
             text = mask(read_text(root / path), strings=False)
             block = object_block(text, "coverage")
             if block:
-                if re.search(r"\bthresholds\s*:", block):
+                limits = object_block(block, "thresholds")
+                if limits is not None and re.search(r"\b(?:lines|branches|functions|statements)\s*:\s*[1-9]|\b100\s*:\s*true\b", limits):
                     thresholds.append(cite_file(path, "thresholds"))
                 elif re.search(r"\b(?:lines|branches|functions|statements)\s*:\s*\d", block):
                     thresholds.append(cite_file(path, "coverage", "with per-metric minimums"))
@@ -1216,90 +1399,524 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
     return {"thresholds": thresholds, "enabled": enabled}
 
 
-def eslint_configuration(root: Path, files: list[str], manifests: Manifests) -> dict[str, Any]:
-    """Read every ESLint configuration as text, for the testing-library and jest-dom plugins."""
-    configs = [path for path in files if Path(path).name in ESLINT_CONFIG_NAMES]
-    result: dict[str, Any] = {"files": configs, "testing-library": None, "jest-dom": None}
-    for plugin, prefix, preset_pattern, presets in (
-        ("testing-library", "testing-library", r"(?:flat/)?(react|vue|svelte|angular|marko|dom)", TESTING_LIBRARY_PRESETS),
-        ("jest-dom", "jest-dom", r"(?:flat/)?(recommended|all)", {"recommended": set(JEST_DOM_RULES), "all": set(JEST_DOM_RULES)}),
-    ):
-        enabled_in: list[str] = []
-        preset_rules: set[str] = set()
-        preset_names: list[str] = []
-        rules: dict[str, str] = {}
-        rule_evidence: dict[str, str] = {}
-        sources: list[tuple[str, str]] = [(path, mask(read_text(root / path), strings=False)) for path in configs]
-        for path, package in manifests.packages:
-            if isinstance(package.get("eslintConfig"), dict):
-                sources.append((path, json.dumps(package["eslintConfig"])))
-        for path, text in sources:
-            package_name = f"eslint-plugin-{plugin}"
-            bindings = re.findall(rf"(?:import\s+(?:\*\s+as\s+)?([\w$]+)\s+from|(?:const|let|var)\s+([\w$]+)\s*=\s*require\s*\()\s*['\"]{re.escape(package_name)}['\"]", text)
-            names = [name for pair in bindings for name in pair if name]
-            uses_plugin = bool(re.search(rf"['\"]{re.escape(package_name)}['\"]", text)) or bool(
-                re.search(rf"['\"]plugin:{re.escape(prefix)}/", text)
-            ) or bool(re.search(rf"['\"]plugins['\"]?\s*:\s*\[[^\]]*['\"]{re.escape(prefix)}['\"]", text))
-            for name in names:
-                for match in re.finditer(rf"\b{re.escape(name)}\s*\.\s*configs\s*(?:\[\s*['\"]{preset_pattern}['\"]\s*\]|\.\s*{preset_pattern.replace('(?:flat/)?', '')}\b)", text):
-                    preset = match.group(1) or match.group(2)
-                    preset_names.append(preset)
-                    preset_rules |= presets.get(preset, set())
-                    enabled_in.append(cite_file(path, match.group(0)))
-            for match in re.finditer(rf"['\"]plugin:{re.escape(prefix)}/{preset_pattern.replace('(?:flat/)?', '')}['\"]", text):
-                preset = match.group(1)
-                preset_names.append(preset)
-                preset_rules |= presets.get(preset, set())
-                enabled_in.append(cite_file(path, match.group(0).strip("'\"")))
-            for match in re.finditer(
-                rf"['\"]{re.escape(prefix)}/([\w-]+)['\"]\s*:\s*(\[\s*)?['\"]?(off|warn|error|0|1|2)\b", text
-            ):
-                level = {"0": "off", "1": "warn", "2": "error"}.get(match.group(3), match.group(3))
-                rules[match.group(1)] = level
-                rule_evidence[match.group(1)] = cite_file(path, f"{prefix}/{match.group(1)}")
-            if uses_plugin and not enabled_in and (names or rules):
-                enabled_in.append(cite_file(path, package_name if package_name in text else f"{prefix}/"))
-        if not enabled_in and not rules:
+LINT_PLUGINS = {
+    "testing-library": {
+        "package": "eslint-plugin-testing-library",
+        "required": TESTING_LIBRARY_RULES,
+        "presets": TESTING_LIBRARY_PRESETS,
+    },
+    "jest-dom": {
+        "package": "eslint-plugin-jest-dom",
+        "required": JEST_DOM_RULES,
+        "presets": {"recommended": set(JEST_DOM_RULES), "all": set(JEST_DOM_RULES)},
+    },
+}
+# Packages whose shared configurations cannot enable or disable a testing-library or jest-dom rule.
+NEUTRAL_CONFIG_PACKAGE = re.compile(
+    r"^(?:@eslint/js|@eslint/compat|@eslint/eslintrc|@eslint/config-helpers|typescript-eslint|@typescript-eslint/[\w-]+|globals"
+    r"|eslint|eslint/config|eslint-config-prettier(?:/[\w-]+)?|node:[\w/]+|path|url"
+    r"|eslint-plugin-(?!testing-library$|jest-dom$)[\w-]+(?:/[\w./-]+)?|@[\w-]+/eslint-plugin(?:-[\w-]+)?(?:/[\w./-]+)?)$"
+)
+NEUTRAL_LEGACY_EXTENDS = re.compile(r"^(?:eslint:[\w-]+|plugin:(?!testing-library/|jest-dom/)[@\w/-]+/[\w-]+|prettier(?:/[\w-]+)?)$")
+LEVELS = {"0": "off", "1": "warn", "2": "error", "off": "off", "warn": "warn", "error": "error"}
+
+
+class Layer:
+    """One configuration object: where it applies, and the testing-library and jest-dom rule levels it sets."""
+
+    def __init__(self, base: str, files: list[str] | None = None, ignores: list[str] | None = None,
+                 rules: dict[str, str] | None = None, match_base: bool = False, global_ignores: bool = False) -> None:
+        self.base = base  # folder the patterns are relative to, relative to the repository root
+        self.files = files
+        self.ignores = ignores
+        self.rules = rules or {}
+        self.match_base = match_base  # legacy overrides match patterns without a slash against the file name
+        self.global_ignores = global_ignores
+        self.presets: list[str] = []
+        self.evidence: list[str] = []
+
+
+def glob_regex(pattern: str) -> str:
+    """A regular expression for an ESLint (minimatch) glob."""
+    output = ""
+    index = 0
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            output += "(?:.*/)?"
+            index += 3
             continue
-        effective = set(preset_rules) | {rule for rule, level in rules.items() if level != "off"}
-        effective -= {rule for rule, level in rules.items() if level == "off"}
+        if pattern.startswith("**", index):
+            output += ".*"
+            index += 2
+            continue
+        character = pattern[index]
+        if character == "*":
+            output += "[^/]*"
+        elif character == "?":
+            output += "[^/]"
+        elif character == "{":
+            end = pattern.find("}", index)
+            if end == -1:
+                output += re.escape(character)
+            else:
+                output += "(?:" + "|".join(glob_regex(part) for part in pattern[index + 1:end].split(",")) + ")"
+                index = end
+        elif character == "[":
+            end = pattern.find("]", index)
+            if end == -1:
+                output += re.escape(character)
+            else:
+                output += pattern[index:end + 1].replace("[!", "[^")
+                index = end
+        else:
+            output += re.escape(character)
+        index += 1
+    return output
+
+
+def glob_matches(pattern: str, path: str, match_base: bool = False) -> bool:
+    pattern = pattern[2:] if pattern.startswith("./") else pattern
+    if pattern.startswith("!"):
+        return False
+    if match_base and "/" not in pattern:
+        path = path.rsplit("/", 1)[-1]
+    return re.fullmatch(glob_regex(pattern), path) is not None
+
+
+def layer_applies(layer: Layer, path: str) -> bool:
+    if layer.base and not path.startswith(layer.base + "/"):
+        return False
+    local = path[len(layer.base) + 1:] if layer.base else path
+    if layer.files is not None and not any(glob_matches(pattern, local, layer.match_base) for pattern in layer.files):
+        return False
+    if layer.ignores and any(glob_matches(pattern, local, layer.match_base) for pattern in layer.ignores):
+        return False
+    return True
+
+
+def rule_level(value: str) -> str | None:
+    match = re.match(r"""\s*\[?\s*['"]?(off|warn|error|[012])\b""", value)
+    return LEVELS[match.group(1)] if match else None
+
+
+def preset_layer(base: str, plugin: str, preset: str, evidence: str) -> Layer:
+    rules = {f"{plugin}/{rule}": "error" for rule in LINT_PLUGINS[plugin]["presets"].get(preset.split("/")[-1], set())}
+    layer = Layer(base, rules=rules)
+    layer.presets.append(f"{plugin}:{preset}")
+    layer.evidence.append(evidence)
+    return layer
+
+
+class FlatConfig:
+    """Read an `eslint.config.*` file as text and list its configuration objects in order.
+
+    Only objects reachable from the default export count. Anything that could
+    change a testing-library or jest-dom rule but cannot be read, such as a
+    shared configuration package or a helper function, is recorded as unresolved.
+    """
+
+    def __init__(self, path: str, text: str) -> None:
+        self.path = path
+        self.base = path.rsplit("/", 1)[0] if "/" in path else ""
+        self.content = mask(text, strings=False)
+        self.structure = mask(text, strings=True)
+        self.unresolved: list[str] = []
+        self.bindings: dict[str, str] = {}
+        for match in re.finditer(r"""\bimport\s+(?P<clause>[^;]*?)\s+from\s*(['"])(?P<source>[^'"]+)\2""", self.content):
+            clause = match.group("clause")
+            for name in re.findall(r"(?:^|,)\s*([A-Za-z_$][\w$]*)\s*(?=,|$)", clause) + re.findall(r"\*\s*as\s+([A-Za-z_$][\w$]*)", clause):
+                self.bindings[name] = match.group("source")
+            braced = re.search(r"\{([^}]*)\}", clause)
+            for item in (braced.group(1).split(",") if braced else []):
+                if item.strip():
+                    self.bindings[item.split(" as ")[-1].strip()] = match.group("source")
+        for match in re.finditer(r"""\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*(['"])([^'"]+)\2\s*\)""", self.content):
+            self.bindings[match.group(1)] = match.group(3)
+        self.variables: dict[str, tuple[int, int]] = {}
+        for match in re.finditer(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=(?!=)\s*", self.structure):
+            if match.group(1) not in self.bindings:
+                self.variables[match.group(1)] = (match.end(), self.expression_end(match.end()))
+        self.compat = {
+            name for name, (start, end) in self.variables.items()
+            if re.match(r"new\s+FlatCompat\s*\(", self.structure[start:end])
+        }
+
+    def expression_end(self, start: int) -> int:
+        """The end of the expression starting at `start`: the first `;`, or newline, at depth zero."""
+        depth = 0
+        for index in range(start, len(self.structure)):
+            character = self.structure[index]
+            if character in "([{":
+                depth += 1
+            elif character in ")]}":
+                if depth == 0:
+                    return index
+                depth -= 1
+            elif depth == 0 and (character == ";" or (character == "\n" and self.structure[start:index].strip())):
+                return index
+        return len(self.structure)
+
+    def layers(self) -> list[Layer]:
+        export = re.search(r"\bexport\s+default\s+|\bmodule\s*\.\s*exports\s*=\s*", self.structure)
+        if not export:
+            self.unresolved.append(f"{self.path} has no default export the collector can read")
+            return []
+        return self.evaluate(export.end(), self.expression_end(export.end()), 0)
+
+    def text(self, start: int, end: int) -> str:
+        return self.content[start:end].strip()
+
+    def strip_span(self, start: int, end: int) -> tuple[int, int]:
+        while start < end and self.structure[start].isspace():
+            start += 1
+        while end > start and self.structure[end - 1] in " \t\r\n;":
+            end -= 1
+        return start, end
+
+    def elements(self, start: int, end: int, depth: int) -> list[Layer]:
+        found: list[Layer] = []
+        for item_start, item_end in split_arguments(self.structure, start, end):
+            found += self.evaluate(item_start, item_end, depth + 1)
+        return found
+
+    def evaluate(self, start: int, end: int, depth: int) -> list[Layer]:
+        start, end = self.strip_span(start, end)
+        expression = self.text(start, end)
+        if not expression or depth > 25:
+            return []
+        if expression.startswith("..."):
+            return self.evaluate(start + 3, end, depth + 1)
+        opener = self.structure[start]
+        if opener in "[{" and matching(self.structure, start) == end - 1:
+            if opener == "[":
+                return self.elements(start + 1, end - 1, depth)
+            return self.object_layers(start, end, depth)
+        preset = re.fullmatch(r"""([A-Za-z_$][\w$]*)\s*\.\s*configs\s*(?:\[\s*(['"])([^'"]+)\2\s*\]|\.\s*([\w-]+))""", expression)
+        if preset:
+            plugin = self.plugin_of(preset.group(1))
+            if plugin:
+                return [preset_layer(self.base, plugin, preset.group(3) or preset.group(4), cite_file(self.path, expression))]
+        call = re.match(r"([A-Za-z_$][\w$.]*)\s*\(", self.structure[start:end])
+        if call and matching(self.structure, start + call.end() - 1) == end - 1:
+            callee = call.group(1)
+            arguments_start = start + call.end()
+            if callee.endswith(".config") or callee in ("defineConfig", "tseslint.config"):
+                return self.elements(arguments_start, end - 1, depth)
+            owner = callee.split(".")[0]
+            if owner in self.compat and callee.endswith(".extends"):
+                return self.compat_extends(arguments_start, end - 1)
+            if self.neutral(owner):
+                return []
+            self.unresolved.append(f"{self.path}: `{fragment(expression, 50)}` is a call the collector cannot evaluate")
+            return []
+        name = re.fullmatch(r"([A-Za-z_$][\w$]*)((?:\s*\.\s*[\w$]+|\s*\[[^\]]*\])*)", expression)
+        if name:
+            base = name.group(1)
+            if base in self.variables and not name.group(2):
+                variable_start, variable_end = self.variables[base]
+                return self.evaluate(variable_start, variable_end, depth + 1)
+            if self.neutral(base) or self.plugin_of(base):
+                return []
+        self.unresolved.append(f"{self.path}: `{fragment(expression, 50)}` cannot be read statically")
+        return []
+
+    def neutral(self, name: str) -> bool:
+        source = self.bindings.get(name)
+        return source is not None and bool(NEUTRAL_CONFIG_PACKAGE.match(source))
+
+    def plugin_of(self, name: str) -> str | None:
+        source = self.bindings.get(name, "")
+        for plugin, settings in LINT_PLUGINS.items():
+            if source == settings["package"]:
+                return plugin
+        return None
+
+    def compat_extends(self, start: int, end: int) -> list[Layer]:
+        found = []
+        for item_start, item_end in split_arguments(self.structure, start, end):
+            value = self.text(item_start, item_end).strip("'\"")
+            found += legacy_extends(self.path, self.base, value, self.unresolved)
+        return found
+
+    def strings(self, start: int, end: int, depth: int) -> list[str] | None:
+        """The string values of an array expression, following a variable; None if unreadable."""
+        start, end = self.strip_span(start, end)
+        expression = self.text(start, end)
+        if expression in self.variables and depth < 5:
+            return self.strings(*self.variables[expression], depth + 1)
+        if not expression.startswith("["):
+            if re.fullmatch(r"""(['"])[^'"]*\1""", expression):
+                return [expression[1:-1]]
+            return None
+        values = []
+        for item_start, item_end in split_arguments(self.structure, start + 1, end - 1):
+            item = self.text(item_start, item_end)
+            if item.startswith("..."):
+                spread = self.strings(item_start + item.index("...") + 3, item_end, depth + 1)
+                if spread is None:
+                    return None
+                values += spread
+            elif re.fullmatch(r"""(['"`])[^'"`]*\1""", item):
+                values.append(item[1:-1])
+            else:
+                return None
+        return values
+
+    def object_layers(self, start: int, end: int, depth: int) -> list[Layer]:
+        layer = Layer(self.base)
+        before: list[Layer] = []
+        keys: set[str] = set()
+        for item_start, item_end in split_arguments(self.structure, start + 1, end - 1):
+            item_start, item_end = self.strip_span(item_start, item_end)
+            item = self.text(item_start, item_end)
+            if item.startswith("..."):
+                spread = self.evaluate(item_start + 3, item_end, depth + 1)
+                if spread:
+                    layer.rules = dict(spread[-1].rules)
+                    layer.presets += [name for part in spread for name in part.presets]
+                    layer.evidence += [entry for part in spread for entry in part.evidence]
+                    keys.add("rules")
+                continue
+            key = re.match(r"""(['"]?)([\w$-]+)\1\s*:\s*""", item)
+            if not key:
+                continue
+            value_start = item_start + key.end()
+            keys.add(key.group(2))
+            if key.group(2) in ("files", "ignores"):
+                values = self.strings(value_start, item_end, 0)
+                if values is None:
+                    self.unresolved.append(f"{self.path}: the `{key.group(2)}` value `{fragment(self.text(value_start, item_end), 40)}` cannot be read")
+                    values = []
+                setattr(layer, key.group(2), values)
+            elif key.group(2) == "rules":
+                layer.rules = self.rules_object(value_start, item_end, depth)
+            elif key.group(2) == "extends":
+                before += self.evaluate(value_start, item_end, depth + 1)
+        for extended in before:
+            extended.files = layer.files if extended.files is None else extended.files
+            extended.ignores = layer.ignores if extended.ignores is None else extended.ignores
+        if keys <= {"ignores", "name"} and "ignores" in keys:
+            layer.global_ignores = True
+        return before + [layer]
+
+    def rules_object(self, start: int, end: int, depth: int) -> dict[str, str]:
+        start, end = self.strip_span(start, end)
+        if self.structure[start] != "{":
+            expression = self.text(start, end)
+            if expression in self.variables:
+                return self.rules_object(*self.variables[expression], depth + 1)
+            self.unresolved.append(f"{self.path}: the rules value `{fragment(expression, 40)}` cannot be read")
+            return {}
+        rules: dict[str, str] = {}
+        for item_start, item_end in split_arguments(self.structure, start + 1, matching(self.structure, start)):
+            item = self.text(item_start, item_end)
+            if item.startswith("..."):
+                source = re.fullmatch(r"""\.\.\.\s*([A-Za-z_$][\w$]*)\s*\.\s*configs\s*(?:\[\s*(['"])([^'"]+)\2\s*\]|\.\s*([\w-]+))\s*\.\s*rules""", item)
+                plugin = self.plugin_of(source.group(1)) if source else None
+                if plugin and source:
+                    rules.update(preset_layer(self.base, plugin, source.group(3) or source.group(4), "").rules)
+                elif not (source and self.neutral(source.group(1))) and not self.neutral(item[3:].split(".")[0].strip()):
+                    self.unresolved.append(f"{self.path}: rules spread `{fragment(item, 40)}` cannot be read")
+                continue
+            entry = re.match(r"""(['"])((?:testing-library|jest-dom)/[\w-]+)\1\s*:\s*(.*)""", item, re.S)
+            if entry:
+                level = rule_level(entry.group(3))
+                if level:
+                    rules[entry.group(2)] = level
+        return rules
+
+
+def legacy_extends(path: str, base: str, value: str, unresolved: list[str]) -> list[Layer]:
+    preset = re.fullmatch(r"plugin:(testing-library|jest-dom)/([\w/-]+)", value)
+    if preset:
+        return [preset_layer(base, preset.group(1), preset.group(2), cite_file(path, value))]
+    if not NEUTRAL_LEGACY_EXTENDS.match(value):
+        unresolved.append(f"{path} extends `{value}`, which the collector cannot read")
+    return []
+
+
+def legacy_json_layers(path: str, base: str, config: dict[str, Any], unresolved: list[str], files: list[str] | None = None,
+                       excluded: list[str] | None = None, raw: str = "") -> list[Layer]:
+    layers: list[Layer] = []
+    extends = config.get("extends")
+    for value in [extends] if isinstance(extends, str) else extends if isinstance(extends, list) else []:
+        if isinstance(value, str):
+            for layer in legacy_extends(path, base, value, unresolved):
+                layer.files, layer.ignores, layer.match_base = files, excluded, True
+                layers.append(layer)
+    rules = config.get("rules")
+    if isinstance(rules, dict):
+        layer = Layer(base, files=files, ignores=excluded, match_base=True)
+        for rule, value in rules.items():
+            if re.match(r"(?:testing-library|jest-dom)/", str(rule)):
+                level = rule_level(json.dumps(value) if not isinstance(value, str) else value)
+                if level:
+                    layer.rules[rule] = level
+                    if f'"{rule}"' in raw:
+                        layer.evidence.append(cite_file(path, f'"{rule}"'))
+        layers.append(layer)
+    for override in config.get("overrides") or []:
+        if isinstance(override, dict):
+            patterns = override.get("files")
+            patterns = [patterns] if isinstance(patterns, str) else [item for item in patterns or [] if isinstance(item, str)]
+            ignored = override.get("excludedFiles")
+            ignored = [ignored] if isinstance(ignored, str) else [item for item in ignored or [] if isinstance(item, str)]
+            layers += legacy_json_layers(path, base, override, unresolved, patterns or None, ignored or None, raw)
+    return layers
+
+
+def legacy_extends_values(content: str) -> list[str]:
+    """The `extends` entries of a YAML or JavaScript legacy configuration: a list, a block list, or one value."""
+    match = re.search(r"""(?m)^[ \t]*['"]?extends['"]?[ \t]*:[ \t]*(.*)$""", content)
+    if not match:
+        return []
+    value = match.group(1).strip()
+    if value.startswith("["):
+        closing = content.find("]", match.start(1))
+        items = content[match.start(1) + 1:closing if closing != -1 else len(content)].split(",")
+    elif value:
+        items = [value]
+    else:
+        items = []
+        for line in content[match.end():].split("\n")[1:]:
+            item = re.match(r"\s*-\s*(.+)$", line)
+            if not item:
+                if line.strip():
+                    break
+                continue
+            items.append(item.group(1))
+    return [item.strip().strip(",").strip().strip("'\"") for item in items if item.strip().strip(",").strip()]
+
+
+def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str]) -> list[Layer]:
+    """YAML and JavaScript legacy configuration, read as text: shared configurations first, then rules."""
+    content = mask(text, strings=False) if path.endswith((".js", ".cjs")) else re.sub(r"(?m)(^|\s)#.*$", r"\1", text)
+    layers: list[Layer] = []
+    for entry in legacy_extends_values(content):
+        layers += legacy_extends(path, base, entry, unresolved)
+    layer = Layer(base)
+    for match in re.finditer(r"""(['"]?)((?:testing-library|jest-dom)/[\w-]+)\1\s*:\s*([^\n,}]+)""", content):
+        level = rule_level(match.group(3))
+        if level:
+            layer.rules[match.group(2)] = level
+            layer.evidence.append(cite_file(path, match.group(2)))
+    if re.search(r"\boverrides\b", content):
+        unresolved.append(f"{path} has overrides whose file scopes the collector does not read in this format")
+    return layers + [layer]
+
+
+def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sample_files: list[str]) -> dict[str, Any]:
+    """Decide which testing-library and jest-dom rules apply to the sample test files, reading configuration as text."""
+    flat = [path for path in files if re.fullmatch(r"eslint\.config\.[cm]?[jt]s", Path(path).name)]
+    legacy = [path for path in files if Path(path).name in ESLINT_CONFIG_NAMES and path not in flat]
+    folder = lambda path: path.rsplit("/", 1)[0] if "/" in path else ""  # noqa: E731
+    unresolved: list[str] = []
+    layers_by_config: dict[str, list[Layer]] = {}
+    for path in flat:
+        config = FlatConfig(path, read_text(root / path))
+        layers_by_config[path] = config.layers()
+        unresolved += config.unresolved
+    for path in legacy:
+        text = read_text(root / path)
+        parsed: Any = None
+        if path.endswith((".json", "/.eslintrc")) or Path(path).name == ".eslintrc":
+            try:
+                parsed = json.loads(strip_json_comments(text))
+            except json.JSONDecodeError:
+                parsed = None
+        layers_by_config[path] = (
+            legacy_json_layers(path, folder(path), parsed, unresolved, raw=text) if isinstance(parsed, dict)
+            else legacy_text_layers(path, folder(path), text, unresolved)
+        )
+    for path, package in manifests.packages:
+        if isinstance(package.get("eslintConfig"), dict):
+            layers_by_config[path] = legacy_json_layers(path, folder(path), package["eslintConfig"], unresolved, raw=read_text(root / path))
+            legacy.append(path)
+
+    def layers_for(sample: str) -> list[Layer]:
+        """The nearest flat configuration, or else the cascade of legacy ones from the root down."""
+        nearest = sorted((path for path in flat if not folder(path) or sample.startswith(folder(path) + "/")), key=lambda path: -len(folder(path)))
+        if nearest:
+            return layers_by_config[nearest[0]]
+        cascade = sorted((path for path in legacy if not folder(path) or sample.startswith(folder(path) + "/")), key=lambda path: len(folder(path)))
+        return [layer for path in cascade for layer in layers_by_config[path]]
+
+    result: dict[str, Any] = {"files": flat + legacy, "unresolved": sorted(set(unresolved)), "samples": sample_files}
+    for plugin, settings in LINT_PLUGINS.items():
+        effective: set[str] | None = None
+        evidence: list[str] = []
+        presets: set[str] = set()
+        mentioned = False
+        for sample in sample_files:
+            state: dict[str, str] = {}
+            ignored = False
+            for layer in layers_for(sample):
+                if layer.global_ignores:
+                    local = sample[len(layer.base) + 1:] if layer.base else sample
+                    parts = local.split("/")
+                    prefixes = ["/".join(parts[:index]) for index in range(1, len(parts) + 1)]
+                    if any(glob_matches(pattern.rstrip("/"), prefix) for pattern in layer.ignores or [] for prefix in prefixes):
+                        ignored = True
+                    continue
+                if not layer_applies(layer, sample):
+                    continue
+                for rule, level in layer.rules.items():
+                    if rule.startswith(plugin + "/"):
+                        state[rule] = level
+                        mentioned = True
+                        evidence += [entry for entry in layer.evidence if entry not in evidence]
+                presets |= {name.split(":", 1)[1] for name in layer.presets if name.startswith(plugin + ":")}
+            enabled = set() if ignored else {rule.split("/", 1)[1] for rule, level in state.items() if level != "off"}
+            effective = enabled if effective is None else effective & enabled
         result[plugin] = {
-            "presets": sorted(set(preset_names)),
-            "rules": rules,
-            "effective": sorted(effective),
-            "evidence": enabled_in[:2] + [rule_evidence[rule] for rule in sorted(rule_evidence)][:4],
+            "mentioned": mentioned,
+            "presets": sorted(presets),
+            "effective": sorted(effective or set()),
+            "evidence": evidence[:6],
         }
     return result
 
 
-def lint_check(plugin: str, required: tuple[str, ...], facts: dict[str, Any], config_files: list[str], manifests: Manifests) -> dict[str, Any]:
-    found = facts.get(plugin)
-    package = f"eslint-plugin-{plugin}"
-    if not found:
-        evidence = [f"command: `collect.py ESLint configuration scan` → {len(config_files)} configuration file(s); none enables {package}"]
-        evidence += [cite_file(path) for path in config_files[:2]]
+def lint_check(plugin: str, facts: dict[str, Any], manifests: Manifests) -> dict[str, Any]:
+    settings = LINT_PLUGINS[plugin]
+    package = settings["package"]
+    found = facts[plugin]
+    unresolved = facts["unresolved"]
+    missing = [rule for rule in settings["required"] if rule not in found["effective"]]
+    scope = f"the {len(facts['samples'])} test file(s) it was checked against"
+    if missing and unresolved:
+        return {
+            "evaluationState": "not-evaluated",
+            "reason": f"ESLint configuration the collector cannot read may set the {plugin} rules: "
+            + "; ".join(unresolved[:3]) + f". Rules found on for {scope}: " + (", ".join(found["effective"]) or "none") + ".",
+        }
+    if not found["mentioned"]:
+        evidence = [f"command: `collect.py ESLint configuration scan` → {len(facts['files'])} configuration file(s); no {plugin} rule applies to {scope}"]
+        evidence += [cite_file(path) for path in facts["files"][:2]]
         return {
             "status": "missing",
             "evidence": evidence,
             "evidenceTier": "direct",
-            "gap": f"No ESLint configuration enables {package}, so nothing stops the test mistakes its rules catch from being committed.",
+            "gap": f"No ESLint configuration enables {package} for test files, so nothing stops the test mistakes its rules catch from being committed.",
             "remediation": (
                 f"Install {package} and add its shared configuration for test files"
                 + (", plus `testing-library/prefer-user-event` and `testing-library/prefer-explicit-assert`, which no shared configuration enables" if plugin == "testing-library" else "")
                 + "; run ESLint over test files in continuous integration."
             ),
-            "judgement": "act-on" if plugin == "testing-library" else "consider",
+            "judgement": "consider",
         }
-    missing = [rule for rule in required if rule not in found["effective"]]
+    evidence = found["evidence"] or [f"command: `collect.py ESLint configuration scan` → {plugin} rules found for {scope}"]
     if not missing:
-        return {"status": "present", "evidence": found["evidence"], "evidenceTier": "direct"}
-    installed = manifests.dependency(package)
-    evidence = found["evidence"] + ([cite_file(installed, f'"{package}"')] if installed else [])
+        result = {"status": "present", "evidence": evidence, "evidenceTier": "direct"}
+        if unresolved:
+            result["degradedReason"] = "Unreadable ESLint configuration may turn some of these rules off: " + "; ".join(unresolved[:2])
+            result["evidenceTier"] = "supported"
+        return result
     return {
         "status": "partial",
         "evidence": evidence[:6],
         "evidenceTier": "direct",
-        "gap": f"{package} is enabled, but {len(missing)} of the required rules are not: " + ", ".join(f"{plugin}/{rule}" for rule in missing) + ".",
+        "gap": f"{package} is enabled, but {len(missing)} of the required rules are not on for {scope}: " + ", ".join(f"{plugin}/{rule}" for rule in missing) + ".",
         "remediation": "Turn on the missing rules for test files: " + ", ".join(f"'{plugin}/{rule}': 'error'" for rule in missing) + ".",
         "judgement": "consider",
     }
@@ -1320,13 +1937,20 @@ def stryker_binary(root: Path) -> Path | None:
 def mutation_configuration(root: Path, targets: list[str]) -> str:
     """A one-off Stryker configuration that keeps the project's own settings and mutates only the targets."""
     directory = MUTATION_DIRECTORY.as_posix()
+    # Forced after the project's own settings: mutate a sandbox copy, never the working tree (`inPlace`),
+    # and send every file Stryker writes (report, log, incremental state) under the audit's directory.
     overrides = {
         "mutate": targets,
+        "inPlace": False,
         "reporters": ["json"],
         "jsonReporter": {"fileName": f"{directory}/mutation.json"},
+        "htmlReporter": {"fileName": f"{directory}/mutation.html"},
         "tempDirName": f"{directory}/sandbox",
         "cleanTempDir": True,
         "incremental": False,
+        "incrementalFile": f"{directory}/incremental.json",
+        "fileLogLevel": "off",
+        "dryRunOnly": False,
     }
     base = "const base = {};"
     for name in STRYKER_CONFIG_NAMES:
@@ -1357,6 +1981,7 @@ def mutation_score(report: dict[str, Any], root: Path) -> tuple[float | None, Co
                 line = ((mutant.get("location") or {}).get("start") or {}).get("line")
                 if isinstance(line, int):
                     survivors.append((name, line, f"{mutant.get('mutatorName', 'a')} mutant {'survived' if status == 'Survived' else 'ran no test'}"))
+    survivors.sort(key=lambda item: 0 if item[2].endswith("survived") else 1)  # survived mutants before uncovered ones
     detected = statuses["Killed"] + statuses["Timeout"]
     undetected = statuses["Survived"] + statuses["NoCoverage"]
     if detected + undetected == 0:
@@ -1367,7 +1992,19 @@ def mutation_score(report: dict[str, Any], root: Path) -> tuple[float | None, Co
 Runner = Callable[..., Any]
 
 
-def mutation_check(root: Path, requested: bool, targets: list[str], run: Runner = subprocess.run) -> dict[str, Any]:
+def mutation_budget(elapsed: float) -> int:
+    """Seconds Stryker may run so the whole collector finishes inside the protocol's timeout."""
+    return int(min(MUTATION_TIMEOUT_CAP_SECONDS, PROTOCOL_COLLECTOR_TIMEOUT_SECONDS - MUTATION_MARGIN_SECONDS - elapsed))
+
+
+def failure_line(output: str) -> str:
+    """The line most likely to explain a failed run: the first one mentioning ERROR, else the last."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    flagged = [line for line in lines if "ERROR" in line]
+    return (flagged or lines[-1:] or [""])[0][:200]
+
+
+def mutation_check(root: Path, requested: bool, targets: list[str], run: Runner = subprocess.run, budget: int = MUTATION_TIMEOUT_CAP_SECONDS) -> dict[str, Any]:
     if not requested:
         return {"evaluationState": "not-evaluated", "reason": "Mutation testing runs only with --with-mutation."}
     binary = stryker_binary(root)
@@ -1378,6 +2015,8 @@ def mutation_check(root: Path, requested: bool, targets: list[str], run: Runner 
         }
     if not targets:
         return {"evaluationState": "not-evaluated", "reason": "--with-mutation was requested, but no source files were found to mutate."}
+    if budget < MUTATION_MINIMUM_SECONDS:
+        return {"evaluationState": "not-evaluated", "reason": f"The scan left only {max(budget, 0)} seconds of the protocol's {PROTOCOL_COLLECTOR_TIMEOUT_SECONDS}-second collector limit, too little for Stryker."}
     directory = root / MUTATION_DIRECTORY
     directory.mkdir(parents=True, exist_ok=True)
     report_path = directory / "mutation.json"
@@ -1390,17 +2029,17 @@ def mutation_check(root: Path, requested: bool, targets: list[str], run: Runner 
         completed = run(
             [str(binary), "run", str(config_path)],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
-            check=False, timeout=MUTATION_TIMEOUT_SECONDS,
+            check=False, timeout=budget,
         )
     except subprocess.TimeoutExpired:
-        return {"evaluationState": "not-evaluated", "reason": f"Stryker did not finish on the {len(targets)} riskiest files within {MUTATION_TIMEOUT_SECONDS} seconds."}
+        return {"evaluationState": "not-evaluated", "reason": f"Stryker did not finish on the {len(targets)} riskiest files within {budget} seconds."}
     except OSError as error:
         return {"evaluationState": "not-evaluated", "reason": f"Stryker failed to start: {type(error).__name__}."}
     finally:
         config_path.unlink(missing_ok=True)
     if not report_path.is_file():
-        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-1:] if completed else []
-        detail = f": {tail[0][:200]}" if tail else ""
+        line = failure_line(completed.stderr or completed.stdout or "")
+        detail = f": {line}" if line else ""
         return {"evaluationState": "not-evaluated", "reason": f"Stryker exited {completed.returncode} without a report{detail}."}
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -1430,32 +2069,53 @@ def mutation_check(root: Path, requested: bool, targets: list[str], run: Runner 
 # Collection
 
 
+def file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runner = subprocess.run) -> dict[str, Any]:
+    started = time.monotonic()
     files = listed_files(root)
     manifests = Manifests(root)
     source_paths = [path for path in files if path.endswith(SOURCE_SUFFIXES) and not path.endswith(".d.ts")]
+    large = [path for path in source_paths if file_size(root / path) > MAX_FILE_BYTES]
     checks: dict[str, Any] = {}
     snapshot: dict[str, Any] = {}
-
-    if not manifests.packages and not source_paths:
-        for check in ALL_CHECKS:
-            checks[check] = {"applicability": "not-applicable", "reason": "No package.json and no JavaScript or TypeScript sources were found."}
-        snapshot["projectDetected"] = False
-        return {"checks": checks, "snapshot": snapshot}
 
     texts: dict[str, str] = {path: read_text(root / path) for path in source_paths}
     comment_masked = {path: mask(text, strings=False) for path, text in texts.items()}
     fully_masked: dict[str, str] = {}
     test_paths: list[str] = []
     for path in source_paths:
-        if TEST_NAME_PATTERN.search(path) or TEST_DIRECTORY_PATTERN.search(path) or "/__tests__/" in f"/{path}" or STORY_PATTERN.search(path):
+        imports_test_api = bool(TEST_API_IMPORT.search(comment_masked[path]))
+        if imports_test_api or TEST_NAME_PATTERN.search(path) or TEST_DIRECTORY_PATTERN.search(path) or "/__tests__/" in f"/{path}" or STORY_PATTERN.search(path):
             fully_masked[path] = mask(texts[path], strings=True)
-        if is_test_file(path, fully_masked.get(path)):
+        if is_test_file(path, fully_masked.get(path), imports_test_api):
             test_paths.append(path)
     stories = [path for path in source_paths if STORY_PATTERN.search(path)]
     interaction_stories = [path for path in stories if re.search(r"\bplay\s*[:=(]|\bplay\s*\(", fully_masked[path])]
+    test_set = set(test_paths)
+    product = [
+        path for path in source_paths
+        if path not in test_set and not STORY_PATTERN.search(path) and not NON_SOURCE_PATTERN.search(path) and not TOOLING_PATTERN.search(path)
+    ]
 
-    resolver = Resolver(root, set(source_paths))
+    if not product and not test_paths and not interaction_stories:
+        reason = (
+            "No JavaScript or TypeScript product code or tests were found"
+            + (f"; the {len(source_paths)} script file(s) present are configuration or tooling" if source_paths else "")
+            + ". Record the whole audit with `audit-not-applicable`."
+        )
+        for check in ALL_CHECKS:
+            checks[check] = {"applicability": "not-applicable", "reason": reason}
+        snapshot["projectDetected"] = False
+        snapshot["toolingFiles"] = source_paths[:20]
+        return {"checks": checks, "snapshot": snapshot}
+
+    resolver = Resolver(root, set(source_paths), manifests.directories[1:])
 
     def product_module(importer: str) -> Callable[[str], bool]:
         return lambda specifier: specifier.startswith(".") or resolver.resolve(importer, specifier) is not None
@@ -1528,11 +2188,11 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
             target = resolver.resolve(path, specifier)
             if not target or target == path:
                 continue
-            if path in test_paths or TEST_SUPPORT_PATTERN.search(path):
+            if path in test_set or TEST_SUPPORT_PATTERN.search(path):
                 tested_by.setdefault(target, set()).add(path)
             else:
                 fan_in[target] += 1
-    production = [path for path in source_paths if not NON_SOURCE_PATTERN.search(path) and path not in test_paths]
+    production = product
     commits = churn(root, months)
     ranked = sorted(
         production,
@@ -1560,7 +2220,10 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     ci_runs = continuous_integration_test_runs(root, files)
     runners = runner_facts(manifests, files, test_imports)
     script_runs = scripts_running_tests(manifests)
+    unrecognised = unrecognised_test_scripts(manifests)
     snapshot["projectDetected"] = True
+    if large:
+        snapshot["skippedLargeFiles"] = {"limitBytes": MAX_FILE_BYTES, "count": len(large), "examples": large[:10]}
     snapshot["runners"] = sorted(runners)
     snapshot["testFiles"] = {"total": len(test_paths), "byKind": dict(sorted(kinds.items())), "storiesWithPlayFunctions": len(interaction_stories)}
     snapshot["testsFound"] = tests_counted
@@ -1598,8 +2261,15 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     snapshot["mutationTargets"] = mutation_targets
 
     # Runner check.
-    unit_runners = {"vitest", "jest", "node:test", "mocha", "ava"} & set(runners)
-    if not test_paths and not interaction_stories:
+    if (not test_paths or not runners) and unrecognised:
+        path, command = unrecognised[0]
+        checks[RUNNER] = {
+            "evaluationState": "not-evaluated",
+            "reason": f"The `test` script in {path} runs `{command[:80]}`, which the collector does not recognise as a test runner"
+            + (f", and it found {len(test_paths)} test files" if test_paths else ", and it found no test files it recognises")
+            + "; check by hand whether that command runs tests.",
+        }
+    elif not test_paths and not interaction_stories:
         checks[RUNNER] = {
             "status": "missing",
             "evidence": [f"command: `collect.py test-file scan` → 0 test files among {len(source_paths)} source files"] + [entry for values in runners.values() for entry in values][:2],
@@ -1611,7 +2281,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     elif not runners:
         checks[RUNNER] = {
             "status": "missing",
-            "evidence": [f"command: `collect.py runner detection` → {len(test_paths)} test files but no Vitest, Jest, node:test, Playwright, Cypress, Storybook test-runner, Mocha, or AVA"] + [cite_file(path) for path in test_paths[:2]],
+            "evidence": [f"command: `collect.py runner detection` → {len(test_paths)} test files but no recognised runner in dependencies, configuration, imports, or scripts"] + [cite_file(path) for path in test_paths[:2]],
             "evidenceTier": "direct",
             "gap": f"{len(test_paths)} test files exist, but no test runner is declared, so they cannot run.",
             "remediation": "Declare the runner the tests are written for as a development dependency and add a `test` script that runs it.",
@@ -1629,7 +2299,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     else:
         evidence = [entry for values in runners.values() for entry in values][:3]
         evidence += [cite_file(path, command) for path, _, command in script_runs[:2]]
-        checks[RUNNER] = {"status": "present", "evidence": evidence, "evidenceTier": "direct"}
+        checks[RUNNER] = {"status": "present", "evidence": list(dict.fromkeys(evidence)), "evidenceTier": "direct"}
 
     # Focused and skipped tests.
     if not test_paths:
@@ -1659,12 +2329,19 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
             "evidence": [f"command: `collect.py focus scan` → 0 focused and 0 skipped tests in {len(test_paths)} test files (comments and strings masked)"],
             "evidenceTier": "direct",
         }
+    if large and "status" in checks.get(FOCUSED, {}):
+        checks[FOCUSED]["degradedReason"] = (
+            f"{len(large)} source file(s) over {MAX_FILE_BYTES // 1_000_000} MB were not read, so a focused or skipped test in them would be missed: "
+            + ", ".join(large[:3])
+        )
+        checks[FOCUSED]["evidenceTier"] = "supported"
 
     # Coverage thresholds.
     coverage = coverage_facts(root, files, manifests, workflows)
     snapshot["coverage"] = {"thresholds": coverage["thresholds"][:4], "collectedBy": coverage["enabled"][:4]}
+    unit_runners = UNIT_RUNNERS & set(runners)
     if not unit_runners:
-        checks[COVERAGE] = {"applicability": "not-applicable", "reason": "No unit or integration test runner (Vitest, Jest, node:test, Mocha, or AVA) was found."}
+        checks[COVERAGE] = {"applicability": "not-applicable", "reason": "No unit or integration test runner (such as Vitest, Jest, node:test, Bun, Karma, Mocha, AVA, tap, or uvu) was found."}
     elif not coverage["thresholds"]:
         config_files = [path for path in files if re.search(r"(^|/)(?:vitest|vite|jest)\.config\.[cm]?[jt]s(?:on)?$", path)]
         checks[COVERAGE] = {
@@ -1688,20 +2365,24 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
         checks[COVERAGE] = {"status": "present", "evidence": coverage["thresholds"][:2] + coverage["enabled"][:2], "evidenceTier": "direct"}
 
     # Lint rules.
-    eslint = eslint_configuration(root, files, manifests)
+    component_tests = [path for path in test_paths if any(specifier.startswith("@testing-library/") for specifier in file_imports.get(path, set()))]
+    samples = (component_tests or test_paths or ["src/example.test.tsx"])[:20]
+    eslint = eslint_configuration(root, files, manifests, samples)
     snapshot["eslint"] = {
         "configurationFiles": eslint["files"],
-        "testingLibrary": eslint["testing-library"] and {key: eslint["testing-library"][key] for key in ("presets", "effective")},
-        "jestDom": eslint["jest-dom"] and {key: eslint["jest-dom"][key] for key in ("presets", "effective")},
+        "checkedAgainst": samples[:5],
+        "unresolved": eslint["unresolved"][:5],
+        "testingLibrary": {key: eslint["testing-library"][key] for key in ("presets", "effective")},
+        "jestDom": {key: eslint["jest-dom"][key] for key in ("presets", "effective")},
     }
     if not testing_library:
         checks[TESTING_LIBRARY_LINT] = {"applicability": "not-applicable", "reason": "Testing Library is not a dependency, so its lint rules have nothing to check."}
     else:
-        checks[TESTING_LIBRARY_LINT] = lint_check("testing-library", TESTING_LIBRARY_RULES, eslint, eslint["files"], manifests)
+        checks[TESTING_LIBRARY_LINT] = lint_check("testing-library", eslint, manifests)
     if not manifests.dependency("@testing-library/jest-dom"):
         checks[JEST_DOM_LINT] = {"applicability": "not-applicable", "reason": "@testing-library/jest-dom is not a dependency."}
     else:
-        checks[JEST_DOM_LINT] = lint_check("jest-dom", JEST_DOM_RULES, eslint, eslint["files"], manifests)
+        checks[JEST_DOM_LINT] = lint_check("jest-dom", eslint, manifests)
 
     # Applicability of the model checks.
     if not test_paths:
@@ -1712,7 +2393,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     if not databases:
         checks[DATABASE] = {"applicability": "not-applicable", "reason": "No database client or ORM is a dependency."}
 
-    checks[MUTATION] = mutation_check(root, with_mutation, mutation_targets, run)
+    checks[MUTATION] = mutation_check(root, with_mutation, mutation_targets, run, mutation_budget(time.monotonic() - started))
     return {"checks": checks, "snapshot": snapshot}
 
 
