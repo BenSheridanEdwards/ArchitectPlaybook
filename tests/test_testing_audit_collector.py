@@ -1190,6 +1190,38 @@ class SecondReviewRegressionTests(CollectorTestCase):
         self.assertEqual(self.check(result, "coverage-thresholds-configured")["status"], "present")
 
 
+class ThirdReviewRegressionTests(CollectorTestCase):
+    """Regression tests for the review of the second-review fixes; each fails on the collector before its fix."""
+
+    lint_project = ReviewRegressionTests.lint_project
+    lint_results = ReviewRegressionTests.lint_results
+
+    # 1. Loosely named files that declare tests with runner globals are tests; product modules are not.
+    def test_loosely_named_files_with_top_level_test_declarations_are_tests(self) -> None:
+        self.package({"name": "lib", "scripts": {"test": "jest"}, "devDependencies": {"jest": "30.0.0"}})
+        self.write("lib/parser.js", "export const parse = (text) => text.trim();\n")
+        self.write("lib/parser-test.js", "const { parse } = require('./parser');\ndescribe('parse', () => {\n  it('trims', () => { expect(parse(' a ')).toBe('a'); });\n});\n")
+        self.write("test-parser.js", "const { parse } = require('./lib/parser');\nit('keeps inner spaces', () => { expect(parse(' a b ')).toBe('a b'); });\n")
+        self.write("src/experiments/ab-test.ts", "export const variant = (id: string) => (id.length % 2 ? 'a' : 'b');\nexport function test(id: string) {\n  return variant(id);\n}\n")
+        self.commit()
+        result = self.collect()
+        self.assertEqual(result["snapshot"]["testFiles"]["total"], 2)
+        ranked = {item["path"] for item in result["snapshot"]["riskRanking"]}
+        self.assertIn("src/experiments/ab-test.ts", ranked)
+        self.assertFalse({"lib/parser-test.js", "test-parser.js"} & ranked, ranked)
+
+    # 2. A JavaScript `extends` value that starts on the next line is read before it is classified.
+    def test_a_javascript_extends_value_on_the_next_line_is_read(self) -> None:
+        self.lint_project()
+        self.write(".eslintrc.cjs", "const shared = require('./shared');\nmodule.exports = { extends:\n  shared };\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom.get("evaluationState"), "not-evaluated")
+        self.assertIn("shared", jest_dom["reason"])
+        self.write(".eslintrc.cjs", "module.exports = {\n  extends:\n    ['plugin:jest-dom/recommended'],\n};\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "present")
+
+
 class FixtureTests(unittest.TestCase):
     def test_component_test_fixtures_clean_up_between_tests(self) -> None:
         """Without Vitest globals, Testing Library never unmounts, and later tests find earlier renders."""

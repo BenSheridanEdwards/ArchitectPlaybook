@@ -149,8 +149,11 @@ STRYKER_CONFIG_NAMES = tuple(
 )
 
 TEST_NAME_PATTERN = re.compile(r"\.(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$")
-# Names like `parse_test.js`, `ab-test.ts`, or `test-helpers.ts` are tests only when the file imports a test API.
+# Names like `parse_test.js`, `ab-test.ts`, or `test-helpers.ts` are tests only when the file imports a test API or
+# declares tests at the top level, as Jest and Mocha globals allow.
 LOOSE_TEST_NAME_PATTERN = re.compile(r"[_-]test\.[cm]?[jt]sx?$|(^|/)test-[^/]*\.[cm]?[jt]sx?$")
+# A titled `describe(`, `it(`, `test(`, `suite(`, or `context(` call at the start of a line, in string-masked text.
+TOP_LEVEL_TEST_DECLARATION = re.compile(r"""(?m)^(?:describe|it|test|suite|context)(?:\s*\.\s*\w+)*\s*\(\s*['"`]""")
 # Test APIs a file can import; such a file is a test wherever it lives (node --test and bun test find them anywhere).
 TEST_API_IMPORT = re.compile(r"""(?:from|require\s*\()\s*['"](?:node:test|bun:test|vitest|@jest/globals|uvu|tap|ava|@playwright/test)['"]""")
 TOOLING_PATTERN = re.compile(
@@ -585,7 +588,9 @@ def continuous_integration_test_runs(root: Path, files: list[str]) -> list[str]:
 def is_test_file(path: str, masked: str | None, imports_test_api: bool = False) -> bool:
     if not path.endswith(SOURCE_SUFFIXES) or path.endswith(".d.ts"):
         return False
-    if TEST_NAME_PATTERN.search(path) or "/__tests__/" in f"/{path}" or (imports_test_api and LOOSE_TEST_NAME_PATTERN.search(path)):
+    if TEST_NAME_PATTERN.search(path) or "/__tests__/" in f"/{path}":
+        return True
+    if LOOSE_TEST_NAME_PATTERN.search(path) and (imports_test_api or (masked is not None and TOP_LEVEL_TEST_DECLARATION.search(masked))):
         return True
     if (TEST_DIRECTORY_PATTERN.search(path) or imports_test_api) and masked is not None:
         # tap writes `t.test(...)`; count that form only in files that import a test API.
@@ -1876,7 +1881,7 @@ def legacy_json_layers(path: str, base: str, config: dict[str, Any], unresolved:
 
 
 def legacy_extends_values(content: str, unresolved: list[str] | None = None, path: str = "") -> list[str]:
-    """The `extends` entries of a YAML or JavaScript legacy configuration: a list, a block list, or one value.
+    """The `extends` entries of a YAML or JavaScript legacy configuration: a list, one value, or (YAML only) a block list.
 
     The key is found wherever it sits, at the start of a line or after `{` or `,` on one line, as in
     `module.exports = { extends: ['plugin:jest-dom/recommended'] };`. A value it cannot read, such as a variable,
@@ -1886,6 +1891,24 @@ def legacy_extends_values(content: str, unresolved: list[str] | None = None, pat
     match = re.search(r"""(?m)(?:^|[{,])[ \t]*['"]?extends['"]?[ \t]*:[ \t]*(.*)$""", content)
     if not match:
         return []
+    if path.endswith((".js", ".cjs")):
+        # JavaScript: the value may start on a later line, so skip whitespace and newlines before classifying it.
+        start = match.start(1)
+        while start < len(content) and content[start].isspace():
+            start += 1
+        rest = content[start:]
+        if rest.startswith("["):
+            closing = rest.find("]")
+            items = rest[1:closing if closing != -1 else len(rest)].split(",")
+        elif rest[:1] in ("'", '"'):
+            closing = rest.find(rest[0], 1)
+            items = [rest[:closing + 1] if closing != -1 else rest]
+        else:
+            if unresolved is not None:
+                shown = fragment(rest.split("\n", 1)[0].rstrip(",;} \t"), 40) or "an empty value"
+                unresolved.append(f"{path} extends `{shown}`, which the collector cannot read")
+            items = []
+        return [item.strip().strip(",").strip().strip("'\"") for item in items if item.strip().strip(",").strip()]
     value = match.group(1).strip()
     if value.startswith("["):
         closing = content.find("]", match.start(1))
@@ -1893,10 +1916,6 @@ def legacy_extends_values(content: str, unresolved: list[str] | None = None, pat
     elif value[:1] in ("'", '"'):
         closing = value.find(value[0], 1)
         items = [value[:closing + 1] if closing != -1 else value]
-    elif value and path.endswith((".js", ".cjs")):
-        if unresolved is not None:
-            unresolved.append(f"{path} extends `{fragment(value.rstrip(',;}'), 40)}`, which the collector cannot read")
-        items = []
     elif value:
         items = [value]
     else:
@@ -2216,7 +2235,8 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     test_paths: list[str] = []
     for path in source_paths:
         imports_test_api = bool(TEST_API_IMPORT.search(comment_masked[path]))
-        if imports_test_api or TEST_NAME_PATTERN.search(path) or TEST_DIRECTORY_PATTERN.search(path) or "/__tests__/" in f"/{path}" or STORY_PATTERN.search(path):
+        if (imports_test_api or TEST_NAME_PATTERN.search(path) or LOOSE_TEST_NAME_PATTERN.search(path) or TEST_DIRECTORY_PATTERN.search(path)
+                or "/__tests__/" in f"/{path}" or STORY_PATTERN.search(path)):
             fully_masked[path] = mask(texts[path], strings=True)
         if is_test_file(path, fully_masked.get(path), imports_test_api):
             test_paths.append(path)

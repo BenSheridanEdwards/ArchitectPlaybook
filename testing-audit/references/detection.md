@@ -40,7 +40,10 @@ modules, custom matchers, and page objects.
     that call `describe`, `it`, or `test`, and files anywhere that import a test
     API and declare tests, as `node --test` and `bun test` find them. A
     `*_test.*`, `*-test.*`, or `test-*.*` name counts only when the file imports
-    a test API, so a product module such as `ab-test.ts` stays product code.
+    a test API or declares titled tests at the top level, such as
+    `describe('parse', ...)` with Jest or Mocha globals, so a product module
+    such as `ab-test.ts` stays product code. Runner configuration that selects
+    files, such as Jest's `testMatch`, is not read.
   - Files in `scripts/`, `tools/`, or `tooling/` at the repository root or a
     workspace package's root are tooling and left out of the risk ranking; the
     same folder names deeper down, such as `src/tools/`, are product code.
@@ -264,8 +267,8 @@ Keep these, and dismiss their flags with a reason:
     its `files`, `ignores`, and `rules` in JavaScript spread order.
   - Legacy JSON configurations apply `extends`, then `rules`, then `overrides`
     that match the test files. YAML and JavaScript legacy files are read as
-    text, quoted or not, on one line or several; their overrides' file scopes
-    are not read. An `extends` value that is not a literal, or a
+    text, quoted or not, on one line or several, including an `extends` value
+    that starts on the next line; their overrides' file scopes are not read. An `extends` value that is not a literal, or a
     `module.exports` that is not an object literal, is recorded as unreadable
     configuration, never as a missing plugin.
   - A shared configuration it cannot read, such as `react-app/jest` or an
