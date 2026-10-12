@@ -53,7 +53,7 @@
       "method": "tool",
       "rationale": "Without a runner and a command that starts it, no test can fail when the product breaks.",
       "lastVerified": "2026-10-12",
-      "expectation": "Test files exist, a runner is declared (Vitest, Jest, Create React App's react-scripts, node:test, Bun, Angular CLI with Karma or Jasmine, Playwright, Cypress, Storybook test-runner, Mocha, AVA, tap, or uvu), and a package script runs it. A test script the collector does not recognise leaves the check not evaluated.",
+      "expectation": "Test files exist, a runner is declared (Vitest, Jest, Create React App's react-scripts, node:test, Bun, Angular CLI with Karma or Jasmine, Playwright, Cypress, Storybook test-runner, Mocha, AVA, tap, or uvu), and a package script runs it. A test script the collector does not recognise leaves the check not evaluated when no recognised script runs tests.",
       "violationSignal": "No test files, test files with no runner to run them, or no package script that runs the suite.",
       "allowedStatuses": [
         "present",
@@ -87,8 +87,8 @@
       "severity": "medium",
       "method": "tool",
       "rationale": "A coverage floor stops untested new code from landing unnoticed, although coverage alone never proves a test checks anything.",
-      "lastVerified": "2026-10-09",
-      "expectation": "The unit or integration runner sets coverage thresholds, and a configuration or script collects coverage so they can fail a run. Not applicable without a unit or integration runner.",
+      "lastVerified": "2026-10-12",
+      "expectation": "The unit or integration runner sets coverage thresholds with at least one metric above zero, and a configuration or script collects coverage so they can fail a run. Not applicable without a unit or integration runner; not evaluated when the only unit runners are Bun, Karma, or tap, whose floor settings the collector does not read.",
       "violationSignal": "No thresholds (missing), or thresholds that nothing collects coverage for (partial).",
       "allowedStatuses": [
         "present",

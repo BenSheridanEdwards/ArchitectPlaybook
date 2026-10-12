@@ -53,6 +53,11 @@ MAX_FILES = 50_000
 MAX_FILE_BYTES = 2_000_000
 MAX_CANDIDATES = 100
 MAX_ASSERTIONS_PER_TEST = 100
+# The near-duplicate scan compares test bodies up to this many characters, with at most this many full
+# comparisons per file and per run, so it stays well inside the protocol's collector time limit.
+MAX_DUPLICATE_BODY = 2_000
+MAX_DUPLICATE_COMPARISONS_PER_FILE = 300
+MAX_DUPLICATE_COMPARISONS_PER_RUN = 3_000
 MUTATION_TARGETS = 5
 # The audit protocol stops a collector after 600 seconds (audit_run.py, apply_collector). Stryker gets
 # what is left after the scan, less a margin for reading its report, and never more than the cap.
@@ -143,17 +148,21 @@ STRYKER_CONFIG_NAMES = tuple(
     for suffix in ("mjs", "js", "cjs", "json")
 )
 
-TEST_NAME_PATTERN = re.compile(r"\.(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$|[_-]test\.[cm]?[jt]sx?$|(^|/)test-[^/]*\.[cm]?[jt]sx?$")
+TEST_NAME_PATTERN = re.compile(r"\.(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$")
+# Names like `parse_test.js`, `ab-test.ts`, or `test-helpers.ts` are tests only when the file imports a test API.
+LOOSE_TEST_NAME_PATTERN = re.compile(r"[_-]test\.[cm]?[jt]sx?$|(^|/)test-[^/]*\.[cm]?[jt]sx?$")
 # Test APIs a file can import; such a file is a test wherever it lives (node --test and bun test find them anywhere).
 TEST_API_IMPORT = re.compile(r"""(?:from|require\s*\()\s*['"](?:node:test|bun:test|vitest|@jest/globals|uvu|tap|ava|@playwright/test)['"]""")
 TOOLING_PATTERN = re.compile(
-    r"(^|/)\.|(^|/)[^/]*\.config\.[cm]?[jt]s$|(^|/)[^/]*rc\.[cm]?[jt]s$|(^|/)(?:scripts|tools|tooling)/"
+    r"(^|/)\.|(^|/)[^/]*\.config\.[cm]?[jt]s$|(^|/)[^/]*rc\.[cm]?[jt]s$"
     r"|(^|/)(?:gulpfile|gruntfile|Gruntfile|dangerfile|Jakefile)\.[cm]?[jt]s$"
 )
+# Tooling folders count only at the repository root or a workspace package's root, so `src/tools/` stays product code.
+TOOLING_FOLDERS = ("scripts", "tools", "tooling")
 TEST_DIRECTORY_PATTERN = re.compile(r"(^|/)(__tests__|tests?|e2e|cypress|playwright|integration)/")
 STORY_PATTERN = re.compile(r"\.stories\.[cm]?[jt]sx?$")
 NON_SOURCE_PATTERN = re.compile(
-    r"(^|/)(__tests__|__mocks__|tests?|e2e|cypress|playwright|fixtures?|mocks?|scripts|\.storybook|stories)/"
+    r"(^|/)(__tests__|__mocks__|tests?|e2e|cypress|playwright|fixtures?|mocks?|\.storybook|stories)/"
     r"|\.(test|spec|cy|e2e|stories|d)\.[cm]?[jt]sx?$|(^|/)[^/]*\.config\.[cm]?[jt]s$|(^|/)[^/]*\.setup\.[cm]?[jt]sx?$"
 )
 TEST_SUPPORT_PATTERN = re.compile(r"(^|/)(__tests__|__mocks__|tests?|fixtures?|mocks?)/")
@@ -524,10 +533,12 @@ class Manifests:
         self.root = root
         self.directories = [root.resolve(), *workspaces(root)]
         self.packages: list[tuple[str, dict[str, Any]]] = []
+        self.raw: dict[str, str] = {}
         for directory in self.directories:
             path = directory / "package.json"
             if path.is_file():
                 self.packages.append((relative(root, path), load_jsonc(path)))
+                self.raw[relative(root, path)] = read_text(path)
 
     def dependency(self, name: str) -> str | None:
         """The manifest that declares a dependency, if any."""
@@ -574,11 +585,20 @@ def continuous_integration_test_runs(root: Path, files: list[str]) -> list[str]:
 def is_test_file(path: str, masked: str | None, imports_test_api: bool = False) -> bool:
     if not path.endswith(SOURCE_SUFFIXES) or path.endswith(".d.ts"):
         return False
-    if TEST_NAME_PATTERN.search(path) or "/__tests__/" in f"/{path}":
+    if TEST_NAME_PATTERN.search(path) or "/__tests__/" in f"/{path}" or (imports_test_api and LOOSE_TEST_NAME_PATTERN.search(path)):
         return True
     if (TEST_DIRECTORY_PATTERN.search(path) or imports_test_api) and masked is not None:
         # tap writes `t.test(...)`; count that form only in files that import a test API.
         return bool(TEST_API_PATTERN.search(masked) or (imports_test_api and re.search(r"\b[A-Za-z_$][\w$]*\s*\.\s*test\s*\(", masked)))
+    return False
+
+
+def in_tooling_folder(path: str, package_roots: list[str]) -> bool:
+    """Whether a file sits in a `scripts/`, `tools/`, or `tooling/` folder at the repository root or a workspace package's root."""
+    for base in ["", *package_roots]:
+        local = path[len(base) + 1:] if base and path.startswith(base + "/") else (path if not base else None)
+        if local is not None and local.split("/", 1)[0] in TOOLING_FOLDERS and "/" in local:
+            return True
     return False
 
 
@@ -909,7 +929,9 @@ def assertions_in(text: str, masked: str, start: int, end: int, web_first: bool 
             chain = EXPECT_CHAIN.match(masked, closing + 1, end)
             matcher, negated, expected, asynchronous = "", False, None, "poll" in match.group(0)
             if chain:
-                matcher = chain.group("matcher")
+                # A Jest-style matcher read but never called, `expect(x).toBeTruthy;`, asserts nothing; Chai's
+                # property assertions, such as `.to.be.true`, are not named `toX` and do assert.
+                matcher = "" if not chain.group("call") and re.match(r"to[A-Z]", chain.group("matcher")) else chain.group("matcher")
                 words = re.findall(r"\w+", chain.group("chain"))
                 negated = "not" in words
                 asynchronous = asynchronous or bool({"resolves", "rejects", "eventually"} & set(words))
@@ -1000,9 +1022,16 @@ def test_blocks(path: str, text: str, masked: str) -> list[TestBlock]:
     return blocks
 
 
+class ComparisonBudget:
+    """How many full near-duplicate comparisons the rest of the run may make."""
+
+    def __init__(self, remaining: int = MAX_DUPLICATE_COMPARISONS_PER_RUN) -> None:
+        self.remaining = remaining
+
+
 def prefilter(
     path: str, text: str, masked: str, product: Callable[[str], bool] = lambda specifier: specifier.startswith("."),
-    web_first: bool = False,
+    web_first: bool = False, budget: ComparisonBudget | None = None,
 ) -> tuple[list[TestBlock], dict[str, int]]:
     """Flag tests whose shape suggests they cannot fail. A flag is a place to look, not a verdict.
 
@@ -1032,34 +1061,57 @@ def prefilter(
             if not implicit and all(item.passes_if_undefined() for item in found):
                 block.flags.append(("passes-if-undefined", next((item.line for item in found), block.line)))
         counts.update(flag for flag, _ in block.flags)
-    near_duplicates(blocks, counts)
+    near_duplicates(blocks, counts, budget)
     return blocks, dict(counts)
 
 
-def near_duplicates(blocks: list[TestBlock], counts: Counter[str]) -> None:
-    """Flag tests that make the same assertions on nearly the same setup: one of them checks nothing new."""
-    bodies = []
+def near_duplicates(blocks: list[TestBlock], counts: Counter[str], budget: ComparisonBudget | None = None) -> None:
+    """Flag tests that make the same assertions on nearly the same setup: one of them checks nothing new.
+
+    Bodies are compared as token sequences, and the scan is bounded so a file of
+    many near-identical tests stays fast: bodies over MAX_DUPLICATE_BODY characters
+    are skipped, a pair must share half its token trigrams before the full
+    comparison, a pair whose tests are both flagged already is not compared, and
+    the full comparisons are capped per file and per run.
+    """
+    budget = budget or ComparisonBudget()
+    tokens: list[list[str] | None] = []
+    shingles: list[set[tuple[str, ...]]] = []
     asserted = []
     for block in blocks:
         body = block.body
         if block.title is not None:
             body = body.replace(block.title, "", 1)
-        bodies.append(re.sub(r"\s+", " ", body).strip())
+        compact = re.sub(r"\s+", " ", body).strip()
+        eligible = 60 <= len(compact) <= MAX_DUPLICATE_BODY and "each" not in block.modifiers
+        words = re.findall(r"[\w$]+|[^\w\s]", compact) if eligible else None
+        tokens.append(words)
+        shingles.append({tuple(words[index:index + 3]) for index in range(max(len(words) - 2, 1))} if words else set())
         asserted.append(sorted(re.sub(r"\s+", "", line) for line in body.split("\n") if re.search(r"\bexpect\b|\bassert\b", line)))
+    flagged = [any(flag == "near-duplicate" for flag, _ in block.flags) for block in blocks]
+    comparisons = 0
     for left in range(len(blocks)):
-        if not 60 <= len(bodies[left]) <= 20_000:
+        if tokens[left] is None or not asserted[left]:
             continue
         for right in range(left + 1, min(len(blocks), left + 200)):
-            if not 60 <= len(bodies[right]) <= 20_000 or "each" in blocks[left].modifiers or "each" in blocks[right].modifiers:
+            if tokens[right] is None or (flagged[left] and flagged[right]) or asserted[left] != asserted[right]:
                 continue
-            if not asserted[left] or asserted[left] != asserted[right]:
+            shared = len(shingles[left] & shingles[right])
+            if shared < 0.5 * len(shingles[left] | shingles[right]):
                 continue
-            matcher = difflib.SequenceMatcher(None, bodies[left], bodies[right], autojunk=False)
-            if matcher.real_quick_ratio() < 0.9 or matcher.quick_ratio() < 0.9 or matcher.ratio() < 0.9:
+            matcher = difflib.SequenceMatcher(None, tokens[left], tokens[right], autojunk=False)
+            if matcher.real_quick_ratio() < 0.9 or matcher.quick_ratio() < 0.9:
                 continue
-            for block in (blocks[left], blocks[right]):
-                if not any(flag == "near-duplicate" for flag, _ in block.flags):
-                    block.flags.append(("near-duplicate", block.line))
+            if comparisons >= MAX_DUPLICATE_COMPARISONS_PER_FILE or budget.remaining <= 0:
+                return
+            comparisons += 1
+            budget.remaining -= 1
+            if matcher.ratio() < 0.9:
+                continue
+            for index in (left, right):
+                if not flagged[index]:
+                    flagged[index] = True
+                    blocks[index].flags.append(("near-duplicate", blocks[index].line))
                     counts["near-duplicate"] += 1
 
 
@@ -1216,10 +1268,26 @@ def churn(root: Path, months: int) -> Counter[str]:
 # Tool checks
 
 
-def command_token(text: str) -> str:
-    """The first word of a matched command, which appears verbatim in package.json even when the script has escaped quotes."""
-    match = re.match(r"[\w@:./-]+", text.strip())
-    return match.group(0) if match else text.strip().split()[0]
+def quotable(haystack: str, *candidates: str) -> str | None:
+    """The first candidate that appears verbatim in the text, compared as the audit protocol compares quotes."""
+    text = " ".join(haystack.split())
+    for candidate in candidates:
+        if candidate and "`" not in candidate and " ".join(candidate.split()) in text:
+            return candidate
+    return None
+
+
+def script_quote(manifests: Manifests, path: str, name: str, command: str, match: re.Match[str], runner: str | None) -> str:
+    """A verifiable quote for a script that runs tests: its key and command up to the runner, else the runner's own token.
+
+    The JSON form of the command matches package.json even when the script has escaped quotes. The quote is never
+    just `pnpm` or `node`, which can appear anywhere in the file.
+    """
+    encoded = json.dumps(command[:match.end()], ensure_ascii=False)[:-1]
+    key = json.dumps(name, ensure_ascii=False)
+    token = "--test" if runner == "node:test" else match.group(0) if not re.search(r"[\\\"']", match.group(0)) else match.group(0).split()[-1]
+    candidates = [f"{key}: {encoded}", f"{key}:{encoded}"] if len(encoded) <= 100 else []
+    return quotable(manifests.raw.get(path, ""), *candidates, token, f"{key}:") or token
 
 
 def runner_facts(manifests: Manifests, files: list[str], test_imports: Counter[str]) -> dict[str, list[str]]:
@@ -1257,19 +1325,19 @@ def runner_facts(manifests: Manifests, files: list[str], test_imports: Counter[s
         for runner, pattern in RUNNER_COMMANDS.items():
             match = pattern.search(command)
             if match and runner not in runners:
-                add(runner, cite_file(path, command_token(match.group(0))))
+                add(runner, cite_file(path, script_quote(manifests, path, name, command, match, runner)))
     return runners
 
 
 def scripts_running_tests(manifests: Manifests) -> list[tuple[str, str, str]]:
-    """(manifest, script name, the command's first word) for each script that runs a test runner."""
+    """(manifest, script name, a verifiable quote) for each script that runs a test runner."""
     found = []
     for path, name, command in manifests.scripts():
-        match = next((match for pattern in RUNNER_COMMANDS.values() for match in [pattern.search(command)] if match), None)
+        runner, match = next(((runner, match) for runner, pattern in RUNNER_COMMANDS.items() for match in [pattern.search(command)] if match), (None, None))
         if match is None and name == "test":
             match = DELEGATING_TEST_COMMAND.search(command)
         if match:
-            found.append((path, name, command_token(match.group(0))))
+            found.append((path, name, script_quote(manifests, path, name, command, match, runner)))
     return found
 
 
@@ -1338,7 +1406,28 @@ def coverage_collection_flag(command: str) -> str | None:
     return None
 
 
+# A coverage metric set above zero; a negative number is a maximum count of uncovered items, also a floor.
+NONZERO_METRIC = re.compile(
+    r"""\b(?:lines|branches|functions|statements)['"]?\s*:\s*(?:-\s*)?(?:0*[1-9]\d*(?:\.\d*)?|0*\.\d*[1-9])|\b100['"]?\s*:\s*true\b"""
+)
+NONZERO_VALUE = r"-?(?:0*[1-9]\d*(?:\.\d*)?|0*\.\d*[1-9])"
+# Runners whose own coverage floor settings the collector does not read: bunfig.toml, karma.conf.js, and .taprc.
+FLOOR_UNREAD_RUNNERS = frozenset({"bun:test", "karma", "angular-cli", "tap"})
+
+
+def json_floor(value: Any) -> bool:
+    """Whether a Jest `coverageThreshold` value from JSON sets at least one metric above zero."""
+    if isinstance(value, dict):
+        return any(
+            (key in ("lines", "branches", "functions", "statements") and isinstance(item, (int, float)) and not isinstance(item, bool) and item != 0)
+            or json_floor(item)
+            for key, item in value.items()
+        )
+    return False
+
+
 def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows: list[str]) -> dict[str, Any]:
+    """Where coverage floors are set, and what collects coverage. A floor needs at least one metric above zero."""
     thresholds: list[str] = []
     enabled: list[str] = []
     for path in files:
@@ -1348,16 +1437,20 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
             block = object_block(text, "coverage")
             if block:
                 limits = object_block(block, "thresholds")
-                if limits is not None and re.search(r"\b(?:lines|branches|functions|statements)\s*:\s*[1-9]|\b100\s*:\s*true\b", limits):
-                    thresholds.append(cite_file(path, "thresholds"))
-                elif re.search(r"\b(?:lines|branches|functions|statements)\s*:\s*\d", block):
+                if limits is not None:
+                    if NONZERO_METRIC.search(limits):
+                        thresholds.append(cite_file(path, "thresholds"))
+                elif NONZERO_METRIC.search(block):
                     thresholds.append(cite_file(path, "coverage", "with per-metric minimums"))
                 if re.search(r"\benabled\s*:\s*true\b", block):
                     enabled.append(cite_file(path, "enabled: true"))
         elif re.fullmatch(r"jest\.config\.[cm]?[jt]s(?:on)?", name):
             text = mask(read_text(root / path), strings=False)
             if re.search(r"\bcoverageThreshold['\"]?\s*:", text):
-                thresholds.append(cite_file(path, "coverageThreshold"))
+                limits = object_block(text, "coverageThreshold")
+                # An object literal must set a metric above zero; any other value cannot be read, so it is credited as before.
+                if limits is None or NONZERO_METRIC.search(limits):
+                    thresholds.append(cite_file(path, "coverageThreshold"))
             if re.search(r"\bcollectCoverage['\"]?\s*:\s*true\b", text):
                 enabled.append(cite_file(path, "collectCoverage"))
         elif name in (".c8rc", ".c8rc.json", ".nycrc", ".nycrc.json"):
@@ -1366,7 +1459,7 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
                 thresholds.append(cite_file(path, "check-coverage" if "check-coverage" in text else "checkCoverage"))
     for path, package in manifests.packages:
         jest = package.get("jest")
-        if isinstance(jest, dict) and jest.get("coverageThreshold"):
+        if isinstance(jest, dict) and json_floor(jest.get("coverageThreshold")):
             thresholds.append(cite_file(path, '"coverageThreshold"'))
         if isinstance(jest, dict) and jest.get("collectCoverage") is True:
             enabled.append(cite_file(path, '"collectCoverage"'))
@@ -1376,15 +1469,22 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
                 thresholds.append(cite_file(path, f'"{tool}"'))
     for path, name, command in manifests.scripts():
         fragment = command.strip()
-        match = re.search(r"--coverage\.thresholds\.\w+=\d+|--test-coverage-(?:lines|branches|functions)=\d+|\bc8\b[^&|;]*--check-coverage|\bnyc\b[^&|;]*--check-coverage", fragment)
+        raw = manifests.raw.get(path, "")
+        match = re.search(
+            rf"--coverage\.thresholds\.\w+={NONZERO_VALUE}(?![\d.])|--coverage\.thresholds\.100(?:=true)?(?![\w.=])"
+            rf"|--test-coverage-(?:lines|branches|functions)={NONZERO_VALUE}(?![\d.])"
+            r"|\bc8\b[^&|;]*--check-coverage|\bnyc\b[^&|;]*--check-coverage",
+            fragment,
+        )
         if match:
-            thresholds.append(cite_file(path, match.group(0)))
+            # Quote text that appears verbatim in package.json, even when the script has escaped quotes.
+            thresholds.append(cite_file(path, quotable(raw, match.group(0), "--check-coverage") or match.group(0)))
         flag = coverage_collection_flag(fragment)
         if not flag:
             wrapper = re.search(r"(?<![\w-])(?:c8|nyc)\s", fragment)
             flag = wrapper.group(0).strip() if wrapper else None
         if flag:
-            enabled.append(cite_file(path, flag))
+            enabled.append(cite_file(path, quotable(raw, flag, flag.partition("=")[0].split()[0]) or flag))
     for path in workflows:
         for number, line in enumerate(read_text(root / path).split("\n"), start=1):
             fragment = line.split("#", 1)[0].strip()
@@ -1395,7 +1495,7 @@ def coverage_facts(root: Path, files: list[str], manifests: Manifests, workflows
                     fragment = fragment[1:-1]
             flag = coverage_collection_flag(fragment)
             if flag:
-                enabled.append(cite(path, number, flag))
+                enabled.append(cite(path, number, quotable(line, flag, flag.partition("=")[0].split()[0]) or flag))
     return {"thresholds": thresholds, "enabled": enabled}
 
 
@@ -1434,6 +1534,7 @@ class Layer:
         self.global_ignores = global_ignores
         self.presets: list[str] = []
         self.evidence: list[str] = []
+        self.keys: set[str] = set()  # the properties a configuration object sets, which a spread copies
 
 
 def glob_regex(pattern: str) -> str:
@@ -1502,6 +1603,7 @@ def rule_level(value: str) -> str | None:
 def preset_layer(base: str, plugin: str, preset: str, evidence: str) -> Layer:
     rules = {f"{plugin}/{rule}": "error" for rule in LINT_PLUGINS[plugin]["presets"].get(preset.split("/")[-1], set())}
     layer = Layer(base, rules=rules)
+    layer.keys.add("rules")
     layer.presets.append(f"{plugin}:{preset}")
     layer.evidence.append(evidence)
     return layer
@@ -1670,12 +1772,19 @@ class FlatConfig:
             item_start, item_end = self.strip_span(item_start, item_end)
             item = self.text(item_start, item_end)
             if item.startswith("..."):
+                # A spread copies the spread object's own properties, in order: a later key overrides it, and it
+                # overrides an earlier one. `files`, `ignores`, and `rules` are the ones that decide the result.
                 spread = self.evaluate(item_start + 3, item_end, depth + 1)
                 if spread:
-                    layer.rules = dict(spread[-1].rules)
+                    copied = spread[-1]
+                    for name in ("files", "ignores"):
+                        if name in copied.keys:
+                            setattr(layer, name, None if getattr(copied, name) is None else list(getattr(copied, name)))
+                    if "rules" in copied.keys:
+                        layer.rules = dict(copied.rules)
                     layer.presets += [name for part in spread for name in part.presets]
                     layer.evidence += [entry for part in spread for entry in part.evidence]
-                    keys.add("rules")
+                    keys |= copied.keys
                 continue
             key = re.match(r"""(['"]?)([\w$-]+)\1\s*:\s*""", item)
             if not key:
@@ -1697,6 +1806,7 @@ class FlatConfig:
             extended.ignores = layer.ignores if extended.ignores is None else extended.ignores
         if keys <= {"ignores", "name"} and "ignores" in keys:
             layer.global_ignores = True
+        layer.keys = keys
         return before + [layer]
 
     def rules_object(self, start: int, end: int, depth: int) -> dict[str, str]:
@@ -1765,15 +1875,28 @@ def legacy_json_layers(path: str, base: str, config: dict[str, Any], unresolved:
     return layers
 
 
-def legacy_extends_values(content: str) -> list[str]:
-    """The `extends` entries of a YAML or JavaScript legacy configuration: a list, a block list, or one value."""
-    match = re.search(r"""(?m)^[ \t]*['"]?extends['"]?[ \t]*:[ \t]*(.*)$""", content)
+def legacy_extends_values(content: str, unresolved: list[str] | None = None, path: str = "") -> list[str]:
+    """The `extends` entries of a YAML or JavaScript legacy configuration: a list, a block list, or one value.
+
+    The key is found wherever it sits, at the start of a line or after `{` or `,` on one line, as in
+    `module.exports = { extends: ['plugin:jest-dom/recommended'] };`. A value it cannot read, such as a variable,
+    is recorded as unresolved rather than read as no shared configuration.
+    """
+    # The first `extends` is the top-level one; those inside overrides are reported as unread scopes.
+    match = re.search(r"""(?m)(?:^|[{,])[ \t]*['"]?extends['"]?[ \t]*:[ \t]*(.*)$""", content)
     if not match:
         return []
     value = match.group(1).strip()
     if value.startswith("["):
         closing = content.find("]", match.start(1))
         items = content[match.start(1) + 1:closing if closing != -1 else len(content)].split(",")
+    elif value[:1] in ("'", '"'):
+        closing = value.find(value[0], 1)
+        items = [value[:closing + 1] if closing != -1 else value]
+    elif value and path.endswith((".js", ".cjs")):
+        if unresolved is not None:
+            unresolved.append(f"{path} extends `{fragment(value.rstrip(',;}'), 40)}`, which the collector cannot read")
+        items = []
     elif value:
         items = [value]
     else:
@@ -1792,7 +1915,9 @@ def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str]) -
     """YAML and JavaScript legacy configuration, read as text: shared configurations first, then rules."""
     content = mask(text, strings=False) if path.endswith((".js", ".cjs")) else re.sub(r"(?m)(^|\s)#.*$", r"\1", text)
     layers: list[Layer] = []
-    for entry in legacy_extends_values(content):
+    if path.endswith((".js", ".cjs")) and re.search(r"\bmodule\s*\.\s*exports\s*=", content) and not re.search(r"\bmodule\s*\.\s*exports\s*=\s*\{", content):
+        unresolved.append(f"{path} exports something other than an object literal, which the collector cannot read")
+    for entry in legacy_extends_values(content, unresolved, path):
         layers += legacy_extends(path, base, entry, unresolved)
     layer = Layer(base)
     for match in re.finditer(r"""(['"]?)((?:testing-library|jest-dom)/[\w-]+)\1\s*:\s*([^\n,}]+)""", content):
@@ -2098,9 +2223,11 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     stories = [path for path in source_paths if STORY_PATTERN.search(path)]
     interaction_stories = [path for path in stories if re.search(r"\bplay\s*[:=(]|\bplay\s*\(", fully_masked[path])]
     test_set = set(test_paths)
+    package_roots = [relative(root, directory) for directory in manifests.directories[1:]]
     product = [
         path for path in source_paths
-        if path not in test_set and not STORY_PATTERN.search(path) and not NON_SOURCE_PATTERN.search(path) and not TOOLING_PATTERN.search(path)
+        if path not in test_set and not STORY_PATTERN.search(path) and not NON_SOURCE_PATTERN.search(path)
+        and not TOOLING_PATTERN.search(path) and not in_tooling_folder(path, package_roots)
     ]
 
     if not product and not test_paths and not interaction_stories:
@@ -2135,6 +2262,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     queries: Counter[str] = Counter()
     interactions: Counter[str] = Counter()
     msw_files: list[str] = []
+    duplicate_budget = ComparisonBudget()
     for path in test_paths:
         text = texts[path]
         masked = fully_masked[path]
@@ -2147,7 +2275,7 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
         file_focused, file_skipped = focus_and_skips(path, text, masked)
         focused += file_focused
         skipped += file_skipped
-        blocks, counts = prefilter(path, text, masked, product_module(path), web_first=kind in ("end-to-end", "playwright-component"))
+        blocks, counts = prefilter(path, text, masked, product_module(path), web_first=kind in ("end-to-end", "playwright-component"), budget=duplicate_budget)
         tests_counted += len(blocks)
         flag_counts.update(counts)
         candidates += [block for block in blocks if block.flags]
@@ -2261,12 +2389,14 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     snapshot["mutationTargets"] = mutation_targets
 
     # Runner check.
-    if (not test_paths or not runners) and unrecognised:
+    if unrecognised and (not test_paths or not runners or not script_runs):
+        # The wrapper may run the suite correctly, so the collector cannot call the runner missing or partial.
         path, command = unrecognised[0]
         checks[RUNNER] = {
             "evaluationState": "not-evaluated",
             "reason": f"The `test` script in {path} runs `{command[:80]}`, which the collector does not recognise as a test runner"
             + (f", and it found {len(test_paths)} test files" if test_paths else ", and it found no test files it recognises")
+            + (f" and the runner(s) {', '.join(sorted(runners))}" if runners else "")
             + "; check by hand whether that command runs tests.",
         }
     elif not test_paths and not interaction_stories:
@@ -2340,8 +2470,17 @@ def collect(root: Path, months: int = 6, with_mutation: bool = False, run: Runne
     coverage = coverage_facts(root, files, manifests, workflows)
     snapshot["coverage"] = {"thresholds": coverage["thresholds"][:4], "collectedBy": coverage["enabled"][:4]}
     unit_runners = UNIT_RUNNERS & set(runners)
+    # Jasmine run by Karma takes its floor from karma.conf.js, which is not read either.
+    unread = FLOOR_UNREAD_RUNNERS | ({"jasmine"} if unit_runners & {"karma", "angular-cli"} else set())
     if not unit_runners:
         checks[COVERAGE] = {"applicability": "not-applicable", "reason": "No unit or integration test runner (such as Vitest, Jest, node:test, Bun, Karma, Mocha, AVA, tap, or uvu) was found."}
+    elif not coverage["thresholds"] and unit_runners <= unread:
+        checks[COVERAGE] = {
+            "evaluationState": "not-evaluated",
+            "reason": f"The unit test runner(s) found ({', '.join(sorted(unit_runners))}) set coverage floors in settings the collector does not read"
+            " (`coverageThreshold` in bunfig.toml, `coverageReporter.check` in karma.conf.js, tap's defaults and .taprc), and no Vitest, Jest, c8, nyc,"
+            " or node:test floor was found; check those settings by hand.",
+        }
     elif not coverage["thresholds"]:
         config_files = [path for path in files if re.search(r"(^|/)(?:vitest|vite|jest)\.config\.[cm]?[jt]s(?:on)?$", path)]
         checks[COVERAGE] = {

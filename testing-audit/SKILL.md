@@ -17,7 +17,7 @@ It has four sources:
 - the judgement of the model, spent on the riskiest code first: Git churn hotspots and high fan-in modules;
 - optionally, a Stryker mutation run on the five riskiest files (`--with-mutation`).
 
-It is static and read-only by default. Only `--with-mutation` runs the project's tests: the collector forces Stryker to mutate a sandbox copy (`inPlace: false`) and sends its report, log, and sandbox under `.architect-audits/testing-audit/mutation/`.
+It is static and read-only by default. Only `--with-mutation` executes project code: Stryker runs the project's build and test code, which can write wherever that code writes. The collector forces Stryker to mutate a sandbox copy (`inPlace: false`) and sends Stryker's own files (sandbox, report, and incremental state) under `.architect-audits/testing-audit/mutation/`, but the sandbox is a working copy, not filesystem isolation. So the audit asks before a mutation run.
 
 **Testing philosophy.** The audit grades with three principles. Test behaviour, not implementation: assert what a user or caller observes. Snapshots are a smell: a snapshot nobody reviewed is an expected value copied from the code. Assert on meaning, not styling: a role, a label, or a semantic token, never a raw utility class.
 
@@ -68,9 +68,9 @@ Add the critical paths you identify, and which test level covers each.
 
 | Check | Severity | Method | Expectation | Violation signal |
 | --- | --- | --- | --- | --- |
-| Tests run under a configured runner | high | tool | Test files exist, a runner is declared, and a package script runs it. An unrecognised `test` command leaves the check not evaluated. | No tests, tests with no runner, or no script that runs them (partial). |
+| Tests run under a configured runner | high | tool | Test files exist, a runner is declared, and a package script runs it. An unrecognised `test` command leaves the check not evaluated when no recognised script runs tests. | No tests, tests with no runner, or no script that runs them (partial). |
 | No focused or skipped tests committed | medium | tool | No `.only`, `fit`, or `fdescribe`; no `.skip`, `xit`, `.todo`, or `.fixme` left behind. | A focused test (violation); skipped or to-do tests (partial). |
-| Coverage thresholds configured | medium | tool | The unit or integration runner sets thresholds, and something collects coverage so they can fail. | No thresholds (missing), or thresholds nothing enforces (partial). |
+| Coverage thresholds configured | medium | tool | The unit or integration runner sets thresholds with at least one metric above zero, and something collects coverage so they can fail. Not evaluated when the only unit runners are Bun, Karma, or tap, whose floor settings the collector does not read. | No thresholds (missing), or thresholds nothing enforces (partial). |
 
 ### Layer 2 — Test effectiveness
 
@@ -127,7 +127,7 @@ Classify each candidate as **real**, **hollow**, **mirror** (it asserts that an 
    ```
 
    - Pass `--since <ref>` for a diff-scoped run, and `--threshold months=<n>` for `--months`.
-   - Pass `--enrichment with-mutation` for `--with-mutation`. The collector then runs Stryker itself on a sandbox copy, writing only under `.architect-audits/testing-audit/mutation/`, and records the mutation check. Stryker gets what is left of the protocol's 600-second collector limit after the scan, less a margin, and at most seven minutes. If Stryker is missing, fails, or runs out of time, the check is not evaluated with the reason.
+   - Pass `--enrichment with-mutation` for `--with-mutation`. Before passing `--enrichment with-mutation`, tell the user that Stryker will execute the project's tests and build, which can write wherever that code writes, and ask for confirmation; without it, run without the flag. The collector then runs Stryker itself on a sandbox copy (`inPlace: false`), sends Stryker's own files under `.architect-audits/testing-audit/mutation/`, and records the mutation check. Stryker gets what is left of the protocol's 600-second collector limit after the scan, less a margin, and at most seven minutes. If Stryker is missing, fails, or runs out of time, the check is not evaluated with the reason.
 2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/testing-audit/.staging/run.json`: `riskRanking`, `untestedRiskyFiles`, `preFilter`, `moduleMocks`, `flakeSignals`, and `firstClassTooling`. Identify the critical paths from routes, handlers, and the risk ranking, and record them with `snapshot --set criticalPaths=<json>`.
 3. **Read within the discovery budget.** Read the tests of the five highest-ranked modules, then the first 25 pre-filter candidates in their ranked order. Widen by another 25 only while more than a third of what you read is hollow or a mirror, up to the 100 candidates the snapshot lists. Record what you sampled with `snapshot --set sampled=<json>`.
 4. **Evaluate every model check.**
@@ -164,9 +164,9 @@ The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `
 
 ## What this skill explicitly does NOT do
 
-- Modify, add, or delete any test, configuration, or source file. The only writes are under `.architect-audits/testing-audit/`, through the protocol and, with `--with-mutation`, Stryker's sandbox, report, and log.
+- Modify, add, or delete any test, configuration, or source file. The audit's own writes are under `.architect-audits/testing-audit/`, through the protocol and, with `--with-mutation`, Stryker's sandbox and report. With `--with-mutation`, the project's build and test code also runs, and it can write wherever that code writes; the audit asks first.
 - Install packages, or run ESLint. Lint rules are read from the configuration as text.
-- Run the test suite, end-to-end suites, or a browser, except Stryker's sandboxed runs with `--with-mutation`.
+- Run the test suite, end-to-end suites, or a browser, except Stryker's runs with `--with-mutation`, after the user confirms.
 - Require a test file per component or module. One integration test can cover a page of components.
 - Treat coverage as proof of effectiveness, or grade a test by its shape alone. The pre-filter only chooses what to read.
 - Audit languages other than JavaScript and TypeScript.

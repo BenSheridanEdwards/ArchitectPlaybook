@@ -35,17 +35,23 @@ modules, custom matchers, and page objects.
     Jest, Create React App's `react-scripts test`, `node --test`, `bun test`,
     Angular's `ng test` with Karma or Jasmine, Playwright, Cypress, Storybook's
     test-runner, Mocha, AVA, tap, and uvu.
-  - Test files are `*.test.*`, `*.spec.*`, `*.cy.*`, `*.e2e.*`, `*_test.*`,
-    `*-test.*`, `test-*.*`, files in `__tests__/`, files in `test/`, `tests/`,
-    `e2e/`, or `integration/` folders that call `describe`, `it`, or `test`, and
-    files anywhere that import a test API and declare tests, as `node --test`
-    and `bun test` find them.
+  - Test files are `*.test.*`, `*.spec.*`, `*.cy.*`, `*.e2e.*`, files in
+    `__tests__/`, files in `test/`, `tests/`, `e2e/`, or `integration/` folders
+    that call `describe`, `it`, or `test`, and files anywhere that import a test
+    API and declare tests, as `node --test` and `bun test` find them. A
+    `*_test.*`, `*-test.*`, or `test-*.*` name counts only when the file imports
+    a test API, so a product module such as `ab-test.ts` stays product code.
+  - Files in `scripts/`, `tools/`, or `tooling/` at the repository root or a
+    workspace package's root are tooling and left out of the risk ranking; the
+    same folder names deeper down, such as `src/tools/`, are product code.
   - "Present" needs a package script that runs a runner, or a `test` script
     that delegates to workspaces through Turborepo, Nx, Lerna, or a recursive
     package-manager run.
-  - A `test` script the collector does not recognise, such as a shell script,
-    leaves the check not evaluated, with the command in the reason, when no
-    runner or no test file is found. Check by hand what it runs.
+  - A `test` script the collector does not recognise, such as a shell script
+    or `node scripts/run-tests.js`, leaves the check not evaluated, with the
+    command in the reason, when no recognised script runs tests, even if a
+    runner and test files are found: the wrapper may run them. Check by hand
+    what it runs.
   - Whether continuous integration runs the suite is `/quality-gates-audit`'s
     check; the lines that do are in the snapshot.
 - **No focused or skipped tests committed.** The collector masks comments,
@@ -64,8 +70,15 @@ modules, custom matchers, and page objects.
   - Jest: `coverageThreshold` in its configuration or `package.json`.
   - c8 and nyc: `check-coverage` with a metric. node:test:
     `--test-coverage-lines` and its siblings.
-  - An empty `thresholds` object, or one whose metrics are all zero, sets no
-    minimum and does not count.
+  - A floor needs at least one metric above zero (a negative number, a
+    maximum count of uncovered items, also counts). An empty `thresholds` or
+    `coverageThreshold` object, metrics that are all zero, or a flag such as
+    `--coverage.thresholds.lines=0` sets no minimum and does not count.
+  - Bun (`coverageThreshold` in `bunfig.toml`), Karma (`coverageReporter.check`
+    in `karma.conf.js`, including Angular's `ng test`), and tap (its defaults
+    and `.taprc`) keep their floors in settings the collector does not read.
+    When those are the only unit runners and no floor above is found, the
+    check is not evaluated with that reason; check the settings by hand.
   - Thresholds fail a run only when coverage is collected: `coverage.enabled`,
     `collectCoverage`, `--coverage` in a script or workflow, or c8 or nyc
     wrapping the run. Thresholds with none of these are partial. CLI evidence
@@ -73,7 +86,9 @@ modules, custom matchers, and page objects.
     explicitly `true`); a `false` value or a provider, reporter, or threshold
     sub-option alone does not enable collection. Duplicate collection options
     are not credited: runners can reject them, so the collector does not assume
-    the last value wins. Shell separators inside quotes stay in their argument;
+    the last value wins. Evidence quotes text that appears verbatim in the
+    file, such as the flag name when the script has escaped quotes. Shell
+    separators inside quotes stay in their argument;
     separate shell commands are scanned independently. c8/nyc wrapper evidence
     comes from package scripts, not workflow descriptions. This is a static
     inventory, not evaluation of effective configuration or arbitrary shell
@@ -93,7 +108,7 @@ flags real tests that only look hollow.
 | `mock-only` | Every assertion is a call assertion on a mock (`toHaveBeenCalledWith` and its family, `.mock.calls`), or compares a result with a value the file fed into a mock (`mockResolvedValue(invoice)` then `toEqual(invoice)`). |
 | `snapshot-only` | Every assertion is a snapshot matcher. |
 | `passes-if-undefined` | Every assertion would still pass if every function the test imports from the repository returned `undefined`. |
-| `near-duplicate` | It makes the same assertions as another test in the same file, on a setup at least 90 percent the same. |
+| `near-duplicate` | It makes the same assertions as another test in the same file, on a setup at least 90 percent the same. Bodies over 2,000 characters are not compared, and the full comparisons are capped per file and per run, so a file of many near-identical tests cannot exhaust the collector's time limit. |
 
 Chai chains such as `expect(total).to.equal(5)` and property assertions such
 as `.to.be.true` are read like Jest matchers; each test reads at most its
@@ -112,7 +127,8 @@ first 100 assertions.
   callback, or a `catch`, so they never run when the result is empty;
 - `.resolves`, `.rejects`, `expect.poll`, and Playwright's web-first matchers
   that are neither awaited nor returned, so the test ends first;
-- `expect(value)` with no matcher.
+- `expect(value)` with no matcher, or a Jest-style matcher that is never
+  called, such as `expect(value).toBeTruthy;`.
 
 ### Hollow shapes the pre-filter cannot see
 
@@ -184,10 +200,16 @@ Keep these, and dismiss their flags with a reason:
   - With `--with-mutation`, the collector writes a one-off Stryker
     configuration that keeps the project's own Stryker settings, if any, and
     mutates only `mutationTargets`.
-  - It forces the options that would write into the repository, whatever the
-    project sets: `inPlace: false`, so Stryker mutates a sandbox copy; file
-    logging off; and the sandbox, JSON report, and incremental file under
-    `.architect-audits/testing-audit/mutation/`.
+  - It forces the options that would make Stryker itself write into the
+    repository, whatever the project sets: `inPlace: false`, so Stryker
+    mutates a sandbox copy; file logging off; and the sandbox, JSON report, and
+    incremental file under `.architect-audits/testing-audit/mutation/`.
+  - That confines Stryker's own files, not the project's code. The sandbox is
+    a working copy, not filesystem isolation, and the generated configuration
+    keeps the project's `buildCommand`, plugins, and executable configuration.
+    Mutation testing runs the project's build and test code, which can write
+    wherever that code writes. So before passing `--enrichment
+    with-mutation`, the model says so and asks the user to confirm.
   - The score is killed plus timed-out mutants over those plus survived and
     uncovered ones.
   - At least 80 percent is present, 60 to 80 partial, and under 60 a violation;
@@ -238,10 +260,14 @@ Keep these, and dismiss their flags with a reason:
     count, and only those whose `files` and `ignores` match the test files.
     Shared configurations, rule settings, `extends`, and an object's own
     `rules` key (which replaces a spread preset's rules) apply in order, so a
-    later setting wins.
+    later setting wins. Spreading an object, such as `{ ...scoped }`, copies
+    its `files`, `ignores`, and `rules` in JavaScript spread order.
   - Legacy JSON configurations apply `extends`, then `rules`, then `overrides`
     that match the test files. YAML and JavaScript legacy files are read as
-    text, quoted or not; their overrides' file scopes are not read.
+    text, quoted or not, on one line or several; their overrides' file scopes
+    are not read. An `extends` value that is not a literal, or a
+    `module.exports` that is not an object literal, is recorded as unreadable
+    configuration, never as a missing plugin.
   - A shared configuration it cannot read, such as `react-app/jest` or an
     imported `@acme/eslint-config`, could set these rules. When the required
     rules are not all on and such configuration exists, the check is not

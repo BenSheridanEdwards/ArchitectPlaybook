@@ -122,7 +122,7 @@ class RunnerTests(CollectorTestCase):
         check = self.check(self.collect(), "tests-run-under-configured-runner")
         self.assertEqual(check["status"], "present")
         self.assertIn('package.json — `"vitest"`', check["evidence"])
-        self.assertIn("package.json — `vitest`", check["evidence"])
+        self.assertIn('package.json — `"test": "vitest`', check["evidence"])
 
     def test_node_test_backends_and_delegating_scripts_count(self) -> None:
         self.package({"name": "monorepo", "private": True, "workspaces": ["packages/*"], "scripts": {"test": "turbo run test"}})
@@ -1006,6 +1006,188 @@ class ReviewRegressionTests(CollectorTestCase):
         ]}}}
         _, _, survivors = collector.mutation_score(report, self.root)
         self.assertEqual([line for _, line, _ in survivors], [2, 1])
+
+
+class SecondReviewRegressionTests(CollectorTestCase):
+    """Regression tests for the second review of the fixes; each fails on the collector before its fix."""
+
+    lint_project = ReviewRegressionTests.lint_project
+    lint_results = ReviewRegressionTests.lint_results
+
+    def protocol(self) -> Any:
+        protocol_spec = importlib.util.spec_from_file_location("audit_run_for_second_review", ROOT / "audit-protocol" / "scripts" / "audit_run.py")
+        assert protocol_spec and protocol_spec.loader
+        protocol = importlib.util.module_from_spec(protocol_spec)
+        sys.modules[protocol_spec.name] = protocol
+        protocol_spec.loader.exec_module(protocol)
+        return protocol
+
+    # Codex 1. The skill must not promise that mutation testing writes only under the audit's folder.
+    def test_the_skill_says_mutation_runs_project_code_and_asks_first(self) -> None:
+        skill = (ROOT / "testing-audit" / "SKILL.md").read_text(encoding="utf-8")
+        detection = (ROOT / "testing-audit" / "references" / "detection.md").read_text(encoding="utf-8")
+        for text in (skill, detection):
+            text = " ".join(text.split())
+            self.assertIsNone(re.search(r"writing only under|The only writes are under", text), "the docs still promise confined writes")
+            self.assertIn("can write wherever that code writes", text)
+        self.assertRegex(skill, r"Before passing `--enrichment with-mutation`[^\n]*ask")
+
+    # Codex 2. A spread copies `files`, `ignores`, and `rules`, in JavaScript spread order.
+    def test_a_spread_keeps_the_scope_of_the_spread_object(self) -> None:
+        self.lint_project()
+        preamble = "import jd from 'eslint-plugin-jest-dom';\n"
+        cases = [
+            ("const scoped = { files: ['other/**/*.test.tsx'], ...jd.configs['flat/recommended'] };\nexport default [{ ...scoped }];\n", "missing"),
+            ("const scoped = { files: ['src/**/*.test.tsx'], ...jd.configs['flat/recommended'] };\nexport default [{ ...scoped }];\n", "present"),
+            ("const scoped = { files: ['src/**/*.test.tsx'], ...jd.configs['flat/recommended'] };\nexport default [{ ...scoped, files: ['other/**'] }];\n", "missing"),
+            ("const scoped = { files: ['other/**'], ...jd.configs['flat/recommended'] };\nexport default [{ files: ['src/**'], ...scoped }];\n", "missing"),
+            ("const scoped = { ignores: ['src/ui/**'], ...jd.configs['flat/recommended'] };\nexport default [{ ...scoped }];\n", "missing"),
+        ]
+        for config, status in cases:
+            with self.subTest(config=config):
+                self.write("eslint.config.js", preamble + config)
+                _, jest_dom = self.lint_results()
+                self.assertEqual(jest_dom["status"], status)
+
+    # Codex 3. A one-line legacy JavaScript configuration is read, and an unreadable `extends` is not called missing.
+    def test_an_inline_legacy_javascript_configuration_is_read(self) -> None:
+        self.lint_project()
+        self.write(".eslintrc.cjs", "module.exports = { extends: ['plugin:jest-dom/recommended'] };\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "present")
+        self.write(".eslintrc.cjs", "module.exports = { root: true, extends: 'plugin:jest-dom/recommended' };\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["status"], "present")
+        self.write(".eslintrc.cjs", "const shared = require('./shared');\nmodule.exports = { extends: shared };\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["evaluationState"], "not-evaluated")
+        self.write(".eslintrc.cjs", "module.exports = require('./base');\n")
+        _, jest_dom = self.lint_results()
+        self.assertEqual(jest_dom["evaluationState"], "not-evaluated")
+
+    # Codex 4. An unrecognised wrapper may run a declared runner's tests.
+    def test_an_unrecognised_wrapper_with_a_runner_and_tests_is_not_evaluated(self) -> None:
+        self.package({"name": "app", "scripts": {"test": "node scripts/run-tests.js"}, "devDependencies": {"vitest": "4.0.0"}})
+        self.write("src/a.test.ts", "import { it, expect } from 'vitest';\nit('adds', () => { expect(1 + 1).toBe(2); });\n")
+        self.write("src/index.ts", "export const one = 1;\n")
+        self.commit()
+        check = self.check(self.collect(), "tests-run-under-configured-runner")
+        self.assertEqual(check.get("evaluationState"), "not-evaluated")
+        self.assertIn("node scripts/run-tests.js", check["reason"])
+
+    # Claude 5. The near-duplicate scan is bounded.
+    def test_many_near_identical_snapshot_tests_collect_in_seconds(self) -> None:
+        self.package(VITEST_PACKAGE)
+        tests = []
+        for index in range(200):
+            props = " ".join(f'prop{number}="value-{number}-{index % 7}"' for number in range(80))
+            tests.append(f"it('renders card {index}', () => {{\n  const {{ asFragment }} = render(<Card {props} />);\n  expect(asFragment()).toMatchSnapshot();\n}});\n")
+        text = "import { render } from '@testing-library/react';\nimport { Card } from './Card';\n" + "".join(tests)
+        self.assertGreater(len(text) / 200, 1_500)
+        self.write("src/Card.test.tsx", text)
+        self.write("src/Card.tsx", "export const Card = () => null;\n")
+        self.commit()
+        began = time.monotonic()
+        result = self.collect()
+        self.assertLess(time.monotonic() - began, 5)
+        self.assertEqual(result["snapshot"]["preFilter"]["byFlag"]["near-duplicate"], 200)
+
+    # Claude 6. A coverage floor needs a metric above zero.
+    def test_zero_coverage_floors_do_not_count(self) -> None:
+        cases = [
+            ({}, "vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 0, branches: 0 }, enabled: true } } };\n", "missing"),
+            ({}, "vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 0, branches: 50 }, enabled: true } } };\n", "present"),
+            ({}, "vitest.config.ts", "export default { test: { coverage: { lines: 0, enabled: true } } };\n", "missing"),
+            ({"devDependencies": {"jest": "30.0.0"}, "scripts": {"test": "jest"}}, "jest.config.js", "module.exports = { collectCoverage: true, coverageThreshold: {} };\n", "missing"),
+            ({"devDependencies": {"jest": "30.0.0"}, "scripts": {"test": "jest"}}, "jest.config.js", "module.exports = { collectCoverage: true, coverageThreshold: { global: { lines: 0 } } };\n", "missing"),
+            ({"devDependencies": {"jest": "30.0.0"}, "scripts": {"test": "jest"}}, "jest.config.js", "module.exports = { collectCoverage: true, coverageThreshold: { global: { lines: 80 } } };\n", "present"),
+            ({"devDependencies": {"jest": "30.0.0"}, "scripts": {"test": "jest"}, "jest": {"collectCoverage": True, "coverageThreshold": {"global": {"lines": 0}}}}, None, "", "missing"),
+            ({"devDependencies": {"jest": "30.0.0"}, "scripts": {"test": "jest"}, "jest": {"collectCoverage": True, "coverageThreshold": {"global": {"lines": -10}}}}, None, "", "present"),
+            ({"scripts": {"test": "vitest run --coverage --coverage.thresholds.lines=0"}}, None, "", "missing"),
+            ({"scripts": {"test": "vitest run --coverage --coverage.thresholds.lines=80"}}, None, "", "present"),
+            ({"scripts": {"test": "node --test --experimental-test-coverage --test-coverage-lines=0"}}, None, "", "missing"),
+        ]
+        for manifest, path, text, status in cases:
+            with self.subTest(manifest=manifest, path=path, text=text):
+                for existing in list(self.root.iterdir()):
+                    if existing.name != ".git":
+                        shutil.rmtree(existing) if existing.is_dir() else existing.unlink()
+                self.package({**VITEST_PACKAGE, **manifest})
+                if path:
+                    self.write(path, text)
+                self.write("src/a.test.ts", "import { it, expect } from 'vitest';\nit('adds', () => { expect(1 + 1).toBe(2); });\n")
+                self.commit()
+                self.assertEqual(self.check(self.collect(), "coverage-thresholds-configured")["status"], status)
+
+    # Claude 7. Bun, Karma, and tap keep their floors in settings the collector does not read.
+    def test_coverage_is_not_evaluated_for_runners_whose_floors_are_not_read(self) -> None:
+        cases = [
+            ({"scripts": {"test": "bun test"}}, "bunfig.toml", "[test]\ncoverageThreshold = 0.9\n", "src/a.test.ts", "import { test, expect } from 'bun:test';\ntest('adds', () => { expect(1 + 1).toBe(2); });\n"),
+            ({"scripts": {"test": "ng test"}, "devDependencies": {"karma": "6.4.0", "jasmine-core": "5.0.0"}}, "karma.conf.js", "module.exports = (config) => config.set({ coverageReporter: { check: { global: { lines: 80 } } } });\n", "src/app/app.spec.ts", "describe('app', () => { it('adds', () => { expect(1 + 1).toBe(2); }); });\n"),
+            ({"scripts": {"test": "tap"}, "devDependencies": {"tap": "21.0.0"}}, ".taprc", "allow-incomplete-coverage: false\n", "test/math.ts", "import t from 'tap';\nt.test('adds', (t) => { t.equal(1 + 1, 2); t.end(); });\n"),
+        ]
+        for manifest, config, settings, path, text in cases:
+            with self.subTest(config=config):
+                for existing in list(self.root.iterdir()):
+                    if existing.name != ".git":
+                        shutil.rmtree(existing) if existing.is_dir() else existing.unlink()
+                self.package({"name": "app", **manifest})
+                self.write(config, settings)
+                self.write(path, text)
+                self.write("src/index.ts", "export const one = 1;\n")
+                self.commit()
+                check = self.check(self.collect(), "coverage-thresholds-configured")
+                self.assertEqual(check.get("evaluationState"), "not-evaluated")
+                self.assertIn("does not read", check["reason"])
+
+    # Claude 8. Product code in nested `tools/` folders and `*-test.ts` files without a test API stays product code.
+    def test_nested_tools_folders_and_loose_test_names_stay_product_code(self) -> None:
+        self.package({"name": "agent", "workspaces": ["packages/*"], **{key: value for key, value in VITEST_PACKAGE.items() if key != "name"}})
+        self.write("src/tools/search.ts", "export const search = () => 1;\n")
+        self.write("src/experiments/ab-test.ts", "export const variant = () => 'a';\n")
+        self.write("src/index.ts", "import { search } from './tools/search';\nimport { variant } from './experiments/ab-test';\nexport const run = () => search() + variant();\n")
+        self.write("src/index.test.ts", "import { it, expect } from 'vitest';\nimport { run } from './index';\nit('runs', () => { expect(run()).toBe('1a'); });\n")
+        self.write("scripts/release.ts", "export const release = 1;\n")
+        self.write("packages/cli/package.json", json.dumps({"name": "cli"}))
+        self.write("packages/cli/scripts/build.ts", "export const build = 1;\n")
+        self.write("packages/cli/src/tools/run.ts", "export const tool = 1;\n")
+        self.write("lib/parse_test.ts", "import { test } from 'vitest';\ntest('parses', () => {});\n")
+        self.commit()
+        result = self.collect()
+        ranked = {item["path"] for item in result["snapshot"]["riskRanking"]}
+        self.assertTrue({"src/tools/search.ts", "src/experiments/ab-test.ts", "packages/cli/src/tools/run.ts"} <= ranked, ranked)
+        self.assertFalse({"scripts/release.ts", "packages/cli/scripts/build.ts"} & ranked, ranked)
+        self.assertEqual(result["snapshot"]["testFiles"]["total"], 2)
+
+    # Notes. Uncalled matchers, verbatim coverage quotes, and distinctive runner quotes.
+    def test_an_uncalled_jest_matcher_is_flagged_but_chai_properties_are_not(self) -> None:
+        text = (
+            "import { run } from '../src/run.js';\n"
+            "it('runs', () => { expect(run('x')).toBeTruthy; });\n"
+            "it('is true', () => { expect(run('x')).to.be.true; });\n"
+        )
+        flags = flags_of("test/run.test.js", text)
+        self.assertEqual(flags["runs"], ["passes-if-undefined"])
+        self.assertEqual(flags["is true"], [])
+
+    def test_coverage_and_runner_quotes_appear_verbatim_and_name_the_runner(self) -> None:
+        self.write("package.json", '{\n  "name": "app",\n  "packageManager": "pnpm@9.0.0",\n  "scripts": {\n'
+                   '    "test": "vitest run --coverage.enabled=\\"true\\"",\n'
+                   '    "test:node": "c8 --reporter=\\"text\\" --check-coverage --lines 80 node --import \\"tsx\\" --test",\n'
+                   '    "test:all": "pnpm -r test"\n  },\n  "devDependencies": {}\n}\n')
+        self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 80 } } } };\n")
+        self.write("src/a.test.ts", "import { it, expect } from 'vitest';\nit('adds', () => { expect(1 + 1).toBe(2); });\n")
+        self.commit()
+        protocol = self.protocol()
+        result = self.collect()
+        for name in ("coverage-thresholds-configured", "tests-run-under-configured-runner"):
+            for entry in self.check(result, name)["evidence"]:
+                protocol.verify_evidence(self.root, entry)
+        runner = self.check(result, "tests-run-under-configured-runner")["evidence"]
+        quotes = [quote for entry in runner for quote in re.findall(r"`([^`]+)`", entry)]
+        self.assertFalse({"pnpm", "node", "c8"} & set(quotes), quotes)
+        self.assertTrue(any("vitest" in quote for quote in quotes), quotes)
+        self.assertEqual(self.check(result, "coverage-thresholds-configured")["status"], "present")
 
 
 class FixtureTests(unittest.TestCase):
