@@ -25,6 +25,9 @@ user? Everything here serves that question.
    third of what you read is a real finding, up to the 60 the snapshot lists.
 4. Read every non-serialisable prop candidate and every client graph chain:
    they are few, and they are high severity.
+5. Cite what you read. A `present` verdict on a model check rests on
+   `path:line` citations of the effects, state declarations, or boundaries
+   you reviewed; a search or file count can only support it.
 
 The knowledge graph, when `graphify-out/graph.json` exists, only helps choose
 which components to read first.
@@ -82,9 +85,10 @@ which components to read first.
     the configurations above it. A JavaScript legacy file that spreads a value,
     such as a required shared configuration, is unreadable. In YAML and
     JavaScript legacy files, overrides whose literal `files` patterns match no
-    component file, such as stories or tests only, are ignored; an override
-    that matches one, or whose `files` cannot be read, makes the check not
-    evaluated.
+    component file, such as stories or tests only, are ignored. JavaScript
+    overrides are read as scoped settings, with `excludedFiles` as their
+    ignores; an override whose `files` cannot be read makes the check not
+    evaluated when the required rules are not already on.
   - Missing: no hook rule applies to the component files. Partial: a rule is
     off for some file, or the classic rules are on without the compiler
     rules.
@@ -261,10 +265,12 @@ returns its value and is treated as having a cleanup.
     configuration's `env` option inlines into the client bundle.
   - The client graph follows every runtime import, including into tooling,
     fixture, and test folders that candidate discovery skips. Workspace
-    packages resolve through their `exports` (exact and wildcard subpaths,
-    with the `browser`, `import`, `module`, `default`, and `require`
-    conditions in object order, never `types`, `react-server`, or `node`)
-    before `browser`, `module`, and `main`.
+    packages resolve through their `exports` (an exact subpath first, then
+    the wildcard pattern with the longest prefix before `*`, as Node picks
+    it; a `null` target blocks the subpath; the `browser`, `import`,
+    `module`, `default`, and `require` conditions in object order, never
+    `types`, `react-server`, or `node`) before `browser`, `module`, and
+    `main`.
   - Violation cites the client import and the marker line. An import the
     collector cannot resolve inside the client graph, including a workspace
     subpath the package does not export, or a module too large to read,
@@ -319,7 +325,8 @@ collector reads.
   the lexer loses its place in a file, it falls back to masking comments
   only, so code is never silently hidden.
 - Files over 2 MB are not read. They are listed under `skippedLargeFiles`,
-  and the tool checks that scan source are degraded.
+  files that fail to read under `unreadableFiles`, and the tool checks that
+  scan source are degraded; a failed read never passes as an empty module.
 - `scripts/`, `tools/`, and `tooling/` folders count as tooling only at the
   repository root or a workspace package's root. Workspace globs from
   `package.json` and `pnpm-workspace.yaml` (block or inline lists) are matched
@@ -350,6 +357,17 @@ collector reads.
 - Versions come from `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, and
   `bun.lock` as text, then from the manifest range; pnpm `catalog:` ranges
   are read from `pnpm-workspace.yaml`. `node_modules` is never read.
+
+## Known limits
+
+The collector is a static, deterministic first pass over common
+configuration and module shapes. It does not execute ESLint, bundlers, Babel,
+or Node's module resolution, so a configuration computed at runtime, or a
+resolution rule it does not model, can differ from what the tools do. A
+`present` on a tool check means nothing was found by these rules, not proof
+that nothing is wrong. Configuration it cannot read is reported as not
+evaluated, never as missing or present, and the model then reads it and
+records the check.
 
 ## Sources
 

@@ -1077,6 +1077,77 @@ class PullRequestReviewTests(CollectorTestCase):
         self.assertIn("{ idempotencyKey }", script)
 
 
+class SecondReviewTests(CollectorTestCase):
+    """Regression tests for the review of e674efa."""
+
+    def lib(self, exports: dict[str, Any], client_import: str) -> dict[str, Any]:
+        self.package({"name": "root", "private": True, "workspaces": ["apps/*", "packages/*"]})
+        self.write("apps/web/package.json", '{"name":"web","dependencies":{"react":"19.1.0","next":"16.0.0","@acme/lib":"*"}}\n')
+        self.write("apps/web/app/page.tsx", 'import { C } from "./C";\nexport default function Page() { return <C />; }\n')
+        self.write("packages/lib/package.json", json.dumps({"name": "@acme/lib", "exports": exports}))
+        self.write("packages/lib/src/internal.ts", "import { Pool } from 'pg';\nexport const value = () => new Pool();\n")
+        self.write("packages/lib/src/internal/x.ts", "import { Pool } from 'pg';\nexport const value = () => new Pool();\n")
+        self.write("packages/lib/src/private/x.ts", "import { Pool } from 'pg';\nexport const value = () => new Pool();\n")
+        self.write("apps/web/app/C.tsx", f'"use client";\nimport {{ value }} from "{client_import}";\nexport function C() {{ return <p>{{String(value)}}</p>; }}\n')
+        self.commit()
+        return self.check(self.collect(), "client-modules-import-no-server-code")
+
+    def test_excluded_files_in_javascript_overrides_apply_to_presets_and_rules(self) -> None:
+        self.next_app(None)
+        self.package(dict(NEXT_PACKAGE, devDependencies={"eslint-plugin-react-hooks": "7.1.1"}))
+        self.write(".eslintrc.cjs", "module.exports = {\n  extends: ['plugin:react-hooks/recommended'],\n  overrides: [{ files: ['*.tsx'], excludedFiles: ['src/**'], rules: { 'react-hooks/rules-of-hooks': 'off' } }],\n};\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "present", "excluded component files keep the rule")
+        self.write(".eslintrc.cjs", "module.exports = {\n  overrides: [{ files: ['*.tsx'], excludedFiles: 'src/**', extends: ['plugin:react-hooks/recommended'] }],\n};\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "missing", "the inherited preset skips excluded files")
+
+    def test_the_most_specific_wildcard_export_wins(self) -> None:
+        item = self.lib({"./*": "./src/*.ts", "./internal/*": "./src/private/*.ts"}, "@acme/lib/internal/x")
+        self.assertEqual(item["status"], "violation")
+        self.assertTrue(any("packages/lib/src/private/x.ts" in entry for entry in item["evidence"]))
+        self.assertNotIn("degradedReason", item)
+
+    def test_a_null_export_blocks_the_subpath(self) -> None:
+        item = self.lib({"./*": "./src/*.ts", "./internal": None}, "@acme/lib/internal")
+        self.assertEqual(item["status"], "present")
+        self.assertIn("@acme/lib/internal", item["degradedReason"])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can read any file")
+    def test_a_failed_read_degrades_instead_of_looking_empty(self) -> None:
+        self.next_app()
+        self.write("tools/secret.ts", "import 'server-only';\nexport const secret = () => process.env.SECRET;\n")
+        self.write("src/components/Leak.tsx", "'use client';\nimport { secret } from '../../tools/secret';\nexport function Leak() { return <p>{secret()}</p>; }\n")
+        self.commit()
+        secret = self.root / "tools/secret.ts"
+        secret.chmod(0)
+        self.addCleanup(secret.chmod, 0o644)
+        self.assertIsNone(collector.read_source(secret))
+        item = self.check(self.collect(), "client-modules-import-no-server-code")
+        self.assertEqual(item["status"], "present")
+        self.assertIn("could not be read, such as tools/secret.ts", item["degradedReason"])
+        component = self.root / "src/components/Leak.tsx"
+        component.chmod(0)
+        self.addCleanup(component.chmod, 0o644)
+        result = collector.collect(self.root)
+        self.assertEqual(result["snapshot"]["unreadableFiles"], ["src/components/Leak.tsx"])
+        self.assertIn("src/components/Leak.tsx", self.check(result, "no-silenced-exhaustive-deps")["degradedReason"])
+
+    def test_detection_notes_state_the_known_limits(self) -> None:
+        notes = (ROOT / "react-audit" / "references" / "detection.md").read_text(encoding="utf-8")
+        self.assertIn("## Known limits", notes)
+        self.assertIn("nothing was found by these rules", notes)
+
+    def test_present_verdicts_must_cite_the_code_that_earns_them(self) -> None:
+        """An evaluation run published model checks as present on search counts alone; the skill and grader forbid it."""
+        skill = (ROOT / "react-audit" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("A `present` verdict cites the code that earns it", skill)
+        self.assertIn("never stand alone", skill)
+        grader = (ROOT / "evals" / "react-audit" / "well-built-ui" / "graders" / "present-verdicts-cite-code.md").read_text(encoding="utf-8")
+        self.assertIn("or the\n  dependency arrays of the effects it reviewed", grader)
+        self.assertIn("rests only on a file name, a\n`search:` or `files:` count, or a note", grader)
+
+
 class EvaluationFixtureTests(unittest.TestCase):
     """The collector decides every tool check the evaluation graders expect, with the status they expect."""
 

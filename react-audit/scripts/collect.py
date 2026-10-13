@@ -145,6 +145,16 @@ DIRECTIVE = re.compile(r"""(['"])([^'"\n]*)\1[ \t]*;?""")
 # Reading files
 
 
+def read_source(path: Path, limit: int = MAX_FILE_BYTES) -> str | None:
+    """A file's text, or None when it is too big or cannot be read, so a failed read is never mistaken for an empty file."""
+    try:
+        if path.stat().st_size > limit:
+            return None
+        return path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def read_text(path: Path, limit: int = MAX_FILE_BYTES) -> str:
     """A file's text without newline translation, so a lone carriage return never becomes a line; empty when too big."""
     try:
@@ -1921,11 +1931,17 @@ def javascript_overrides(path: str, base: str, content: str, unresolved: list[st
             return None
         if re.search(r"\.\.\.\s*[A-Za-z_$(]", item):
             return None
+        excluded_value = re.search(r"""\bexcludedFiles['"]?\s*:\s*(\[[^\]]*\]|(['"])[^'"]*\2|[^,}\s]+)""", item)
+        excluded: list[str] | None = None
+        if excluded_value:
+            excluded = [value for _, value in re.findall(r"""(['"])([^'"]+)\1""", excluded_value.group(1))]
+            if not excluded:
+                return None  # a variable or expression the collector cannot read
         for entry in legacy_extends_values(item, unresolved, path):
             for layer in legacy_extends(path, base, entry, unresolved, presets):
-                layer.files, layer.match_base = patterns, True
+                layer.files, layer.ignores, layer.match_base = patterns, excluded, True
                 layers.append(layer)
-        scoped = Layer(base, files=patterns, match_base=True)
+        scoped = Layer(base, files=patterns, ignores=excluded, match_base=True)
         for match in re.finditer(r"""(['"])((?:react-hooks|react-compiler)/[\w-]+)\1\s*:\s*([^\r\n,}]+)""", item):
             level = rule_level(match.group(3))
             if level:
@@ -2282,18 +2298,20 @@ class Resolver:
         subpath = "." if specifier == name else "./" + specifier[len(name) + 1:]
         if exports is not None:
             # With `exports`, only exported subpaths resolve, through the conditions a browser bundle applies.
-            value = exports.get(subpath)
-            if value is None:
-                for pattern, candidate in exports.items():
-                    if pattern.count("*") == 1:
-                        prefix, _, suffix = pattern.partition("*")
-                        if subpath.startswith(prefix) and subpath.endswith(suffix) and len(subpath) >= len(prefix) + len(suffix):
-                            middle = subpath[len(prefix):len(subpath) - len(suffix) if suffix else None]
-                            target = browser_target(candidate)
-                            return self.entry(directory, target.replace("*", middle)) if target else None
-                return None
-            target = browser_target(value)
-            return self.entry(directory, target) if target else None
+            if subpath in exports:
+                # An exact key wins over every pattern; `null` blocks the subpath outright.
+                target = browser_target(exports[subpath])
+                return self.entry(directory, target) if target else None
+            patterns = [pattern for pattern in exports if pattern.count("*") == 1]
+            # Node picks the pattern with the longest prefix before `*`, then the longest key.
+            patterns.sort(key=lambda pattern: (-len(pattern.partition("*")[0]), -len(pattern)))
+            for pattern in patterns:
+                prefix, _, suffix = pattern.partition("*")
+                if subpath.startswith(prefix) and subpath.endswith(suffix) and len(subpath) >= len(prefix) + len(suffix):
+                    middle = subpath[len(prefix):len(subpath) - len(suffix) if suffix else None]
+                    target = browser_target(exports[pattern])
+                    return self.entry(directory, target.replace("*", middle)) if target else None
+            return None
         if subpath == ".":
             for entry in entries:
                 found = self.entry(directory, entry)
@@ -2823,7 +2841,7 @@ def not_applicable(reason: str) -> dict[str, Any]:
 def degrade(result: dict[str, Any], large: list[str]) -> dict[str, Any]:
     if large and "status" in result:
         result["degradedReason"] = (
-            f"{len(large)} source file(s) over {MAX_FILE_BYTES // 1_000_000} MB were not read: " + ", ".join(large[:3])
+            f"{len(large)} source file(s) were not read (over {MAX_FILE_BYTES // 1_000_000} MB, or unreadable): " + ", ".join(large[:3])
         )
         result["evidenceTier"] = "supported"
     return result
@@ -2852,11 +2870,20 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
     package_roots = [package.path for package in manifests.packages if package.path]
     source_paths = [path for path in files if path.endswith(SOURCE_SUFFIXES) and not path.endswith(".d.ts")]
     large = [path for path in source_paths if file_size(root / path) > MAX_FILE_BYTES]
+    unreadable_files: list[str] = []
     product_paths = [
         path for path in source_paths
         if path not in large and not NON_SOURCE_PATTERN.search(path) and not in_tooling_folder(path, package_roots)
     ]
-    sources = {path: Source(path, read_text(root / path)) for path in product_paths}
+    sources: dict[str, Source] = {}
+    for path in product_paths:
+        text = read_source(root / path)
+        if text is None:
+            unreadable_files.append(path)
+        else:
+            sources[path] = Source(path, text)
+    # Every source check is degraded by files it could not read: too large, or a failed read.
+    large = large + unreadable_files
     resolver = Resolver(root, set(source_paths), manifests.packages)
 
     # Versions, frameworks, and the compiler, per package.
@@ -2887,7 +2914,9 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
     snapshot["packages"] = [{key: value for key, value in item.items() if not key.startswith("_")} for item in packages_facts]
     snapshot["compiler"] = [{key: value for key, value in item.items() if key != "unread" or value} for item in compilers]
     if large:
-        snapshot["skippedLargeFiles"] = {"limitBytes": MAX_FILE_BYTES, "count": len(large), "examples": large[:10]}
+        snapshot["skippedLargeFiles"] = {"limitBytes": MAX_FILE_BYTES, "count": len(large) - len(unreadable_files), "examples": [path for path in large if path not in unreadable_files][:10]}
+    if unreadable_files:
+        snapshot["unreadableFiles"] = unreadable_files[:10]
     if any(package.declares_prefix("@remix-run/") for package in react_packages):
         snapshot["remixVersion2"] = "Remix 2 continues as React Router 7 and later; Remix 3 is a separate framework that does not use React."
 
@@ -3180,11 +3209,12 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
         def module_source(path: str) -> Source | None:
             if path in loaded:
                 return loaded[path]
-            if path in large_set or not (root / path).is_file():
+            text = None if path in large_set or not (root / path).is_file() else read_source(root / path)
+            if text is None:
                 if path not in unreadable:
                     unreadable.append(path)
                 return None
-            source = Source(path, read_text(root / path))
+            source = Source(path, text)
             loaded[path] = source
             loaded_imports[path] = imports_of(source)
             prologues.setdefault(path, directives(source))

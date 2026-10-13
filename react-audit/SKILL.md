@@ -136,6 +136,7 @@ Classify each candidate as **unneeded effect**, **missing cleanup**, **race**, *
    - Apply "Judging an effect" and the detection notes.
    - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
    - A candidate flag is a place to look, never evidence on its own; cite the code you read.
+   - A `present` verdict cites the code that earns it, as `path:line` with a quoted fragment. For the effect and state checks, cite each effect or state declaration you reviewed: the top ones by risk rank, within the discovery budget. A `search:` or `files:` count may support it, never stand alone.
    - Use `hypothesis` for suspicions you cannot verify, and `not-evaluated` with a reason when the repository gives you no basis, such as `forms-use-actions` when the React version is unknown.
 5. **Judge.** Keep at most five findings `act-on` (`finish` refuses more; demote the rest with `judge`), ranked by severity and then by risk rank. The collector marks lint, suppression, ref, and export findings `consider`. Dismiss with a reason any candidate you judged sound.
 6. **Finish.** Run `audit_run.py finish react-audit`, fix anything it rejects, and present the chat summary the protocol defines.
