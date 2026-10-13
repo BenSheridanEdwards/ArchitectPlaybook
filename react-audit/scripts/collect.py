@@ -1577,6 +1577,8 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
     for sample in samples:
         state: dict[str, str] = {}
         ignored = False
+        sample_evidence: list[str] = []
+        sample_presets: set[str] = set()
         for layer in layers_for(sample):
             if layer.global_ignores:
                 local = sample[len(layer.base) + 1:] if layer.base else sample
@@ -1589,9 +1591,13 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
                 continue
             for rule, level in layer.rules.items():
                 state[rule] = level
-                mentioned = True
-                evidence += [entry for entry in layer.evidence if entry not in evidence]
-            preset_names |= set(layer.presets)
+                sample_evidence += [entry for entry in layer.evidence if entry not in sample_evidence]
+            sample_presets |= set(layer.presets)
+        if not ignored and state:
+            # A globally ignored file is never linted, so nothing configured for it counts.
+            mentioned = True
+            evidence += [entry for entry in sample_evidence if entry not in evidence]
+            preset_names |= sample_presets
         enabled = set() if ignored else {rule.split("/", 1)[1] for rule, level in state.items() if level != "off" and rule.startswith("react-hooks/")}
         if not ignored and state.get("react-compiler/react-compiler", "off") != "off":
             # The retired standalone compiler plugin reports what the compiler rules in react-hooks 7 now report.
@@ -1927,7 +1933,7 @@ def directives(source: Source) -> list[tuple[str, int]]:
     """The directive prologue of a file: string statements before any other code, comments allowed."""
     found: list[tuple[str, int]] = []
     text = source.comment_masked
-    index = 0
+    index = 1 if text.startswith("\ufeff") else 0
     while True:
         while index < len(text) and text[index].isspace():
             index += 1
@@ -2215,7 +2221,23 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
 ENVIRONMENT_READ = re.compile(r"\bprocess\s*\.\s*env\s*\.\s*([A-Z_][A-Z0-9_]*)|\bprocess\s*\.\s*env\s*\[\s*['\"]([A-Z_][A-Z0-9_]*)['\"]\s*\]")
 
 
-def server_markers(source: Source, imports: list[Import]) -> list[tuple[int, str, str]]:
+def next_inlined_environment(root: Path, files: list[str]) -> set[str]:
+    """Variable names a Next.js configuration's `env` option inlines into the client bundle."""
+    names: set[str] = set()
+    for path in files:
+        if not re.search(r"(^|/)next\.config\.[cm]?[jt]s$", path):
+            continue
+        source = Source(path, read_text(root / path))
+        for match in re.finditer(r"\benv\s*:\s*\{", source.code):
+            closing = source.close(match.end() - 1)
+            if closing == -1:
+                continue
+            block = source.comment_masked[match.end():closing]
+            names |= set(re.findall(r"""(?:^|[,{\s])['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*:""", block))
+    return names
+
+
+def server_markers(source: Source, imports: list[Import], inlined: frozenset[str] = frozenset()) -> list[tuple[int, str, str]]:
     """Lines that make a module server-only: server-only imports, Node built-ins, server packages, and private environment variables."""
     markers: list[tuple[int, str, str]] = []
     for item in imports:
@@ -2228,7 +2250,7 @@ def server_markers(source: Source, imports: list[Import]) -> list[tuple[int, str
         name = match.group(1) or match.group(2)
         if not source.code[match.start():match.start() + 1].strip():
             continue
-        if name in ALWAYS_INLINED_ENVIRONMENT or name.startswith(PUBLIC_ENVIRONMENT_PREFIXES):
+        if name in ALWAYS_INLINED_ENVIRONMENT or name in inlined or name.startswith(PUBLIC_ENVIRONMENT_PREFIXES):
             continue
         line = source.line_of(match.start())
         markers.append((line, quotable(source.lines.line(line), match.group(0), name) or name, f"reads the private environment variable {name}"))
@@ -2683,9 +2705,10 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                 elif target is None and resolver.looks_local(item.specifier):
                     unresolved_local.append((path, item.specifier))
         reached = client_graph(client_entries, edges, server_modules)
+        inlined = frozenset(next_inlined_environment(root, files))
         leaks = []
         for module in sorted(reached, key=lambda path: (risk_of.get(path, len(risk_of)), path)):
-            markers = server_markers(sources[module], imports_by_file.get(module, []))
+            markers = server_markers(sources[module], imports_by_file.get(module, []), inlined)
             if not markers:
                 continue
             chain = [module]

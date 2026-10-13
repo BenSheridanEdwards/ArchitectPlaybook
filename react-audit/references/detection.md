@@ -222,7 +222,8 @@ returns its value and is treated as having a cleanup.
   - Server markers: `server-only`, `next/headers`, Node built-ins, database
     clients and other server SDKs, and reads of `process.env` variables
     without a public prefix (`NEXT_PUBLIC_`, `VITE_`, `EXPO_PUBLIC_`,
-    `PUBLIC_`, `REACT_APP_`) other than `NODE_ENV`.
+    `PUBLIC_`, `REACT_APP_`) other than `NODE_ENV` and names a Next.js
+    configuration's `env` option inlines into the client bundle.
   - Violation cites the client import and the marker line. An import the
     collector cannot resolve inside the client graph degrades the result.
   - Whether a secret or private field actually reaches the browser is

@@ -29,7 +29,7 @@ Checks gate themselves on facts, not failures. A React 18 package gets "not appl
 /react-audit --learn          # teaching mode; --teach is an alias
 ```
 
-`--since` and `--months` make the run provisional, because they change what the audit measures.
+`--since` and `--months` make the run provisional, because they change what the audit measures. The tool checks always cover the whole repository, also in a `--since` run.
 
 ## Ownership
 
