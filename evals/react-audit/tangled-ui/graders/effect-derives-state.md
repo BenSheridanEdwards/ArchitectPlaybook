@@ -1,0 +1,5 @@
+---
+type: regex
+target: { source: file, path: .architect-audits/react-audit/findings.md }
+pattern: "## All checks\\n\\n\\| Layer \\| Check \\| Severity \\| Status \\| Judgement \\|\\n(?:\\| -{3} ){5}\\|\\n(?:\\|[^\\n]*\\|\\n)*?\\| [a-z-]+ \\| Effects do not derive or mirror state \\| \\w+ \\| (violation|partial) \\|"
+---

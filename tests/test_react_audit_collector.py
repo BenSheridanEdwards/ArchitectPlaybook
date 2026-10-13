@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -536,6 +537,10 @@ class BoundaryTests(CollectorTestCase):
         item = self.check(result, "client-modules-import-no-server-code")
         self.assertEqual(item["status"], "violation")
         self.assertIn("src/components/Price.tsx:2 — `@/lib/payments` in a 'use client' module", item["evidence"])
+        self.write("src/components/Checkout.tsx", "'use client';\nimport { Price } from './Price';\nimport { formatPrice } from '@/lib/payments';\nexport function Checkout() { return <Price cents={formatPrice(1).length} />; }\n")
+        self.commit()
+        evidence = self.check(self.collect(), "client-modules-import-no-server-code")["evidence"]
+        self.assertEqual(sum(1 for entry in evidence if "`@/lib/payments`" in entry), 2, "every direct client importer is cited, up to two")
         self.assertIn('src/lib/payments.ts:1 — `"stripe"` imports stripe, and it is bundled for the browser', item["evidence"])
         self.assertNotIn("judgement", item, "a boundary leak is act-on by default")
 
@@ -649,6 +654,8 @@ class EffectTests(CollectorTestCase):
             "    const id = setInterval(() => setIsDone(true), 1000);\n"
             "  }, []);\n"
             "  useEffect(() => store.subscribe(setResults), []);\n"
+            "  const onVisit = useEffectEvent((id: string) => { log(id, draft); });\n"
+            "  useEffect(() => { onVisit(query); }, [query]);\n"
             "  return <p>{draft}</p>;\n"
             "}\n"
         ))
@@ -661,7 +668,7 @@ class EffectTests(CollectorTestCase):
             10: ["async-without-cleanup"],
             18: ["subscribes-without-cleanup"],
         })
-        self.assertEqual(snapshot["effects"]["total"], 6)
+        self.assertEqual(snapshot["effects"]["total"], 7, "an effect that calls a useEffectEvent function is not a candidate")
         self.assertEqual(snapshot["state"]["booleanFlagGroups"][0]["booleans"], ["isLoading", "isError", "isDone"])
         self.assertEqual(snapshot["state"]["stateInitialisedFromProps"][0]["initialisedFrom"], "query")
 
@@ -687,6 +694,40 @@ class BoundsTests(CollectorTestCase):
         effects = collector.effects_in(source, {f"setValue{index}" for index in range(3000)})
         self.assertLess(time.monotonic() - began, 20)
         self.assertEqual(len(effects), collector.MAX_EFFECTS_PER_FILE)
+
+
+class EvaluationFixtureTests(unittest.TestCase):
+    """The collector decides every tool check the evaluation graders expect, with the status they expect."""
+
+    def test_tool_check_graders_match_the_collector(self) -> None:
+        catalog = json.loads((ROOT / "react-audit" / "checks.json").read_text(encoding="utf-8"))
+        by_title = {check["title"]: check for check in catalog["checks"]}
+        for case in ("tangled-ui", "well-built-ui"):
+            folder = ROOT / "evals" / "react-audit" / case
+            with tempfile.TemporaryDirectory() as directory:
+                subprocess.run(["bash", str(folder / "fixture.sh")], cwd=directory, check=True, capture_output=True)
+                result = collector.collect(Path(directory))
+                for item in result["checks"].values():
+                    for entry in item.get("evidence", []):
+                        protocol.verify_evidence(Path(directory), entry)
+            graded = 0
+            for grader in sorted((folder / "graders").glob("*.md")):
+                text = grader.read_text(encoding="utf-8")
+                pattern = re.search(r'^pattern: (".*")$', text, re.M)
+                if not pattern:
+                    continue
+                expression = json.loads(pattern.group(1))
+                title = re.search(r"\\\| ([^|\\]+?) \\\| \\w\+ \\\| \(([^)]*)\) \\\|$", expression)
+                assert title is not None, grader
+                check = by_title[title.group(1).replace("\\(", "(").replace("\\)", ")")]
+                result_item = result["checks"].get(check["checkId"])
+                if result_item is None:
+                    self.assertEqual(check["method"], "model", f"{case}: {grader.stem} expects a tool check the collector left pending")
+                    continue
+                status = result_item.get("status") or ("not applicable" if result_item.get("applicability") == "not-applicable" else "not evaluated")
+                self.assertIn(status, title.group(2).split("|"), f"{case}: {grader.stem}")
+                graded += 1
+            self.assertGreaterEqual(graded, 6, case)
 
 
 class CommandLineAndProtocolTests(CollectorTestCase):

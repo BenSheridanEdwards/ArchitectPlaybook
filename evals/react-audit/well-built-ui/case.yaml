@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: react-well-built-ui
+description: The same orders dashboard built well with the React Compiler, actions, URL search, and a clean server-client boundary; measures false positives.
+tags: [react, clean]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run with every collector check present and the stable-dependencies check not
+  applicable because the React Compiler is on. No model check is a violation: totals are computed during
+  render, the poller cleans up, the view tracker uses useEffectEvent, the refund form uses useActionState,
+  and only a Server Function crosses into a client component. The act-on list is short or empty and
+  invents no problems.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /react-audit
+  max_turns: 120
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill]

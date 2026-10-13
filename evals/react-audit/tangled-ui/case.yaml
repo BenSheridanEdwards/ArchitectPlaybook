@@ -1,0 +1,19 @@
+schema_version: "1.1"
+name: react-tangled-ui
+description: A Next.js 16 App Router orders dashboard on React 19 with effects that copy state and race, boolean flags, and server code and functions crossing into client components.
+tags: [react, planted]
+runs: 3
+expected_outcome: >-
+  Publishes a complete run. The collector reports no hooks lint rules for component files, an unjustified
+  exhaustive-deps suppression, forwardRef wrappers, default-exported components, and a violation for
+  src/lib/payments.ts (Stripe and STRIPE_SECRET_KEY) reached from 'use client' components; the toolchain
+  is present. The model finds the effect-derived totals, the racing search fetch, the selectedOrder state
+  synced by an effect that omits orders, the boolean submission flags, the hand-rolled refund form, and
+  the plain function passed from the orders page to OrdersTable.
+context:
+  scaffold_script: fixture.sh
+execution:
+  prompt: /react-audit
+  max_turns: 120
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill]

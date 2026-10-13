@@ -2090,6 +2090,8 @@ def preceding(text: str, position: int) -> str:
 def effects_in(source: Source, setters: set[str]) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     code = source.code
+    # Functions from useEffectEvent are meant to be called from effects; they are not parent callbacks.
+    effect_events = set(re.findall(r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\s*\.\s*)?useEffectEvent\s*\(", code))
     for match in EFFECT_CALL.finditer(code):
         if len(found) >= MAX_EFFECTS_PER_FILE:
             break
@@ -2124,10 +2126,10 @@ def effects_in(source: Source, setters: set[str]) -> list[dict[str, Any]]:
         free_calls = [name for name, position in calls if preceding(own, position) != "."]
         member_calls = [name for name, position in calls if preceding(own, position) == "."]
         setter_calls = [name for name in free_calls if name in setters]
-        callbacks = [name for name in free_calls if re.fullmatch(r"on[A-Z]\w*", name)]
+        callbacks = [name for name in free_calls if re.fullmatch(r"on[A-Z]\w*", name) and name not in effect_events]
         async_work = bool(ASYNC_WORK.search(body))
         subscribes = bool(SUBSCRIPTION.search(own))
-        if (setter_calls or callbacks) and not async_work and not subscribes and set(free_calls) <= set(setter_calls) | set(callbacks) | {"Boolean", "Number", "String"} and not set(member_calls) & SIDE_EFFECT_MEMBERS and not re.search(r"\b(?:window|document|localStorage|sessionStorage|navigator)\b", own):
+        if (setter_calls or callbacks) and not async_work and not subscribes and set(free_calls) <= set(setter_calls) | set(callbacks) | effect_events | {"Boolean", "Number", "String"} and not set(member_calls) & SIDE_EFFECT_MEMBERS and not re.search(r"\b(?:window|document|localStorage|sessionStorage|navigator)\b", own):
             if setter_calls:
                 flags.append("only-sets-state")
             if callbacks:
@@ -2725,11 +2727,14 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
         if leaks:
             evidence = []
             for module, chain, markers in leaks[:4]:
-                entry = chain[0]
-                if len(chain) > 1:
-                    first_import = next((item for target, item in edges.get(entry, []) if target == chain[1]), None)
-                    if first_import:
-                        evidence.append(cite(entry, first_import.line, quotable(sources[entry].lines.line(first_import.line), first_import.specifier) or first_import.specifier, "in a 'use client' module"))
+                # The client modules that import the leaking module directly, the first one on the chain first.
+                importers = [chain[-2]] if len(chain) > 1 else []
+                importers += sorted(path for path in reached if path not in importers and any(target == module for target, _ in edges.get(path, [])))
+                for importer in importers[:2]:
+                    item = next((item for target, item in edges.get(importer, []) if target == module), None)
+                    if item:
+                        note = "in a 'use client' module" if importer in client_entries else "in a module a 'use client' file imports"
+                        evidence.append(cite(importer, item.line, quotable(sources[importer].lines.line(item.line), item.specifier) or item.specifier, note))
                 line, quote, description = markers[0]
                 evidence.append(cite(module, line, quote, f"{description}, and it is bundled for the browser"))
             checks[SERVER_IMPORTS] = {
