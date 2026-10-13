@@ -790,15 +790,15 @@ One pull request per audit, in this order of risk reduction. Each rewrite:
 1. Security (server-side code, large-language-model features).
 2. Testing (any TypeScript, effectiveness).
 3. Architecture (red flags, churn, deletion test).
-4. React (compiler era). Retire `server-state-in-data-layer` and `single-global-state-library`, which `/architecture-audit` owns since #27, or point them there with `relatedChecks`.
+4. React (compiler era). Retire `server-state-in-data-layer` and `single-global-state-library`, which `/architecture-audit` owns since #27, or point them there with `relatedChecks`. Catalog 2.0.0 retires both and owns the hooks lint concern as `react-audit.react-hooks-plugin-enabled`.
 5. Dependency (supply chain).
 6. Quality gates (run them, branch protection, Actions hardening).
 7. Agentic (2026 surface). The security collector scans every tracked file, settings files included, so point the settings-file secret checks at `security-audit.no-secrets-in-source` with `relatedChecks`, or retire them.
 8. Accessibility (Web Content Accessibility Guidelines 2.2 gaps, browser mode).
-9. Performance (measured mode). Retire or point `single-data-fetching-strategy` at `/architecture-audit`'s `server-state-has-one-home`.
-10. Linting.
+9. Performance (measured mode). Retire or point `single-data-fetching-strategy` at `/architecture-audit`'s `server-state-has-one-home`. Retire `expensive-computations-memoized`, which React's guidance treats as premature, or make it not applicable when the React Compiler is on.
+10. Linting. Retire `react-hooks-recommended-configured`, or point it at `react-audit.react-hooks-plugin-enabled`, which owns the hooks rules for component files.
 11. Bundle and build.
-12. Error handling.
+12. Error handling. Point `abortcontroller-for-cancellable-requests` at `react-audit.cleanup-functions-present`, which owns effect cleanup and races.
 13. Documentation.
 
 ## Sources

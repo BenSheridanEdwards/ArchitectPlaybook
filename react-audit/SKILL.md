@@ -1,380 +1,160 @@
 ---
 name: react-audit
-description: Audit idiomatic React (hooks correctness, component design, state management, React 18/19 idioms). Static-only by design with optional implementation plan.
+description: Audit React correctness for the React 19 and compiler era — effects that should not exist or leak, duplicated and boolean state, server-client boundary leaks, and hooks lint, toolchain, and export facts from a deterministic collector.
 disable-model-invocation: true
-argument-hint: "[--worktree] [--learn|--teach]"
+argument-hint: "[--worktree] [--since=<ref>] [--months=<n>] [--learn|--teach]"
 ---
 
 # /react-audit
 
-Audit a TypeScript and React project against an opinionated baseline of **idiomatic React** organised in four layers — **hooks correctness**, **component design**, **state management**, **React 18/19 idioms** — preceded by a diagnostic snapshot. Then offer to generate an implementation plan for the gaps.
+Find the React code that will misbehave in production, and fix it in risk order: effects that copy state or race, values with two sources of truth, and server code or functions leaking across the server-client boundary.
 
-This skill is scoped to React-correctness independent of cost, accessibility, or architecture. Many React concerns live in adjacent audits; the boundary table below is the canonical map.
+The audit is written for React 19, the React Compiler, and server components. It applies to any repository that depends on React, including React Native and Expo apps, where the server-component checks do not apply. When no `package.json` declares React, the collector marks every check not applicable; record the whole audit with `audit-not-applicable`.
 
-## Publishing results
+It has two sources:
+- a deterministic collector, which reads React versions per package, the framework, React Compiler adoption, the hooks lint rules that apply to component files, `react-scripts`, exhaustive-deps suppressions, forwardRef wrappers, default exports outside framework files, and the client module graph; it also lists effect and state candidates and ranks files by Git churn and import fan-in;
+- the judgement of the model, spent on the riskiest components first, within a discovery budget.
 
-Record every result through the shared audit protocol. Never write the four findings files by hand.
+Checks gate themselves on facts, not failures. A React 18 package gets "not applicable" for the React 19 checks, and a project without server components gets it for the boundary checks. React Compiler adoption is context for judging effect dependencies, never a gate: the compiler skips components it cannot compile, and React keeps `useMemo` and `useCallback` as the escape hatch for effect dependencies. The audit is static and read-only; it never runs the application, ESLint, or the compiler.
 
-```bash
-python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin react-audit
-```
-
-Then record each check with `record`, `not-applicable`, or `not-evaluated`, and publish with `finish`.
-
-A check you could not evaluate is never `partial`. Record it with `not-evaluated` and the reason, even where the steps below say to degrade it to `partial`. Facts the steps below write into `metadata.json` or prepend to `findings.md`, such as tool tiers, framework variants, recovery hints, and banners, go into the snapshot with `snapshot --set` instead.
-
-Follow [the run protocol](../audit-protocol/references/run-protocol.md) for the evidence forms, judgements, chat format, and implementation plan. Where it disagrees with the steps below, the run protocol wins.
-
-## How this differs from neighbouring audits
-
-The architect-playbook deliberately keeps audit boundaries tight so a single concern lives in a single skill. Every audit in the playbook touches React in some way; this is where the lines fall:
-
-| Concern | Owner |
-| --- | --- |
-| Hook correctness (Rules of Hooks, dependency arrays, custom hook design) | `/react-audit` |
-| Component-shape patterns (function components, forwardRef, displayName, naming) | `/react-audit` |
-| State strategy at the React-API level (when to lift, when to derive, form/server/URL/component split) | `/react-audit` |
-| React 18+ primitives usage (`useTransition`, `useId`, Suspense, `'use client'`, server actions, `useOptimistic`) | `/react-audit` |
-| Memoization for **runtime cost** (performance-driven `useMemo`/`React.memo`/virtualization) | `/performance-audit` |
-| Memoization for **correctness** (referential stability that downstream code depends on) | `/react-audit` |
-| God components, file size, fan-out as architectural invariants | `/architecture-audit` |
-| Single state-management library (Redux vs Zustand vs Jotai chosen once) | `/architecture-audit` |
-| jsx-a11y rules and accessibility patterns inside components | `/accessibility-audit` |
-| React error boundaries and Suspense + boundary pairing | `/error-handling-audit` |
-| ESLint plugin coverage (which React rules are even enabled) | `/linting-audit` |
-| Bundle-level concerns: `React.lazy` configuration, dynamic-import wiring | `/bundle-build-audit` |
-
-When a single fix passes multiple audits (for example, enabling `eslint-plugin-react-hooks` satisfies both `/linting-audit` and `/react-audit`; choosing a single global state library satisfies `/architecture-audit` and `/react-audit`), every relevant audit surfaces the same gap so the user sees it once and resolves it once.
-
-## Posture: static-only, no opt-in modes
-
-Hook correctness is best caught by a typed AST analyser, which is exactly what `eslint-plugin-react-hooks` already is — and `/linting-audit` already verifies that plugin is configured. Re-running the plugin from this skill would be redundant. The non-lintable parts of this audit (state-strategy patterns, idiom adoption, hook-design quality) are static AST and pattern detection.
-
-If the user wants a fresh real-run capture of hook violations, `/linting-audit --with-run` is the right tool. This skill stays static.
+[Detection notes](references/detection.md) explain each check, the collector's limits, and the sources verified for this baseline.
 
 ## Usage
 
 ```
-/react-audit                                      # default: concise Top 5 + full report saved + ask about plan
-/react-audit --worktree                          # create an isolated Git worktree, then run the audit there
-/react-audit --learn                              # mid-level engineer teaching mode (detailed explanations + file/line examples)
-/react-audit --teach                              # alias for --learn
+/react-audit                  # audit the current repository
+/react-audit --worktree       # run in .worktrees/react-audit on its own branch
+/react-audit --since=<ref>    # judge only files changed since <ref> (a provisional, filtered run)
+/react-audit --months=12      # widen the Git history window for the risk ranking (default 6)
+/react-audit --learn          # teaching mode; --teach is an alias
 ```
 
-**💡 Pro tip**: Add `--worktree` to run this audit in an isolated Git worktree.
+`--since` and `--months` make the run provisional, because they change what the audit measures. The tool checks always cover the whole repository, also in a `--since` run.
 
-The skill never accepts `--apply`. The implementation plan is descriptive Markdown.
+## Ownership
 
-This audit deliberately has no numeric threshold flags. Most checks are zero-tolerance or qualitative; class-component presence is a `partial` regardless of count. The canonical path to evolving the baseline itself is `/system-self-improve`.
+Each concern has one owning check (Architecture Decision Record 0004).
 
-## The opinionated baseline
+| Concern | Owner |
+| --- | --- |
+| Effects, state inside component trees, custom hooks, React 19 APIs, and the server-client module graph | `/react-audit` |
+| Whether the React hooks lint rules apply to component files | `/react-audit` (`react-hooks-plugin-enabled`); `/linting-audit`'s `react-hooks-recommended-configured` duplicates it until that catalog migrates |
+| Where server data loads, the client-state strategy, and module-level state ownership | `/architecture-audit` (`server-state-has-one-home`, `single-client-state-strategy`, `single-owner-per-state`) |
+| Secrets and private fields reaching the browser | `/security-audit` (`server-only-data-stays-on-server`) |
+| Memoization and rendering cost | `/performance-audit` |
+| Error boundaries and request error paths | `/error-handling-audit` |
 
-A check resolves to one of four statuses:
+The state and boundary checks name their owners in `relatedChecks` and rate only what those checks do not cover.
 
-- **present** — the invariant holds.
-- **partial** — most signals resolve, with a small number of exceptions, or the codebase shows mixed adherence to a soft check.
-- **missing** — an applicable structural prerequisite is absent. A non-React project is an out-of-domain audit and is represented explicitly as not applicable instead.
-- **violation** — the audit identified concrete code that breaks the invariant.
+## The baseline
 
-Layer 0 is informational only and has no status. When React is older than 18,
-Layer 4 checks are emitted as `not-applicable`/`not-evaluated` with null status;
-they do not distort the summary or Repository Quality Score denominator.
+Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violation`. A check that cannot apply is not applicable, and one you could not evaluate is not evaluated with its reason, never `partial`. Severity follows Architecture Decision Record 0004: correctness bugs users see are high, idiom and style are medium or low. The method column says whether the collector decides the check (`tool`) or you do (`model`).
 
 ### Layer 0 — Diagnostic snapshot (always written, no pass/fail)
 
-- React version, resolved from `package.json` and the lockfile (the lockfile is authoritative when it disagrees with `package.json`).
-- Framework variant (Next.js App Router or Pages Router, Remix, Vite-React, Create React App, plain React).
-- Component counts: function components, class components, total. Class components are explicitly counted because their presence shapes layer 2.
-- Custom hook count, plus the largest custom hook by line count (helps identify hooks that should be split).
-- Detected form library: react-hook-form, formik, native, or none.
-- Detected animation library: framer-motion, react-spring, native CSS animation/transitions, or none.
-- Detected design system / component library: Radix UI, shadcn/ui, MUI, Chakra UI, Mantine, Ariakit, custom in-house, or none.
-- Counts of new-React primitives in source: `useTransition`, `useDeferredValue`, `useId`, `useOptimistic`, `use()`, `useFormStatus`.
-- `'use client'` and `'use server'` directive counts (App Router projects only; recorded as `null` otherwise).
-- `forwardRef` usage count and `React.memo` usage count.
+The collector records:
+- React per package (declared, resolved from the lockfile, and the version that gates the React 19 checks, which is the lowest a peer range admits);
+- frameworks and routers (Next.js App or Pages Router, React Router framework mode, Remix 2, Expo Router, React Native, Gatsby, Vite, Create React App) and whether server components are in use;
+- React Compiler adoption per package, read from the exported configuration for the installed Next.js version, its compilation mode, and file- or function-level `'use no memo'` opt-outs;
+- the hooks lint presets and rules that apply to the sampled component files;
+- `'use client'` and `'use server'` files, inline Server Functions, misplaced directives, and the client module graph;
+- forwardRef and ref-as-prop counts, and default exports inside and outside framework files;
+- effect candidates, boolean state groups, state initialised from props, exhaustive-deps suppressions, and non-serialisable prop candidates;
+- the risk ranking, and source files too large to read.
 
-### Layer 1 — Hooks correctness
+### Layer 1 — Toolchain and lint
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| `eslint-plugin-react-hooks` recommended set enabled | The hooks plugin's recommended rules are enabled in the active ESLint configuration (or the equivalent Biome rules for projects on Biome). Overlap with `/linting-audit`; both surface. | Plugin missing, or recommended set off. |
-| No silenced exhaustive-deps without justification | `// eslint-disable-next-line react-hooks/exhaustive-deps` lines have a justification comment on the same or adjacent line. Soft check — reported as `partial`. | Suppressions of `exhaustive-deps` with no surrounding explanation. |
-| No empty dependency arrays where dependencies exist | `useEffect(() => { ... }, [])` is not used when the body legitimately closes over rendered values that change. | Effects with empty dependency arrays that read state, props, or context that varies across renders. |
-| No data fetching in effects when a query library exists | When TanStack Query, SWR, RTK Query, Apollo Client, or framework-native loaders are available, components fetch via the data layer rather than `useEffect` plus `fetch`. (Overlap with `/performance-audit`'s "server state in data layer" check.) | `useEffect` calling `fetch`/`axios` in a project with a query layer installed. |
-| No state synchronisation | State is derived from props or other state, not stored in `useState` and re-synchronised by `useEffect`. | Patterns where a `useEffect` does `setX(propX)` to mirror props into state. |
-| Status enums over multiple booleans | When a component tracks multi-stage state, a single status enum is used (`'idle' | 'loading' | 'success' | 'error'`) rather than separate `isLoading`, `isError`, `isSuccess` booleans that can drift. Soft check — reported as `partial`. | Three or more boolean state variables that represent a single conceptual lifecycle. |
-| `useRef` for mutable non-render state | Mutable values that don't trigger re-renders use `useRef`, not `useState`. | `useState` used to hold a value that is never read in render but mutated frequently. |
-| Cleanup functions present for side effects | `useEffect` returns a cleanup for subscriptions, timers, observers, async-cancellation, and event listeners. | Side-effect setup with no matching teardown. |
-| Memoization for correctness, not just performance | When a callback or value appears in another hook's dependency array and that downstream hook depends on referential stability for correctness (typically a `useEffect` dependency list), the callback or value is wrapped in `useCallback`/`useMemo`. Distinct from `/performance-audit`'s performance-driven memoization: this catches infinite-re-run bugs, not slow renders. | A `useEffect` whose dependencies include an inline callback created on each render. |
-| Custom hook design | Custom hooks have a single responsibility, are named `useFoo`, and return a consistent shape across the codebase (single value for one return, tuple for two, object for three or more). Soft check — reported as `partial` when adherence is mixed. | Custom hooks returning mixed shapes inconsistently, or named without the `use` prefix. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Hooks lint rules enforced for component files | medium | tool | eslint-plugin-react-hooks 7's `recommended` (rules-of-hooks, exhaustive-deps, and the compiler rules) applies to every component and hook file. | No hook rule for component files (missing); classic rules without the compiler rules, Biome's hook rules, or rules off for some files (partial). |
+| Built with a maintained toolchain | medium | tool | No package builds with Create React App (`react-scripts`), which was deprecated in February 2025. | A package depends on react-scripts. |
+| Exhaustive-deps suppressions are justified | medium | tool | Every exhaustive-deps suppression gives its reason after ` -- ` or in an adjacent comment. | Suppressions with no reason (partial). |
 
-### Layer 2 — Component design
+### Layer 2 — Effects and custom hooks
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Function components only in new code | New components are function components; class components persist only as legacy. The audit reports class components as `partial` rather than `violation` because legacy migrations are slow. The strongest signal is a class component whose file has been modified more recently than the most recent function-component file — recorded explicitly. | Class components present (count recorded); class component newer than the most recent function component (flagged). |
-| Components named in PascalCase | Component files and exported component identifiers use PascalCase. | Non-PascalCase component definitions. |
-| Hooks named with `use` prefix | Custom hooks export identifiers starting with `use` followed by an uppercase letter. | A function that calls hooks but does not start with `use`. |
-| `forwardRef` for ref-receiving components | Components that need to receive `ref` (typically design-system primitives, focusable controls) use `forwardRef`. React 19's `ref` as a prop is also accepted. | A component renders a focusable element that consumers would expect to ref, but does not forward refs and is not React-19 ref-as-prop. |
-| `displayName` on `memo`/`forwardRef` wrappers | Components wrapped in `React.memo` or `forwardRef` set `displayName` so the React DevTools tree is readable. | Wrapped components with no `displayName`. |
-| Children prop typed | When a component accepts children, the prop is typed `React.ReactNode` (not `any`, not `JSX.Element`, which is too narrow). | `children: any` or `children: JSX.Element` in component prop types. |
-| One component or hook per file | Files export one primary component or hook plus its supporting types and helpers, not a grab-bag of unrelated components. Soft check — reported as `partial`. | Files exporting more than three independent components or hooks. |
-| Named exports for components | Components are exported as named exports, not default exports. Improves grep-ability and tooling. Soft check — reported as `partial`. | Default-exported components in projects that otherwise use named exports. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Effects do not derive or mirror state | high | model | Derived values are computed during render; resets use a `key`; event logic and parent notifications run in handlers. | An effect that only sets state from props or state, an effect chain, or an effect that calls a parent callback when state changes. |
+| Effects clean up and ignore stale results | high | model | Effects that subscribe, listen, time, or fetch return a cleanup that unsubscribes, clears, aborts, or sets an ignore flag. | A fetch with no abort or ignore flag, or a listener, interval, or subscription with no cleanup. |
+| Effect dependencies are honest | medium | model | Effects list what they read; latest-value logic uses `useEffectEvent` (React 19.2) instead of a suppression. | An empty or partial dependency array, often suppressed, over values that change. |
+| Effect dependencies are stable | medium | model | Objects and functions in effect dependencies are created inside the effect, hoisted, or memoized; under the React Compiler, only where it compiles the component, and `useMemo` stays the escape hatch an effect relies on. | A dependency created fresh on every render in code the compiler does not cover. |
+| Custom hooks encapsulate one concern | medium | model | One concern per hook, a consistent return shape, named for what it does. Soft check — mixed adherence is reported as partial. | Hooks mixing concerns, inconsistent shapes, or lifecycle wrappers such as `useMount`. |
 
-### Layer 3 — State management
+### Layer 3 — State
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| Form state via a form library | Forms with more than five fields, or with non-trivial validation, use a dedicated form library (react-hook-form, formik). Native form state is acceptable for trivial forms. Soft check — reported as `partial`. | Complex forms hand-rolled with a `useState` per field. |
-| Server state in the data layer | Server-fetched data lives in TanStack Query, SWR, RTK Query, Apollo Client, or framework-native loaders — not in component-local `useState` populated by `useEffect`+`fetch`. (Overlap with `/performance-audit` and `/architecture-audit`; all three surface.) | Fetched-data state held in component state with no query layer involved. |
-| Single global state library | Exactly one of Redux Toolkit, Zustand, Jotai, MobX, or React Context as the global state strategy. (Overlap with `/architecture-audit`; both surface so a single fix passes both.) | Multiple global state libraries in the same application. |
-| No state synchronisation between sources of truth | Data is stored in one place and derived elsewhere; the same value isn't held in component state and a global store and a URL parameter at once. | Detected duplicate-state patterns. |
-| State at the right level | Local state lives in the component that uses it; lifted state lives at the lowest common ancestor; global state is for genuinely global concerns (auth, theme, feature flags) — not "anything used in two places". Soft check — reported as `partial`. | Global state holding values used by a single subtree, or local state for values used across the application. |
-| URL state for shareable or recoverable state | Search queries, filters, sort orders, current page, and selected tabs live in URL parameters when the user would expect them to survive a reload. Soft check — reported as `partial`. | Detected patterns where a refresh would lose UI state that the user expects to keep. |
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Each value has one source of truth | high | model | Each value lives in one place in the component tree and is derived elsewhere; props are not copied into state unless named as initial values. | State copied from a prop and kept in sync, or a value held in two state variables, a store, or the URL at once. |
+| One status value instead of boolean flags | medium | model | A multi-step process is one status value, or the data layer's or `useActionState`'s state. | Three or more booleans describing one process. |
+| State lives at the right level | medium | model | Local where used, shared at the lowest common parent, global only for application-wide concerns; hidden UI that keeps state uses `<Activity>` or stays mounted. Soft check — mixed adherence is reported as partial. | A store or context holding one subtree's state, or state lifted far above its readers. |
+| Shareable view state lives in the URL | low | model | Filters, queries, pages, and tabs a user expects to survive a reload live in search parameters. Soft check — mixed adherence is reported as partial. | Such view state held only in `useState`. |
 
-### Layer 4 — React 18/19 idioms (explicitly not applicable when React is below 18)
+### Layer 4 — Components and server boundaries
 
-| Check | Expectation | Violation signal |
-| --- | --- | --- |
-| `useId` for accessible IDs | Generated IDs used to wire up labels, ARIA attributes, and form controls use `useId` rather than ad-hoc counters or random strings. (Overlap with `/accessibility-audit`.) | Hand-rolled ID generation when React 18+ is available. |
-| `useTransition` or `startTransition` for non-urgent updates | Updates that can be deferred (filtering large lists, search-as-you-type, navigation in a Suspense-aware app) use `useTransition` or `startTransition`. Soft check — reported as `partial`. (Overlap with `/performance-audit`.) | Detected hot patterns where transitions would help and are absent. |
-| Suspense boundaries for async data | When the framework or library supports Suspense for data fetching (React 19 `use()`, TanStack Query Suspense mode, framework loaders), Suspense boundaries with meaningful fallbacks are used. | Async data fetched without surrounding Suspense in projects that have opted into Suspense-based data fetching. |
-| `'use client'` used minimally and deliberately (Next.js App Router only) | Client-component boundaries sit at the leaves of the tree, not at the root. (Overlap with `/architecture-audit`.) Soft check — reported as `partial` when more than half of components are client components. Explicitly not applicable outside App Router. | Excessive `'use client'` fragmentation; or `'use client'` files importing server-only modules. |
-| Server Actions used appropriately (Next.js App Router only) | Mutating operations in App Router projects use Server Actions (`'use server'`) when appropriate, rather than client-side `fetch` to a route handler that simply mutates. Soft check — reported as `partial`. Explicitly not applicable outside App Router. | Patterns where Server Actions would be the natural choice but route handlers are used instead. |
-| `useOptimistic` for optimistic mutations (React 19 only) | Optimistic UI updates use `useOptimistic` rather than hand-rolled optimistic state. Explicitly not applicable for React 18.x. | Hand-rolled optimistic updates in React 19 codebases. |
+The React 19 checks are not applicable below React 19; the boundary checks are not applicable without server components.
+
+| Check | Severity | Method | Expectation | Violation signal |
+| --- | --- | --- | --- | --- |
+| Components take ref as a prop | low | tool | React 19 components accept `ref` as a prop; forwardRef stays only where a peer range supports React 18. | forwardRef wrappers in React 19 code (partial). |
+| Components use named exports outside framework files | low | tool | Named exports, except framework-required files (Next.js App and Pages Router files, route modules, Expo Router routes) and lazy-loading targets. | Default-exported components elsewhere (partial). |
+| Forms submit through actions | medium | model | Form mutations use actions with `useActionState`, `useFormStatus`, and `useOptimistic`, or a form library built on them. | `onSubmit` handlers with hand-rolled pending, error, or optimistic state. |
+| Client modules import no server-only code | high | tool | Nothing reachable from a 'use client' file imports `server-only`, Node built-ins, server SDKs, or reads a private environment variable. | A client module chain that reaches server code (violation). |
+| Only serialisable props cross into client components | high | model | Server Components pass plain, field-selected data, JSX, or Server Functions to client components. | A plain function, class instance, or whole database record passed to a client component. |
+| 'use client' marks small interactive leaves | medium | model | The directive sits on the first line of files that need state, effects, or browser APIs, near the leaves. | 'use client' on root layouts, pages, or mostly static containers, or a directive React ignores. |
+
+## Judging an effect
+
+This is the core of the audit. For each effect you read:
+
+1. **Name what it synchronises with.** An effect exists to keep a component in step with something outside React: a subscription, a timer, the DOM, a network request. If the answer is "other state" or "a prop", the effect should not exist; compute during render, reset with a `key`, or move the logic into the event handler.
+2. **Trace the cleanup.** For a subscription, listener, timer, or observer, find the teardown. For async work, find the abort or the ignore flag that stops an older response from landing after a newer one. Name the sequence that fails, such as "type 'ab', the 'a' response arrives last".
+3. **Read the dependencies against the body.** Every prop, state value, or context the effect reads belongs in the array. A suppressed or emptied array is honest only when the omitted value is read by event-like logic, which `useEffectEvent` now expresses.
+4. **Check where the value lives.** If the effect copies a value into state, ask which copy is the truth and what happens when they differ.
+
+Classify each candidate as **unneeded effect**, **missing cleanup**, **race**, **stale closure**, **duplicated state**, or **sound**, with one sentence and a `path:line` citation that quotes the line. Keep the look-alikes in the detection notes: synchronising with an external system, a fetch with an ignore flag, and a ref read inside an effect are fine.
 
 ## What this skill does
 
-1. **Reads the knowledge graph when present.** Soft dependency: when `graphify-out/graph.json` exists, the audit identifies widely-consumed custom hooks (a hook used by 50 components is more important to get right than one used by 2) and prioritises them in the implementation plan. The audit still runs in full when the graph is absent.
-2. **Confirms a TypeScript and React project.** Detects `package.json`, `tsconfig.json`, and `react` in dependencies. If TypeScript or React is absent, the skill writes a canonical not-applicable audit with every catalog check present once and a null status.
-3. **Resolves the React version** from `package.json` and the lockfile. Determines whether layer 4 runs (React 18 or newer) or is represented explicitly as not applicable.
-4. **Detects framework, form library, animation library, and design system** for the diagnostic snapshot and for layer-specific dispatch (App Router gates two layer 4 checks).
-5. **Counts class components and identifies the most-recently-modified component of each kind** so the implementation plan can flag class components newer than the most recent function component as the strongest migration signal.
-6. **Writes Layer 0 — the diagnostic snapshot** to `.architect-audits/react-audit/snapshot.md` and prepends the same content to `findings.md`.
-7. **Walks each check in the active layer list**, applying any `--include` and `--exclude` filters. Records a status, evidence, and (where relevant) sample file references per check.
-8. **Writes phase 1 outputs** to `.architect-audits/react-audit/`:
-   - `findings.md` — diagnostic snapshot followed by check results, grouped by layer.
-   - `findings.json` — machine-readable.
-   - `snapshot.md` — diagnostic snapshot on its own.
-   - `metadata.json` — skill version, run timestamp, Graphify revision (when present), React version, framework variant, applied filters, and the reason any Layer 4 checks are not applicable.
-9. **Phase 2 — offers to plan the gaps.** Summarises the findings in chat and asks the user a single yes-or-no question:
-
-   > "Generate an implementation plan for the React idiom gaps? (yes/no)"
-
-   On `yes`, writes `.architect-audits/react-audit/implementation-plan.md` describing exactly which hook patterns to fix, which components to refactor, which state-management adjustments to make, and which React 18/19 primitives to adopt — ordered by layer and then by impact (graph centrality applied when available). The plan does not modify any project files.
-
-   On `no`, exits cleanly.
+1. Stages a run through the shared audit protocol. The collector decides the tool checks, marks what does not apply, and records the candidates and risk ranking.
+2. Reads components in risk order within a discovery budget, rather than walking every file.
+3. Judges effects, state, and boundaries with the method above. Every finding cites the lines it rests on.
+4. Publishes `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` through the protocol, and summarises the act-on findings.
+5. Offers an implementation plan of agent-executable briefs.
 
 ## Implementation steps
 
-### Step 1 — Confirm the prerequisites
+1. **Begin.** Follow [the run protocol](../audit-protocol/references/run-protocol.md). With `--worktree`, create the worktree as it describes.
 
-```bash
-test -f package.json || { echo "react-audit: no package.json detected; change directory to the project root."; exit 1; }
-```
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/../audit-protocol/scripts/audit_run.py" begin react-audit
+   ```
 
-Confirm TypeScript and React (`react` directly or via Next.js, Remix, etc.). When either is absent, write all four canonical output files, set the audit applicability to `not-applicable`, and emit every catalog check as `not-applicable`/`not-evaluated` with `status: null`.
+   Pass `--since <ref>` for a diff-scoped run, and `--threshold months=<n>` for `--months`.
+2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/react-audit/.staging/run.json`: `packages`, `compiler`, `riskRanking`, `effects.candidates`, `state`, `exhaustiveDepsSuppressions`, and `directives`. Collector checks marked not applicable stay that way; do not re-record them. When the collector leaves a tool check not evaluated because configuration it could not read lives in the repository, such as a shared ESLint configuration it does not follow, read that configuration chain yourself and record the check with `path:line` evidence.
+3. **Read within the discovery budget.** Read the five highest-ranked components and hooks, then the first 25 effect candidates in ranked order, then every non-serialisable prop candidate and every module in `serverOnlyReachedFromClient`. Widen by 25 candidates only while more than a third of what you read is a real finding. Record what you sampled with `snapshot --set sampled=<json>`.
+4. **Evaluate every model check.**
+   - Apply "Judging an effect" and the detection notes.
+   - Record each check with `record`, citing `path:line` with quoted fragments. Give every non-present result a `--tier`. Show absence with `files:` or a `search:` count, and prefix free-text observations with `note:`.
+   - A candidate flag is a place to look, never evidence on its own; cite the code you read.
+   - A `present` verdict cites the code that earns it, as `path:line` with a quoted fragment. For the effect and state checks, cite each effect or state declaration you reviewed: the top ones by risk rank, within the discovery budget. A `search:` or `files:` count may support it, never stand alone.
+   - Use `hypothesis` for suspicions you cannot verify, and `not-evaluated` with a reason when the repository gives you no basis, such as `forms-use-actions` when the React version is unknown.
+5. **Judge.** Keep at most five findings `act-on` (`finish` refuses more; demote the rest with `judge`), ranked by severity and then by risk rank. The collector marks lint, suppression, ref, and export findings `consider`. Dismiss with a reason any candidate you judged sound.
+6. **Finish.** Run `audit_run.py finish react-audit`, fix anything it rejects, and present the chat summary the protocol defines.
+7. **Offer the plan.** Ask: "Generate an implementation plan for the act-on findings? (yes/no)"
 
-### Step 2 — Resolve React version and framework
+## Phase 2: the implementation plan
 
-Read `package.json` and the lockfile. The lockfile is authoritative when the two disagree. Record the major.minor version. If below 18, emit every Layer 4 catalog check explicitly as `not-applicable`/`not-evaluated` with a null status.
-
-Resolve framework variant from dependencies and directory layout:
-
-- Next.js with `app/` → App Router.
-- Next.js with `pages/` only → Pages Router.
-- `@remix-run/*` → Remix.
-- `vite` plus `react` → Vite-React.
-- `react-scripts` → Create React App.
-- `react` only → plain React.
-
-### Step 3 — Detect the React-ecosystem stack
-
-Read `package.json` dependencies for:
-
-- Form library: `react-hook-form`, `formik`. If neither, native.
-- Animation library: `framer-motion`, `motion`, `react-spring`, `@react-spring/*`.
-- Design system: `@radix-ui/*`, `@chakra-ui/*`, `@mui/*`, `@mantine/*`, `@ariakit/*`. Detect shadcn/ui by the presence of `components/ui` plus its conventional file shape.
-- Data layer (already detected by neighbouring audits; record here too for the implementation plan): `@tanstack/react-query`, `swr`, `@reduxjs/toolkit` with `createApi`, `@apollo/client`, framework-native loaders.
-
-### Step 4 — Build the diagnostic snapshot
-
-Compute the items listed in Layer 0. For component counts and the largest-hook calculation, walk `.tsx` and `.ts` source files; identify components by their JSX-returning signature and React inheritance, identify hooks by name and hook-call presence. Use Graphify communities to sample broadly when present; otherwise sweep all source files.
-
-Write `snapshot.md` and prepend the same content to `findings.md`.
-
-### Step 5 — Resolve each check
-
-For each check in the active layer list, walk its detection logic:
-
-- **All required signals indicate the invariant holds →** `present`.
-- **Most signals hold; a small number of exceptions →** `partial`. Soft checks default to `partial` when adherence is mixed.
-- **An applicable structural prerequisite is absent →** `missing`. If React itself is absent, use the audit-level not-applicable result instead.
-- **Concrete violators exist →** `violation`. Always include sample file references.
-
-Record up to ten representative samples plus a total count per check.
-
-### Step 6 — Write phase 1 outputs
-
-Create `.architect-audits/react-audit/` if needed. Write `findings.md`, `findings.json`, `snapshot.md`, `metadata.json`. Overwrite previous runs of these four; preserve `implementation-plan.md` unless the user agrees to regenerate it.
-
-### Step 7 — Print the concise chat summary and offer phase 2
-
-Print a human-first, scannable summary in the chat. Do not print the full layered findings — those are written to disk in Step 6. The chat output has exactly this shape:
-
-1. **Short header** — audit name, timestamp, and a one-line summary of the codebase state.
-2. **Top 5 Highest-Leverage Recommendations** — ordered by architectural principles: test philosophy, maintainability, risk reduction, velocity, long-term health. For fewer than five findings, print what exists. For each recommendation (numbered 1–5):
-   - **Title** (one clear line).
-   - **Why it matters** (explain the principle in 1–2 sentences).
-   - **Real consequences if ignored** (honest downside for the team or project).
-   - **Smallest high-leverage fix** (exact next step, effort level, and which files to touch).
-   - At the end, add a lettered sub-list of concrete actions if useful (e.g. 2a, 2b) so the user can reply with "2b" or "1 and 3" to trigger implementation.
-3. **Bottom line**: `Full detailed audit report (layered findings, snapshot, metadata, implementation plan) → .architect-audits/react-audit/findings.md`
-
-When `--learn` or `--teach` is set, expand each recommendation into mid-level engineer teaching mode:
-- For every item, explain as if teaching a mid-level engineer, pointing to specific files and line numbers from the current codebase.
-- Use educational language: "Here's why this pattern bites teams in the long run…", "This is the exact mistake I see in most codebases at your stage…", "The fix is small but pays off huge because…".
-- Include a short "What you'll learn from fixing this" section for each recommendation.
-- Keep the numbered/lettered structure so the user can still reply with "2b" or "1 and 3".
-- End with the same bottom-line link to the full report.
-
-After printing, ask the single yes-or-no question: *"Generate an implementation plan for the gaps identified above? (yes/no)"* Do not proceed to phase 2 without an explicit affirmative.
-
-### Step 8 — Phase 2: generate the implementation plan
-
-When the user agrees, build `implementation-plan.md`:
-
-1. **Header** — repository name, baseline version, React version, framework variant, design system, timestamp, total counts per layer.
-2. **Layer 1 — hooks correctness plan**: per finding, the file and line, the offending pattern, and the recommended replacement (status enum snippet, derived-state refactor, cleanup function, memoization-for-correctness wrapping). Widely-consumed hooks (Graphify-prioritised) are addressed first because the blast radius is larger.
-3. **Layer 2 — component design plan**: per finding, the rename, the `forwardRef` introduction, the `displayName` addition, or the file split. Class-component migrations are listed with the most-recently-modified ones flagged for migration first; legacy class components in stable code are marked low-priority.
-4. **Layer 3 — state management plan**: per finding, the state to lift/lower/derive, the form-library introduction snippet, the URL-state migration. Cross-references `/architecture-audit`'s implementation plan when both flag the same single-state-library gap.
-5. **Layer 4 — React 18/19 idiom adoption plan** (when applicable): adoption snippets for `useId`, `useTransition`, Suspense boundaries, `useOptimistic`. Server Action conversion proposals for App Router projects.
-6. **Closing checklist** — flat checkbox list mirroring the gaps, suitable for pasting into a pull-request description.
-
-The plan is descriptive, not executable. It does not edit components, install libraries, or refactor state.
+On yes, write `.architect-audits/react-audit/implementation-plan.md` with the task briefs the protocol defines. Order them: server-client boundary leaks, then effects that race or leak, then duplicated and derived state, then dependency honesty, then toolchain, lint, and idiom. Give each effect fix an acceptance criterion a test can check, such as "typing two queries quickly shows the second query's results".
 
 ## Repository Quality Score findings contract
 
-`findings.json` is the scoring source and MUST use schema `2.0.0`. Emit the
-top-level fields `schemaVersion`, `runIdentifier`, `skillName`, `skillVersion`,
-`checkCatalogSchemaVersion`, `checkCatalogVersion`, `runStartedAt`,
-`runFinishedAt`, `target`, `execution`, and `checks`. `target` records the
-repository, exact Git commit, and whether the audited source tree was clean.
-`execution` records `filtersApplied`, `filterArguments`, threshold and policy
-overrides, `enrichmentArguments`, and graph availability.
-
-Emit every entry from `checks.json` exactly once and use its full `checkId` and
-layer. Each result records `applicability`, `evaluationState`, `evidenceQuality`,
-`classification`, canonical `status`, and `evidence`. A check that does not apply
-is `not-applicable`/`not-evaluated` with a null status. A filtered or otherwise
-unresolved applicable check is `applicable`/`not-evaluated` with a null status;
-never guess a pass or failure. `metadata.json` repeats the common run, target,
-catalog, and execution identity. The complete contract is
-`.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
-
-## Findings file shape
-
-`findings.json` (the example shows one representative check; emitted output
-contains every catalog check exactly once):
-
-```json
-{
-  "schemaVersion": "2.0.0",
-  "runIdentifier": "<uuid>",
-  "skillName": "react-audit",
-  "skillVersion": "1.0.0",
-  "checkCatalogSchemaVersion": "1.1.0",
-  "checkCatalogVersion": "1.1.0",
-  "target": { "repository": "example", "gitCommit": "<full-commit-sha>", "sourceWorkingTreeClean": true },
-  "execution": { "filtersApplied": false, "filterArguments": [], "thresholdOverrides": {}, "policyOverrides": {}, "enrichmentArguments": [], "graphAvailable": true },
-  "runStartedAt": "2026-04-26T13:47:00Z",
-  "runFinishedAt": "2026-04-26T13:47:11Z",
-  "reactVersion": "18.3.1",
-  "framework": "next-app-router",
-  "formLibrary": "react-hook-form",
-  "animationLibrary": "framer-motion",
-  "designSystem": "shadcn",
-  "snapshot": {
-    "componentCounts": { "function": 218, "class": 6, "total": 224 },
-    "customHookCount": 47,
-    "largestCustomHook": { "name": "useInboxState", "path": "src/features/inbox/useInboxState.ts", "lines": 184 },
-    "newPrimitivesUsage": { "useTransition": 4, "useDeferredValue": 1, "useId": 12, "useOptimistic": 0, "use": 0, "useFormStatus": 0 },
-    "useClientCount": 71,
-    "useServerCount": 8,
-    "forwardRefCount": 23,
-    "memoCount": 14,
-    "mostRecentlyModifiedFunctionComponent": "src/features/billing/PlanCard.tsx",
-    "mostRecentlyModifiedClassComponent": "src/legacy/AdminGrid.tsx"
-  },
-  "summary": {
-    "hooksCorrectness":               { "present": 6, "partial": 2, "missing": 0, "violation": 2 },
-    "componentDesign":                { "present": 5, "partial": 2, "missing": 0, "violation": 1 },
-    "stateManagement":                { "present": 3, "partial": 2, "missing": 0, "violation": 1 },
-    "reactEighteenAndNineteenIdioms": { "present": 4, "partial": 2, "missing": 0, "violation": 0 }
-  },
-  "checks": [
-    {
-      "layer": "hooks-correctness",
-      "checkId": "react-audit.no-state-synchronisation",
-      "applicability": "applicable",
-      "applicabilityReason": null,
-      "evaluationState": "evaluated",
-      "evaluationReason": null,
-      "evidenceQuality": "complete",
-      "classification": "state-synchronisation-violation",
-      "status": "violation",
-      "evidence": [],
-      "samples": [
-        { "path": "src/features/profile/ProfileForm.tsx", "line": 38, "pattern": "useEffect(() => setLocal(props.value), [props.value])" }
-      ],
-      "totalCount": 4,
-      "expectation": "State is derived from props, not mirrored into useState by useEffect.",
-      "gap": "4 components mirror props into local state and re-synchronise via useEffect.",
-      "remediation": "Replace local state with direct prop usage; if the component needs a controllable initial value, accept a defaultValue prop and useState with it as the lazy initialiser, with no synchronising effect."
-    }
-  ]
-}
-```
-
-When React is below 18, the layer 4 summary becomes
-`"reactEighteenAndNineteenIdioms": { "notApplicable": true, "reason": "react-version-below-18" }`.
-Every corresponding catalog entry remains in `checks` with
-`applicability: "not-applicable"`, `evaluationState: "not-evaluated"`,
-`evidenceQuality: "none"`, and `status: null`.
-
-`findings.md` mirrors the same content in human-readable form, with the diagnostic snapshot at the top and one section per check, grouped by layer. `snapshot.md` contains only the snapshot. `metadata.json` carries skill identity, timestamps, Graphify revision (when present), React version, framework variant, the form/animation/design-system detection, applied filters, and the reason any Layer 4 checks are not applicable.
-
-## Idempotency rules
-
-- Re-running with no flags overwrites `findings.md`, `findings.json`, `snapshot.md`, and `metadata.json` in place.
-- `implementation-plan.md` is preserved across runs unless the user agrees to regenerate it.
-- Filter flags are recorded in `metadata.json` so a partial run can be reproduced.
-
-## Failure modes and remediation
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `no package.json detected` | The skill is run outside a Node.js project root. | Change directory into the project root and re-run. |
-| `no tsconfig.json detected` | JavaScript-only project. | Write a canonical not-applicable audit result with every catalog check present once and a null status. |
-| React not detected | The project does not depend on `react` directly or via a meta-framework. | Write the same canonical not-applicable audit result; do not omit the audit from RQS coverage. |
-| React below 18 | The lockfile resolves React to 17.x or earlier. | Continue. Emit each React-18-only Layer 4 check as `not-applicable`/`not-evaluated` with reason `react-version-below-18` and `status: null`. The implementation plan adds an upgrade recommendation. |
-| React 18 with no detected framework | A bare React project with a hand-rolled bundler. | Continue. Emit App-Router-specific checks explicitly as `not-applicable`/`not-evaluated` with a null status. |
-| Knowledge graph missing | `/pre-audit-setup` has not been run. | Continue. Record `noGraphify: true` in metadata. The implementation plan loses centrality-based prioritisation; widely-consumed hooks are still surfaced via per-file count, with reduced precision. |
-| Multiple Reacts in the lockfile | Multiple major versions of React present (typically because a dependency pinned an older React). | Record both versions in the snapshot. The audit operates against the version the application's main entry resolves. The duplicate-React situation is also a `/dependency-audit` concern; both audits surface it. |
-| Class components dominate | The codebase has more class components than function components. | The "function components only in new code" check still reports `partial` (class components don't make this `violation`); the diagnostic snapshot records the imbalance and the implementation plan recommends a phased migration starting with most-frequently-modified files. |
+The protocol publishes findings schema `2.0.0`. It writes one `runIdentifier`, `runStartedAt` and `runFinishedAt`, and the `checkCatalogVersion`. It records `applicability`, `evaluationState`, and `evidenceQuality` for every catalog check, and repeats the run identity in `metadata.json`. See `.agents/AUDIT_FINDINGS_CONTRACT.md` in the playbook repository.
 
 ## What this skill explicitly does NOT do
 
-- Execute any code or run any test.
-- Audit runtime cost (memoization-for-performance, virtualization, render thrashing). Those are owned by `/performance-audit`.
-- Audit god components, file size, fan-out, or single-state-library architectural concerns. Those are owned by `/architecture-audit` (state-library overlap is intentionally surfaced in both).
-- Audit accessibility patterns inside components. Those are owned by `/accessibility-audit`.
-- Audit React error boundaries or Suspense + boundary pairing. Those are owned by `/error-handling-audit`.
-- Audit ESLint plugin coverage. That is owned by `/linting-audit` (the `react-hooks` plugin overlap is intentionally surfaced in both).
-- Audit `React.lazy` configuration or dynamic-import wiring. Those are owned by `/bundle-build-audit`.
-- Install any package or dependency.
-- Create, modify, or delete any file outside `.architect-audits/react-audit/`.
-- Modify components, hooks, or configuration.
-- Open pull requests or commit anything to git.
-- Audit non-React frontends. Vue, Svelte, Angular, and Solid are out of scope.
-- Replace human review of nuanced React design decisions. The audit catches structural patterns; trade-offs like "should this be a custom hook or a child component" still require judgement.
+- Modify, add, or delete any source, configuration, or test file. The audit writes only under `.architect-audits/react-audit/`, through the protocol.
+- Install packages, or run ESLint, the React Compiler, a bundler, or the application. Lint and compiler settings are read from configuration as text.
+- Recommend `useMemo`, `useCallback`, or `React.memo` for speed, or penalise their absence; rendering cost belongs to `/performance-audit`, and the compiler memoizes for you.
+- Grade naming, `displayName`, one component per file, or function versus class components; linters and TypeScript own those.
+- Decide where server data should load or which state library to use; `/architecture-audit` owns both.
+- Audit Vue, Svelte, Solid, Angular, or Preact without React.

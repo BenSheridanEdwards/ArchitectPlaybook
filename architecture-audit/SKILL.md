@@ -49,7 +49,7 @@ The vocabulary comes from John Ousterhout's deep modules and from the red flags 
 | Lint rules that enforce boundaries, as configuration | `/linting-audit` |
 | Whether architecture documents and decision records exist and are current | `/documentation-audit` |
 
-`/architecture-audit` owns where server data loads and how global client state is held. The React and performance audits still carry overlapping checks (`react-audit.server-state-in-data-layer`, `react-audit.single-global-state-library`, and `performance-audit.single-data-fetching-strategy`). Under Architecture Decision Record 0004, each retires its copy or points it here with `relatedChecks` when its catalog moves to schema `1.2.0`.
+`/architecture-audit` owns where server data loads and how global client state is held. `/react-audit` retired its copies in catalog 2.0.0. The performance audit still carries an overlapping check (`performance-audit.single-data-fetching-strategy`); under Architecture Decision Record 0004, it retires its copy or points it here with `relatedChecks` when its catalog moves to schema `1.2.0`.
 
 The three tool checks always cover the whole repository, also in a `--since` run, because a cycle or a boundary rule is a property of the whole graph.
 
