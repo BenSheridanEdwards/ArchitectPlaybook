@@ -220,7 +220,7 @@ class ApplicabilityTests(CollectorTestCase):
         self.assertEqual(self.check(result, "ref-passed-as-a-prop")["applicability"], "not-applicable")
 
     def test_monorepo_packages_are_gated_separately(self) -> None:
-        self.package({"name": "monorepo", "private": True, "workspaces": ["apps/*", "", "/etc", "../outside", "!apps/legacy"]})
+        self.package({"name": "monorepo", "private": True, "workspaces": ["apps/*", "", "/etc", "../outside"]})
         self.package({"name": "web", "dependencies": {"react": "19.3.0"}}, "apps/web/package.json")
         self.package({"name": "legacy", "dependencies": {"react": "18.3.1"}}, "apps/legacy/package.json")
         self.write("apps/web/src/Input.tsx", "export function Input({ ref }: { ref?: React.Ref<HTMLInputElement> }) { return <input ref={ref} />; }\n")
@@ -694,6 +694,204 @@ class BoundsTests(CollectorTestCase):
         effects = collector.effects_in(source, {f"setValue{index}" for index in range(3000)})
         self.assertLess(time.monotonic() - began, 20)
         self.assertEqual(len(effects), collector.MAX_EFFECTS_PER_FILE)
+
+
+class ReviewRegressionTests(CollectorTestCase):
+    """Each case comes from a repository the adversarial review built to break the collector."""
+
+    def hooks(self) -> dict[str, Any]:
+        self.commit()
+        return self.check(self.collect(), "react-hooks-plugin-enabled")
+
+    def hooks_project(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0", "react-dom": "19.1.0"}, "devDependencies": {"eslint-plugin-react-hooks": "7.0.0", "eslint-config-next": "16.0.0", "eslint": "9"}})
+        self.write("src/A.tsx", 'import { useState } from "react";\nexport function A() { const [a] = useState(0); return <p>{a}</p>; }\n')
+
+    def test_nested_pnpm_negated_and_dotted_workspaces_are_found(self) -> None:
+        self.write("frontend/package.json", '{"name":"web","dependencies":{"react":"19.1.0"}}\n')
+        self.write("frontend/src/A.tsx", "export function A() { return <p>a</p>; }\n")
+        self.write("backend/app.py", "print(1)\n")
+        self.commit()
+        packages = self.collect()["snapshot"]["packages"]
+        self.assertEqual([item["package"] for item in packages], ["frontend/package.json"], "no workspace list: nested packages count")
+        for workspace in ('packages: ["apps/*"]\n', "packages:\n- apps/*\n", "packages:\n  - 'apps/*' # apps\n  - '!apps/legacy'\n"):
+            with self.subTest(workspace=workspace):
+                self.write("package.json", '{"name":"root","private":true}\n')
+                self.write("pnpm-workspace.yaml", workspace)
+                self.write("apps/web/package.json", '{"name":"web","dependencies":{"react":"19.1.0"}}\n')
+                self.write("apps/legacy/package.json", '{"name":"legacy","dependencies":{"react":"18.2.0"}}\n')
+                self.commit()
+                found = [item["package"] for item in self.collect()["snapshot"]["packages"]]
+                self.assertIn("apps/web/package.json", found)
+                self.assertEqual("apps/legacy/package.json" in found, "!apps/legacy" not in workspace)
+        (self.root / "pnpm-workspace.yaml").unlink()
+        self.write("package.json", '{"name":"root","private":true,"workspaces":["./apps/*","!apps/legacy","**"]}\n')
+        self.write("node_modules/evil/package.json", '{"name":"evil","dependencies":{"react":"17.0.0"}}\n')
+        self.write(".gitignore", "node_modules\n")
+        self.commit()
+        found = [item["package"] for item in self.collect()["snapshot"]["packages"]]
+        self.assertNotIn("apps/legacy/package.json", found)
+        self.assertFalse(any("node_modules" in item for item in found))
+
+    def test_compiler_scoped_by_overrides_options_variables_or_conditions_is_not_everywhere(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0", "next": "16.0.0"}, "devDependencies": {"babel-plugin-react-compiler": "1.0.0"}})
+        self.write("src/A.tsx", "export function A() { return <p>a</p>; }\n")
+        cases = {
+            "babel.config.js": "module.exports = {\n  plugins: [],\n  overrides: [\n    { test: './src/modern/**', plugins: ['babel-plugin-react-compiler'] },\n  ],\n};\n",
+            "babel.config.json": '{"plugins": [], "overrides": [{"test": "./src/modern", "plugins": ["babel-plugin-react-compiler"]}]}\n',
+            "next.config.ts": "const nextConfig = {\n  ...(process.env.ENABLE_COMPILER === '1' ? { reactCompiler: true } : {}),\n};\nexport default nextConfig;\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                for other in cases:
+                    if (self.root / other).exists():
+                        (self.root / other).unlink()
+                self.write(name, text)
+                self.commit()
+                result = self.collect()
+                self.assertFalse(result["snapshot"]["compiler"][0]["everywhere"])
+                self.assertNotIn(CHECK + "memoization-for-correctness", result["checks"])
+        (self.root / "next.config.ts").unlink()
+        self.write("babel.config.js", 'const ReactCompilerConfig = { compilationMode: "annotation" };\nmodule.exports = { plugins: [["babel-plugin-react-compiler", ReactCompilerConfig]] };\n')
+        self.commit()
+        self.assertEqual(self.collect()["snapshot"]["compiler"][0]["mode"], "annotation")
+        self.write("babel.config.js", 'const options = require("./compiler-options");\nmodule.exports = { plugins: [["babel-plugin-react-compiler", options]] };\n')
+        self.commit()
+        compiler = self.collect()["snapshot"]["compiler"][0]
+        self.assertFalse(compiler["everywhere"])
+        self.assertIn("options", compiler["unread"][0])
+
+    def test_compat_config_extglob_spread_extends_root_stop_js_spread_and_yaml_lists(self) -> None:
+        self.hooks_project()
+        self.write("eslint.config.mjs", 'import { FlatCompat } from "@eslint/eslintrc";\nconst compat = new FlatCompat({ baseDirectory: import.meta.dirname });\nexport default [\n  ...compat.config({ extends: ["next/core-web-vitals"] }),\n];\n')
+        self.assertEqual(self.hooks()["status"], "present")
+        self.write("eslint.config.mjs", 'import reactHooks from "eslint-plugin-react-hooks";\nexport default [\n  { files: ["**/*.ts?(x)"], ...reactHooks.configs.flat.recommended },\n];\n')
+        self.assertEqual(self.hooks()["status"], "present")
+        self.write("eslint.config.mjs", 'import { defineConfig } from "eslint/config";\nimport reactHooks from "eslint-plugin-react-hooks";\nconst hooks = { plugins: { "react-hooks": reactHooks }, extends: ["react-hooks/recommended"] };\nexport default defineConfig([\n  { ...hooks, files: ["src/**/*.tsx"] },\n]);\n')
+        self.assertEqual(self.hooks()["status"], "present")
+        self.write("eslint.config.mjs", 'import reactHooks from "eslint-plugin-react-hooks";\nexport default [\n  reactHooks.configs.flat\n    .recommended,\n];\n')
+        item = self.hooks()
+        self.assertEqual(item["status"], "present")
+        self.assertNotIn("\n", item["evidence"][0], "evidence is one line")
+        (self.root / "eslint.config.mjs").unlink()
+        self.write(".eslintrc.json", '{"extends":["plugin:react-hooks/recommended-legacy"]}\n')
+        self.write("src/.eslintrc.json", '{"root":true,"extends":["eslint:recommended"]}\n')
+        self.assertEqual(self.hooks()["status"], "missing", "root: true stops the cascade above src")
+        (self.root / ".eslintrc.json").unlink()
+        (self.root / "src/.eslintrc.json").unlink()
+        self.write(".eslintrc.js", 'const base = require("@acme/eslint-config");\nmodule.exports = {\n  ...base,\n  rules: { ...base.rules, "react-hooks/exhaustive-deps": "warn" },\n};\n')
+        self.assertEqual(self.hooks()["evaluationState"], "not-evaluated")
+        (self.root / ".eslintrc.js").unlink()
+        self.write(".eslintrc.yml", "plugins:\n  - react-hooks\nrules:\n  react-hooks/rules-of-hooks:\n    - error\n  react-hooks/exhaustive-deps:\n    - warn\n")
+        item = self.hooks()
+        self.assertEqual(item["status"], "partial")
+        self.assertIn("React Compiler rules", item["gap"])
+
+    def test_odd_json_shapes_do_not_crash(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0"}, "eslintConfig": {"overrides": [{"files": 7}], "root": "yes"}})
+        self.write("tsconfig.json", '{"compilerOptions": []}\n')
+        self.write("babel.config.json", '{"plugins": [{"name": "x"}, 3]}\n')
+        self.write("app.json", '{"expo": []}\n')
+        self.write("biome.json", '[]\n')
+        self.write("src/A.tsx", "export function A() { return <p>a</p>; }\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "missing")
+
+    def test_client_safe_packages_browser_conditions_and_generic_arrows_are_not_server_code(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0", "react-dom": "19.1.0", "next": "16.0.0", "@supabase/ssr": "0.5.0"}})
+        self.write("app/page.tsx", 'import { Login } from "./Login";\nimport { Help } from "./Help";\nexport default function Page() { return <><Login /><Help map={(x) => x} /></>; }\n')
+        self.write("app/Login.tsx", '"use client";\nimport { supabase } from "../lib/client";\nexport function Login() { return <button onClick={() => supabase()}>Log in</button>; }\n')
+        self.write("lib/client.ts", 'import { createBrowserClient } from "@supabase/ssr";\nexport const supabase = () => createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);\n')
+        self.write("app/Help.tsx", '"use client";\ntype Mapper = <T>(value: T) => T;\nconst hint = "Set process.env.DATABASE_URL on the server";\nexport function Help({ map }: { map: Mapper }) { return <p>{map(hint)}</p>; }\n')
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "client-modules-import-no-server-code")["status"], "present")
+        self.package({"name": "root", "private": True, "workspaces": ["apps/*", "packages/*"]})
+        self.write("apps/web/package.json", '{"name":"web","dependencies":{"react":"19.1.0","next":"16.0.0","@acme/data":"*"}}\n')
+        self.write("apps/web/app/C.tsx", '"use client";\nimport { load } from "@acme/data";\nexport function C() { return <button onClick={() => load()}>x</button>; }\n')
+        self.write("apps/web/app/page.tsx", 'import { C } from "./C";\nexport default function Page() { return <C />; }\n')
+        self.write("packages/data/package.json", '{"name":"@acme/data","exports":{".":{"react-server":"./src/server.ts","default":"./src/client.ts"}},"dependencies":{"pg":"8"}}\n')
+        self.write("packages/data/src/client.ts", 'export const load = () => fetch("/api");\n')
+        self.write("packages/data/src/server.ts", 'import { Pool } from "pg";\nexport const load = () => new Pool();\n')
+        for path in ("app/page.tsx", "app/Login.tsx", "app/Help.tsx", "lib/client.ts"):
+            (self.root / path).unlink()
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "client-modules-import-no-server-code")["status"], "present")
+
+    def test_private_variables_are_cited_on_their_own_line_including_destructuring(self) -> None:
+        self.next_app()
+        self.write("src/components/Pay.tsx", '"use client";\nconst key = process.env\n  .STRIPE_SECRET_KEY;\nexport function Pay() { return <p>{key}</p>; }\n')
+        self.write("src/components/Keys.tsx", '"use client";\nconst { PAYMENT_TOKEN, NEXT_PUBLIC_SITE } = process.env;\nexport function Keys() { return <p>{PAYMENT_TOKEN}{NEXT_PUBLIC_SITE}</p>; }\n')
+        self.commit()
+        result = self.collect()
+        evidence = self.check(result, "client-modules-import-no-server-code")["evidence"]
+        self.assertIn("src/components/Pay.tsx:3 — `STRIPE_SECRET_KEY` reads the private environment variable STRIPE_SECRET_KEY, and it is bundled for the browser", evidence)
+        markers = [item["markers"] for item in result["snapshot"]["directives"]["serverOnlyReachedFromClient"]]
+        self.assertIn(["reads the private environment variable PAYMENT_TOKEN"], markers)
+
+    def test_lone_carriage_returns_do_not_shift_line_numbers(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0"}})
+        self.write("src/B.tsx", '"use client";\r\nimport { forwardRef } from "react";\r\r\rexport const B = forwardRef<HTMLDivElement>(function B(p, ref) { return <div ref={ref} />; });\r')
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "ref-passed-as-a-prop")["evidence"], ["src/B.tsx:2 — `forwardRef`"])
+
+    def test_waku_pages_are_exempt_from_named_exports(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0", "react-dom": "19.1.0", "waku": "0.27.0", "react-server-dom-webpack": "19.1.0"}})
+        self.write("src/pages/_layout.tsx", 'import type { ReactNode } from "react";\nexport default async function RootLayout({ children }: { children: ReactNode }) { return <main>{children}</main>; }\n')
+        self.write("src/pages/index.tsx", 'export default async function HomePage() { return <h1>Home</h1>; }\n')
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "named-exports-for-components")["status"], "present")
+
+    def test_optional_and_prop_member_callbacks_notify_the_parent(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0"}})
+        self.write("src/Field.tsx", (
+            'import { useEffect, useState } from "react";\n'
+            'export function Field({ onChange }: { onChange?: (v: string) => void }) {\n'
+            '  const [value, setValue] = useState("");\n'
+            '  useEffect(() => {\n    onChange?.(value);\n  }, [value, onChange]);\n'
+            '  return <input value={value} onChange={(e) => setValue(e.target.value)} />;\n}\n'
+            'export function Field2(props: { onChange: (v: string) => void }) {\n'
+            '  const [value, setValue] = useState("");\n'
+            '  useEffect(() => {\n    props.onChange(value);\n  }, [value, props]);\n'
+            '  return <input value={value} onChange={(e) => setValue(e.target.value)} />;\n}\n'
+        ))
+        self.commit()
+        candidates = self.collect()["snapshot"]["effects"]["candidates"]
+        self.assertEqual([item["flags"] for item in candidates], [["notifies-parent"], ["notifies-parent"]])
+
+    def test_big_lockfiles_still_resolve_the_version(self) -> None:
+        packages = {"": {"dependencies": {"react": ">=18"}}, "node_modules/react": {"version": "19.1.0"}}
+        packages.update({f"node_modules/pkg-{index}": {"version": "1.0.0", "integrity": "sha512-" + "a" * 80} for index in range(30_000)})
+        self.write("package-lock.json", json.dumps({"lockfileVersion": 3, "packages": packages}))
+        self.assertGreater((self.root / "package-lock.json").stat().st_size, collector.MAX_FILE_BYTES)
+        self.package({"name": "a", "dependencies": {"react": ">=18"}})
+        self.write("src/A.tsx", "export function A() { return <p />; }\n")
+        self.commit()
+        self.assertEqual(self.collect()["snapshot"]["packages"][0]["resolved"], "19.1.0")
+
+    def test_suppressions_count_only_at_the_start_of_a_comment(self) -> None:
+        self.package({"name": "a", "dependencies": {"react": "19.1.0"}})
+        self.write("src/A.tsx", "// We removed the eslint-disable-next-line react-hooks/exhaustive-deps from here.\nexport function A() { return <p />; }\n")
+        self.commit()
+        self.assertEqual(self.collect()["snapshot"]["exhaustiveDepsSuppressions"]["total"], 0)
+
+    def test_upper_bound_ranges_gate_below_the_bound(self) -> None:
+        self.assertEqual(collector.lowest_version("<19"), (18, 0))
+        self.assertEqual(collector.lowest_version("<=19.0.0"), (18, 0))
+        self.assertEqual(collector.lowest_version(">=18 <20"), (18, 0))
+        self.assertEqual(collector.lowest_version("<18.3"), (18, 0))
+
+    def test_a_non_null_assertion_before_division_is_not_a_regular_expression(self) -> None:
+        masked = collector.mask("const half = total! / 2; forwardRef(Thing); const other = /x/.test(y);\n", "a.ts")
+        self.assertIn("total! / 2", masked)
+        self.assertIn("forwardRef(Thing)", masked)
+        self.assertNotIn("/x/", masked, "a real regular expression is still masked")
+
+    def test_many_misplaced_directive_lines_scan_linearly(self) -> None:
+        text = "export function f() {}\n" + "'use client';\n" * 20_000
+        began = time.monotonic()
+        found = collector.misplaced_directives(collector.Source("src/a.ts", text), [])
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertEqual(len(found), 20_000)
 
 
 class EvaluationFixtureTests(unittest.TestCase):

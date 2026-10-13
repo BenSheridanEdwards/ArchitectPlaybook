@@ -42,7 +42,10 @@ which components to read first.
     `globalIgnores` and ignore-only objects drop a file entirely. Shared
     configurations, `extends`, and an object's own `rules` key apply in
     order, so a later setting wins, and a spread such as `{ ...scoped }`
-    copies `files`, `ignores`, and `rules` in JavaScript spread order.
+    copies `files`, `ignores`, `rules`, and its own `extends` in JavaScript
+    spread order. Globs support brace lists and extglobs such as `*.ts?(x)`.
+    `FlatCompat`'s `compat.extends(...)` and `compat.config({ extends, rules })`
+    are read as legacy configuration.
   - Presets it knows, by the installed version:
     - eslint-plugin-react-hooks 7 `recommended` and `recommended-latest`,
       written `reactHooks.configs.flat.recommended`, `"react-hooks/recommended"`
@@ -61,6 +64,9 @@ which components to read first.
     `set-state-in-effect`, `set-state-in-render`, `static-components`,
     `unsupported-syntax`, and `use-memo`. `recommended-latest` also adds
     `void-use-memo`, which is not required.
+  - In the legacy cascade, a file with `root: true` stops ESLint from reading
+    the configurations above it. A JavaScript legacy file that spreads a value,
+    such as a required shared configuration, is unreadable.
   - Missing: no hook rule applies to the component files. Partial: a rule is
     off for some file, or the classic rules are on without the compiler
     rules.
@@ -198,7 +204,8 @@ returns its value and is treated as having a cleanup.
     Router file;
   - React Router framework and Remix 2 route modules: files under the route
     folder, files named in `routes.ts`, `root`, and the entry files;
-  - Expo Router routes, Gatsby pages and templates;
+  - Expo Router routes, Gatsby pages and templates, and Waku pages and
+    layouts under `src/pages`;
   - targets of `React.lazy(() => import(...))` and
     `next/dynamic(() => import(...))`.
 
@@ -219,8 +226,12 @@ returns its value and is treated as having a cleanup.
     and dynamic imports, but not type-only imports, through relative paths,
     tsconfig path aliases, and workspace packages. It stops at `'use server'`
     modules, whose exports a client may import as Server Functions.
+  - Workspace packages resolve through their conditional `exports`, skipping
+    the `react-server` and `node` conditions a browser bundle never takes.
   - Server markers: `server-only`, `next/headers`, Node built-ins, database
-    clients and other server SDKs, and reads of `process.env` variables
+    clients and other server SDKs (not packages that also build browser
+    clients, such as `@supabase/ssr`), and reads of `process.env` variables,
+    including destructured ones, cited on the line that names the variable,
     without a public prefix (`NEXT_PUBLIC_`, `VITE_`, `EXPO_PUBLIC_`,
     `PUBLIC_`, `REACT_APP_`) other than `NODE_ENV` and names a Next.js
     configuration's `env` option inlines into the client bundle.
@@ -278,17 +289,26 @@ collector reads.
   and the tool checks that scan source are degraded.
 - `scripts/`, `tools/`, and `tooling/` folders count as tooling only at the
   repository root or a workspace package's root. Workspace globs from
-  `package.json` and `pnpm-workspace.yaml` that are empty, negated, absolute,
-  or climb out of the repository with `..` are ignored.
+  `package.json` and `pnpm-workspace.yaml` (block or inline lists) are matched
+  against the folders Git lists, so `node_modules` is never walked; negated
+  globs exclude packages, and globs that are empty, absolute, or climb out of
+  the repository with `..` are ignored. Without a workspace list, every nested
+  `package.json` is a package, as in a repository with `frontend/` and
+  `backend/` folders.
+- Files are read without newline translation, so a lone carriage return
+  never shifts a cited line. Lockfiles are read up to 100 MB.
 - React Compiler adoption is read from `next.config.*` (`reactCompiler`, top
   level in Next.js 16, under `experimental` in 15), Babel configuration
   (`babel-plugin-react-compiler`), Vite configuration (the Babel plugin, or
   `reactCompilerPreset` with `@vitejs/plugin-react` 6), Expo's `app.json`,
   and other bundler configuration files. A value it cannot read, such as
-  `reactCompiler: process.env.COMPILER === "1"`, makes adoption unknown,
-  never off; the stable-dependencies check then stays with the model. Mode
-  `annotation` or `syntax`, a `sources` or `gating` option, or any
-  `'use no memo'` file means the compiler does not cover every component.
+  `reactCompiler: process.env.COMPILER === "1"`, options held in a variable
+  it cannot find, or configuration inside a condition, a spread ternary, or a
+  function, makes adoption unknown, never off; the stable-dependencies check
+  then stays with the model. Mode `annotation` or `syntax`, a `sources` or
+  `gating` option, a Babel `overrides`, `env`, `test`, `include`, or `exclude`
+  scope, or any `'use no memo'` file means the compiler does not cover every
+  component.
 - Versions come from `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, and
   `bun.lock` as text, then from the manifest range; pnpm `catalog:` ranges
   are read from `pnpm-workspace.yaml`. `node_modules` is never read.

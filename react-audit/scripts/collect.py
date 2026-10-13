@@ -48,6 +48,8 @@ SKIPPED_DIRECTORIES = {
 }
 MAX_FILES = 50_000
 MAX_FILE_BYTES = 2_000_000
+# Lockfiles of large monorepos run to tens of megabytes; they are read as data, never lexed.
+MAX_LOCKFILE_BYTES = 100_000_000
 MAX_CANDIDATES = 60
 MAX_EFFECTS_PER_FILE = 200
 MAX_TAGS_PER_FILE = 2_000
@@ -95,7 +97,7 @@ SERVER_PACKAGES = {
     "server-only", "next/headers", "pg", "postgres", "mysql2", "mysql", "@prisma/client", "mongodb", "mongoose",
     "better-sqlite3", "sqlite3", "ioredis", "redis", "@vercel/postgres", "@neondatabase/serverless", "knex",
     "drizzle-orm/node-postgres", "drizzle-orm/postgres-js", "drizzle-orm/mysql2", "drizzle-orm/better-sqlite3",
-    "@aws-sdk/client-s3", "nodemailer", "bcrypt", "argon2", "stripe", "firebase-admin", "@supabase/ssr",
+    "@aws-sdk/client-s3", "nodemailer", "bcrypt", "argon2", "stripe", "firebase-admin",
 }
 PUBLIC_ENVIRONMENT_PREFIXES = ("NEXT_PUBLIC_", "VITE_", "EXPO_PUBLIC_", "PUBLIC_", "REACT_APP_")
 ALWAYS_INLINED_ENVIRONMENT = {"NODE_ENV", "NEXT_RUNTIME"}
@@ -143,11 +145,12 @@ DIRECTIVE = re.compile(r"""(['"])([^'"\n]*)\1[ \t]*;?""")
 # Reading files
 
 
-def read_text(path: Path) -> str:
+def read_text(path: Path, limit: int = MAX_FILE_BYTES) -> str:
+    """A file's text without newline translation, so a lone carriage return never becomes a line; empty when too big."""
     try:
-        if path.stat().st_size > MAX_FILE_BYTES:
+        if path.stat().st_size > limit:
             return ""
-        return path.read_text(encoding="utf-8", errors="replace")
+        return path.read_bytes().decode("utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -257,8 +260,13 @@ def location(path: str) -> str:
     return f"`{path}`" if any(character.isspace() for character in path) else path
 
 
+def one_line(value: str | None) -> str | None:
+    return " ".join(value.split()) if value else value
+
+
 def cite(path: str, line: int, quote: str | None = None, note: str | None = None) -> str:
     """A citation the audit protocol verifies against the cited line."""
+    quote, note = one_line(quote), one_line(note)
     text = f"{location(path)}:{line}"
     if quote:
         text += f" — `{quote}`"
@@ -270,6 +278,7 @@ def cite(path: str, line: int, quote: str | None = None, note: str | None = None
 
 
 def cite_file(path: str, quote: str | None = None, note: str | None = None) -> str:
+    quote, note = one_line(quote), one_line(note)
     text = location(path)
     if quote:
         text += f" — `{quote}`"
@@ -318,9 +327,22 @@ def quotable(haystack: str, *candidates: str) -> str | None:
 # Lexing: comments, strings, templates, regular expressions, and JSX
 
 
+def line_end(text: str, index: int) -> int:
+    """Where the line starting at or before `index` ends: the next newline or carriage return."""
+    ends = [position for position in (text.find("\n", index), text.find("\r", index)) if position != -1]
+    return min(ends) if ends else len(text)
+
+
 def mask_comments_only(text: str) -> tuple[str, list[tuple[int, int]]]:
     """Blank comments only, as a fallback when the full lexer loses its place."""
+    masked, _, comments = mask_fallback(text)
+    return masked, comments
+
+
+def mask_fallback(text: str) -> tuple[str, str, list[tuple[int, int]]]:
+    """Blank comments, and in a second view also string and template contents, without tracking JSX or regular expressions."""
     output = list(text)
+    strings = list(text)
     comments: list[tuple[int, int]] = []
     index = 0
     quote = ""
@@ -328,10 +350,15 @@ def mask_comments_only(text: str) -> tuple[str, list[tuple[int, int]]]:
         character = text[index]
         if quote:
             if character == "\\":
+                for position in (index, index + 1):
+                    if position < len(text) and strings[position] not in "\r\n":
+                        strings[position] = " "
                 index += 2
                 continue
-            if character == quote or (character == "\n" and quote != "`"):
+            if character == quote or (character in "\r\n" and quote != "`"):
                 quote = ""
+            elif character not in "\r\n":
+                strings[index] = " "
             index += 1
             continue
         if character in "'\"`":
@@ -339,8 +366,7 @@ def mask_comments_only(text: str) -> tuple[str, list[tuple[int, int]]]:
             index += 1
             continue
         if text.startswith("//", index):
-            end = text.find("\n", index)
-            end = len(text) if end == -1 else end
+            end = line_end(text, index)
         elif text.startswith("/*", index):
             end = text.find("*/", index + 2)
             end = len(text) if end == -1 else end + 2
@@ -349,10 +375,10 @@ def mask_comments_only(text: str) -> tuple[str, list[tuple[int, int]]]:
             continue
         comments.append((index, end))
         for position in range(index, end):
-            if output[position] != "\n":
-                output[position] = " "
+            if output[position] not in "\r\n":
+                output[position] = strings[position] = " "
         index = end
-    return "".join(output), comments
+    return "".join(output), "".join(strings), comments
 
 
 def type_arguments_end(text: str, index: int) -> int | None:
@@ -441,6 +467,7 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
     markup_start = re.compile(r"<(?:[A-Za-z]|>)")
     tag_name = re.compile(r"[A-Za-z_$][\w$-]*(?:[.:][A-Za-z_$][\w$-]*)*")
     generic_parameters = re.compile(r"<(?:const\s+)?[A-Za-z_$][\w$]*\s*(?:[,=]|\bextends\b)")
+    generic_arrow = re.compile(r"<([A-Za-z_$][\w$]*)>\s*\(")
     length = len(text)
     while index < length:
         character = text[index]
@@ -452,7 +479,7 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
             if character == "\\" and not attribute:
                 index += 2
                 continue
-            if character == context or (character == "\n" and not attribute):
+            if character == context or (character in "\r\n" and not attribute):
                 contexts.pop()
                 if contexts[-1]["kind"] in ("code", "expression"):
                     contexts[-1].update(operand=False, token="literal", statement=False)
@@ -519,17 +546,19 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
             index += 1
             continue
         if text.startswith("//", index):
-            end = text.find("\n", index)
-            end = length if end == -1 else end
+            end = line_end(text, index)
         elif text.startswith("/*", index):
             end = text.find("*/", index + 2)
             end = length if end == -1 else end + 2
         else:
+            generic = generic_arrow.match(text, index) if allow_markup and character == "<" else None
+            if generic and f"</{generic.group(1)}>" in text[index:]:
+                generic = None  # an element such as <Trans>(optional)</Trans>, not type parameters
             if character in "'\"":
                 contexts.append({"kind": character})
             elif character == "`":
                 contexts.append({"kind": "template"})
-            elif allow_markup and character == "<" and frame["operand"] and markup_start.match(text, index) and not generic_parameters.match(text, index):
+            elif allow_markup and character == "<" and frame["operand"] and markup_start.match(text, index) and not generic_parameters.match(text, index) and not generic:
                 has_markup = True
                 contexts.append({"kind": "markup", "depth": 0})
                 contexts.append({"kind": "tag", "depth": 1, "name": True})
@@ -550,7 +579,7 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
                     elif text[index] == "/" and not character_class:
                         index += 1
                         break
-                    elif text[index] == "\n":
+                    elif text[index] in "\r\n":
                         break
                     index += 1
                 while index < length and text[index].isalpha():
@@ -609,6 +638,8 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
                         frame["depth"] = depth - 1
                     block = bool(frame["brackets"]) and frame["brackets"].pop() in {"block", "declaration"}
                     frame.update(operand=block, statement=block)
+                elif character == "!" and not frame["operand"] and not text.startswith("!=", index):
+                    pass  # a TypeScript non-null assertion such as `total!`: a value still ends here, so `/` is division
                 elif not character.isspace():
                     frame.update(operand=character not in "].", statement=character == ";")
                     if text.startswith(("++", "--", "=>"), index):
@@ -623,16 +654,16 @@ def lex(text: str, allow_markup: bool) -> tuple[str, str, list[tuple[int, int]],
             continue
         comments.append((index, end))
         for position in range(index, end):
-            if output[position] != "\n":
+            if output[position] not in "\r\n":
                 output[position] = " "
         index = end
     if invalid or len(contexts) != 1:
         # An uncertain context must not hide the rest of the file: fall back to masking comments only.
-        masked, comments = mask_comments_only(text)
-        return masked, masked, comments, has_markup
+        masked, code, comments = mask_fallback(text)
+        return masked, code, comments, has_markup
     comment_masked = "".join(output)
     code = "".join(
-        character if code_positions[position] or character == "\n" else " "
+        character if code_positions[position] or character in "\r\n" else " "
         for position, character in enumerate(comment_masked)
     )
     return comment_masked, code, comments, has_markup
@@ -647,35 +678,65 @@ def mask(text: str, path: str = "file.tsx") -> str:
 # Manifests, workspaces, and versions
 
 
-def workspaces(root: Path) -> list[Path]:
+def workspace_patterns(root: Path) -> tuple[list[str], bool]:
+    """Workspace globs from package.json and pnpm-workspace.yaml, and whether any workspace list is declared."""
     package = load_jsonc(root / "package.json")
     patterns = package.get("workspaces")
     if isinstance(patterns, dict):
         patterns = patterns.get("packages")
-    globs: list[str] = [item for item in patterns if isinstance(item, str)] if isinstance(patterns, list) else []
-    pnpm = root / "pnpm-workspace.yaml"
-    if pnpm.is_file():
-        block = re.search(r"(?ms)^packages:\s*\n((?:[ \t]+-.*\n?|[ \t]*#.*\n?|[ \t]*\n)*)", read_text(pnpm))
-        if block:
-            globs += re.findall(r"^[ \t]+-\s*['\"]?([^'\"\n#]+?)['\"]?\s*(?:#.*)?$", block.group(1), flags=re.M)
-    found: list[Path] = []
-    resolved_root = root.resolve()
-    for pattern in globs:
-        pattern = pattern.strip()
-        # Only relative patterns inside the repository: no empty, negated, absolute, or parent patterns.
-        if not pattern or pattern.startswith(("!", "/", "~")) or ".." in pattern.split("/") or re.match(r"^[A-Za-z]:", pattern):
+    declared = isinstance(patterns, list)
+    globs = [item for item in patterns if isinstance(item, str)] if isinstance(patterns, list) else []
+    text = read_text(root / "pnpm-workspace.yaml").replace("\r\n", "\n")
+    key = re.search(r"(?m)^packages[ \t]*:[ \t]*(.*)$", text)
+    if key:
+        declared = True
+        inline = key.group(1).split("#", 1)[0].strip()
+        if inline.startswith("["):
+            closing = text.find("]", key.start(1))
+            items = text[key.start(1) + text[key.start(1):].index("[") + 1:closing if closing != -1 else len(text)].split(",")
+        else:
+            items = []
+            for line in text[key.end():].split("\n")[1:]:
+                item = re.match(r"[ \t]*-[ \t]*(.*)$", line)
+                if item:
+                    items.append(item.group(1))
+                elif line.strip() and not line.strip().startswith("#"):
+                    break
+        globs += [item.split("#", 1)[0].strip().strip("'\"") for item in items]
+    return [item.strip() for item in globs if item.strip()], declared
+
+
+def workspaces(root: Path, files: list[str] | None = None) -> list[Path]:
+    """Workspace package folders, matched against the folders Git lists, so node_modules is never walked."""
+    if files is None:
+        files = listed_files(root)
+    candidates = sorted({
+        folder(path) for path in files
+        if Path(path).name == "package.json" and folder(path)
+        and not NON_SOURCE_PATTERN.search(folder(path) + "/") and "node_modules" not in path.split("/")
+    })
+    patterns, declared = workspace_patterns(root)
+    if not declared:
+        # No workspace list: every nested package counts, as in a repository with frontend/ and backend/ folders.
+        return [(root / candidate).resolve() for candidate in candidates]
+    include: list[str] = []
+    exclude: list[str] = []
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        pattern = pattern[1:].strip() if negated else pattern
+        while pattern.startswith("./"):
+            pattern = pattern[2:]
+        pattern = pattern.rstrip("/")
+        # Only relative patterns inside the repository: no empty, absolute, or parent patterns.
+        if not pattern or pattern.startswith(("/", "~")) or ".." in pattern.split("/") or re.match(r"^[A-Za-z]:", pattern):
             continue
-        try:
-            matches = sorted(root.glob(pattern.rstrip("/")))
-        except (ValueError, NotImplementedError, OSError):
-            continue
-        for directory in matches:
-            resolved = directory.resolve()
-            if resolved != resolved_root and resolved_root not in resolved.parents:
-                continue
-            if (directory / "package.json").is_file() and "node_modules" not in directory.parts:
-                found.append(resolved)
-    return sorted(set(found))
+        (exclude if negated else include).append(glob_regex(pattern))
+    found = [
+        candidate for candidate in candidates
+        if any(re.fullmatch(expression, candidate) for expression in include)
+        and not any(re.fullmatch(expression, candidate) for expression in exclude)
+    ]
+    return [(root / candidate).resolve() for candidate in found]
 
 
 DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
@@ -717,9 +778,9 @@ class Package:
 class Manifests:
     """Every package.json in the root and its workspaces."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, files: list[str] | None = None) -> None:
         self.root = root
-        directories = [root.resolve(), *workspaces(root)]
+        directories = [root.resolve(), *workspaces(root, files)]
         self.packages = [Package(root, directory) for directory in directories if (directory / "package.json").is_file()]
 
     def owner(self, path: str) -> Package | None:
@@ -745,8 +806,12 @@ def lowest_version(spec: str) -> tuple[int, int] | None:
     for alternative in spec.split("||"):
         match = VERSION_NUMBER.search(alternative)
         if match:
-            minor = match.group(2)
-            found.append((int(match.group(1)), int(minor) if minor and minor.isdigit() else 0))
+            major = int(match.group(1))
+            minor = int(match.group(2)) if match.group(2) and match.group(2).isdigit() else 0
+            if re.match(r"\s*<", alternative):
+                # Only an upper bound: the range admits the previous major, so gate as that.
+                major, minor = (major, 0) if minor else (max(major - 1, 0), 0)
+            found.append((major, minor))
     return min(found) if found else None
 
 
@@ -774,10 +839,16 @@ class Lockfiles:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.npm = load_jsonc(root / "package-lock.json") if (root / "package-lock.json").is_file() else {}
-        self.pnpm = read_text(root / "pnpm-lock.yaml") if (root / "pnpm-lock.yaml").is_file() else ""
-        self.yarn = read_text(root / "yarn.lock") if (root / "yarn.lock").is_file() else ""
-        self.bun = read_text(root / "bun.lock") if (root / "bun.lock").is_file() else ""
+        self.npm: dict[str, Any] = {}
+        if (root / "package-lock.json").is_file():
+            try:
+                value = json.loads(read_text(root / "package-lock.json", MAX_LOCKFILE_BYTES) or "{}")
+            except json.JSONDecodeError:
+                value = {}
+            self.npm = value if isinstance(value, dict) else {}
+        self.pnpm = read_text(root / "pnpm-lock.yaml", MAX_LOCKFILE_BYTES).replace("\r\n", "\n")
+        self.yarn = read_text(root / "yarn.lock", MAX_LOCKFILE_BYTES).replace("\r\n", "\n")
+        self.bun = read_text(root / "bun.lock", MAX_LOCKFILE_BYTES)
 
     def resolve(self, package: Package, name: str, spec: str) -> str | None:
         packages = self.npm.get("packages")
@@ -872,6 +943,9 @@ def framework_facts(root: Path, package: Package, files: set[str]) -> dict[str, 
         facts["frameworks"].append("react-native")
     if package.declares("gatsby"):
         facts["frameworks"].append("gatsby")
+    if package.declares("waku"):
+        facts["frameworks"].append("waku")
+        facts["wakuPagesDirectory"] = f"{base}src/pages"
     if package.declares("react-scripts"):
         facts["frameworks"].append("create-react-app")
     if package.declares("@tanstack/react-start"):
@@ -891,6 +965,40 @@ COMPILER_CONFIG_PATTERN = re.compile(
     r"|react-router\.config\.[cm]?[jt]s|metro\.config\.[cm]?js)$"
 )
 COMPILER_REFERENCE = re.compile(r"""babel-plugin-react-compiler|\breactCompilerPreset\b|\breactCompiler\b""")
+
+
+def conditional_context(code: str, index: int) -> bool:
+    """Whether a configuration key sits inside a conditional object or a function body, whose value depends on runtime."""
+    depth = 0
+    position = index - 1
+    while position >= 0:
+        character = code[position]
+        if character in ")]}":
+            depth += 1
+        elif character in "([{":
+            if depth:
+                depth -= 1
+            elif character != "[":
+                before = code[max(0, position - 40):position].rstrip()
+                if character == "{" and re.search(r"(?:\?|&&|\|\||=>|\)|\breturn|[)\]}]\s*:)$", before):
+                    return True
+                if character == "(" and re.search(r"(?:\?|&&|\|\||=>|\breturn)$", before):
+                    return True
+        position -= 1
+    return False
+
+
+def read_options(block: str, facts: dict[str, Any], where: str) -> None:
+    """Read `compilationMode`, `sources`, and `gating` from the start of a compiler options object."""
+    closing = matching(block, 0) if block.startswith("{") else -1
+    block = block[:closing + 1] if closing != -1 else block
+    mode = re.search(r"""\bcompilationMode\s*:\s*(['"])(\w+)\1""", block)
+    if mode:
+        facts["mode"] = mode.group(2)
+    elif re.search(r"\bcompilationMode\s*:", block):
+        facts["unread"].append(f"{where} sets compilationMode to a value the collector cannot read")
+    if re.search(r"\b(?:sources|gating)\s*:", block):
+        facts["scoped"] = True
 
 
 def compiler_facts(root: Path, package: Package, files: list[str], manifests: Manifests) -> dict[str, Any]:
@@ -921,7 +1029,7 @@ def compiler_facts(root: Path, package: Package, files: list[str], manifests: Ma
         lines = Lines(text)
         if path.endswith(("app.json",)):
             data = load_jsonc(root / path)
-            experiments = (data.get("expo") or {}).get("experiments") if isinstance(data.get("expo"), dict) else None
+            experiments = data["expo"].get("experiments") if isinstance(data.get("expo"), dict) else None
             if isinstance(experiments, dict) and isinstance(experiments.get("reactCompiler"), bool):
                 facts["enabled"] = experiments["reactCompiler"]
                 facts["evidence"].append(cite_file(path, quotable(text, '"reactCompiler": true', '"reactCompiler":true') or '"reactCompiler"'))
@@ -929,9 +1037,15 @@ def compiler_facts(root: Path, package: Package, files: list[str], manifests: Ma
         if path.endswith(".json") or Path(path).name.startswith(".babelrc") and not path.endswith(("js", "cjs")):
             data = load_jsonc(root / path)
             plugins = data.get("plugins") if isinstance(data.get("plugins"), list) else []
+            nested = json.dumps({key: data.get(key) for key in ("overrides", "env")})
+            if "react-compiler" in nested:
+                # The plugin is configured only for some files or environments, so it does not cover every component.
+                facts["enabled"] = True
+                facts["scoped"] = True
+                facts["evidence"].append(cite_file(path, "babel-plugin-react-compiler" if "babel-plugin-react-compiler" in text else "react-compiler"))
             for plugin in plugins:
                 name, options = (plugin[0], plugin[1] if len(plugin) > 1 else {}) if isinstance(plugin, list) and plugin else (plugin, {})
-                if name in ("babel-plugin-react-compiler", "react-compiler"):
+                if isinstance(name, str) and name in ("babel-plugin-react-compiler", "react-compiler"):
                     facts["enabled"] = True
                     facts["evidence"].append(cite_file(path, "babel-plugin-react-compiler" if "babel-plugin-react-compiler" in text else "react-compiler"))
                     if isinstance(options, dict):
@@ -939,14 +1053,21 @@ def compiler_facts(root: Path, package: Package, files: list[str], manifests: Ma
                         if "sources" in options or "gating" in options:
                             facts["scoped"] = True
             continue
+        source = Source(path if path.endswith(SOURCE_SUFFIXES) else path + ".js", text)
+        babel = Path(path).name.startswith(("babel.config", ".babelrc"))
+        if babel and re.search(r"\b(?:overrides|env|test|include|exclude|only|ignore)\s*:", content):
+            facts["scoped"] = True  # Babel applies the plugin to some files only
         for match in COMPILER_REFERENCE.finditer(content):
             line = lines.number(match.start())
             token = match.group(0)
             after = content[match.end():match.end() + 400]
+            if conditional_context(source.code, match.start()):
+                facts["unread"].append(f"{path}:{line} configures the compiler inside a condition or a function, which the collector does not evaluate")
+                continue
             if token == "reactCompiler":
-                value = re.match(r"""\s*:\s*(true|false|\{)""", after)
+                value = re.match(r"""\s*[:=]\s*(true|false|\{)""", after)
                 if not value:
-                    if re.match(r"\s*:", after):
+                    if re.match(r"\s*[:=](?!=)", after):
                         facts["unread"].append(f"{path}:{line} sets reactCompiler to a value the collector cannot read")
                     continue
                 if value.group(1) == "false":
@@ -955,24 +1076,24 @@ def compiler_facts(root: Path, package: Package, files: list[str], manifests: Ma
                 facts["enabled"] = True
                 facts["evidence"].append(cite(path, line, fragment(lines.line(line)) or "reactCompiler"))
                 if value.group(1) == "{":
-                    start = match.end() + after.index("{")
-                    block = content[start:start + 400]
-                    mode = re.search(r"""\bcompilationMode\s*:\s*(['"])(\w+)\1""", block)
-                    if mode:
-                        facts["mode"] = mode.group(2)
-                    if re.search(r"\b(?:sources|gating)\s*:", block):
-                        facts["scoped"] = True
+                    start_block = match.end() + after.index("{")
+                    read_options(content[start_block:start_block + 400], facts, f"{path}:{line}")
                 continue
             facts["enabled"] = True
             facts["evidence"].append(cite(path, line, token))
-            window = content[match.start():match.start() + 400]
-            mode = re.search(r"""\bcompilationMode\s*:\s*(['"])(\w+)\1""", window)
-            if mode:
-                facts["mode"] = mode.group(2)
-            elif re.search(r"""\bcompilationMode\s*:\s*[A-Za-z_$]""", window):
-                facts["unread"].append(f"{path}:{line} sets compilationMode to a value the collector cannot read")
-            if re.search(r"\b(?:sources|gating)\s*:", window):
-                facts["scoped"] = True
+            # Options follow the plugin name (`["babel-plugin-react-compiler", options]`) or fill the preset call.
+            options = re.match(r"""\s*['"]?\s*,\s*(\{|[A-Za-z_$][\w$]*)|\s*\(\s*(\{|[A-Za-z_$][\w$]*)""", after)
+            if options:
+                value = options.group(1) or options.group(2)
+                if value == "{":
+                    block_start = match.end() + options.end() - 1
+                    read_options(content[block_start:block_start + 400], facts, f"{path}:{line}")
+                else:
+                    declared = re.search(rf"""\b(?:const|let|var)\s+{re.escape(value)}\s*(?::[^=]+)?=\s*\{{""", content)
+                    if declared:
+                        read_options(content[declared.end() - 1:declared.end() + 400], facts, f"{path}:{line}")
+                    else:
+                        facts["unread"].append(f"{path}:{line} passes compiler options in `{value}`, which the collector cannot read")
     if facts["enabled"] is False and expo_default and not any("reactCompiler" in entry for entry in facts["evidence"]):
         # Expo SDK 54 and later enable the compiler in the default template; the app.json flag records it.
         facts["note"] = "Expo SDK 54 or later: the default template enables the compiler in app.json."
@@ -1016,6 +1137,16 @@ def glob_regex(pattern: str) -> str:
             index += 2
             continue
         character = pattern[index]
+        if character in "?*+@!" and pattern.startswith("(", index + 1):
+            closing = pattern.find(")", index + 2)
+            if closing != -1:
+                alternatives = "|".join(glob_regex(part) for part in pattern[index + 2:closing].split("|"))
+                if character == "!":
+                    output += f"(?:(?!(?:{alternatives})(?:/|$))[^/]*)"
+                else:
+                    output += f"(?:{alternatives})" + {"?": "?", "*": "*", "+": "+", "@": ""}[character]
+                index = closing + 1
+                continue
         if character == "*":
             output += "[^/]*"
         elif character == "?":
@@ -1270,6 +1401,9 @@ class FlatConfig:
         if call and matching(self.structure, start + call.end() - 1) == end - 1:
             callee = call.group(1)
             arguments_start = start + call.end()
+            owner = callee.split(".")[0]
+            if owner in self.compat and callee.endswith(".config"):
+                return self.compat_config(arguments_start, end - 1)
             if callee.endswith(".config") or callee in ("defineConfig", "tseslint.config"):
                 return self.elements(arguments_start, end - 1, depth)
             if callee == "globalIgnores":
@@ -1300,6 +1434,34 @@ class FlatConfig:
     def neutral(self, name: str) -> bool:
         source = self.bindings.get(name)
         return source is not None and bool(NEUTRAL_CONFIG_PACKAGE.match(source))
+
+    def compat_config(self, start: int, end: int) -> list[Layer]:
+        """`compat.config({ extends, rules })`: a legacy configuration object inside a flat one."""
+        start, end = self.strip_span(start, end)
+        if self.structure[start:start + 1] != "{":
+            self.unresolved.append(f"{self.path}: `compat.config` is given a value the collector cannot read")
+            return []
+        found: list[Layer] = []
+        rules = Layer(self.base)
+        for item_start, item_end in split_arguments(self.structure, start + 1, matching(self.structure, start)):
+            item_start, item_end = self.strip_span(item_start, item_end)
+            key = re.match(r"""(['"]?)([\w$-]+)\1\s*:\s*""", self.text(item_start, item_end))
+            if not key:
+                if self.text(item_start, item_end).startswith("..."):
+                    self.unresolved.append(f"{self.path}: `compat.config` spreads a value the collector cannot read")
+                continue
+            value_start = item_start + key.end()
+            if key.group(2) == "extends":
+                values = self.strings(value_start, item_end, 0)
+                if values is None:
+                    self.unresolved.append(f"{self.path}: the compat `extends` value cannot be read")
+                for value in values or []:
+                    found += legacy_extends(self.path, self.base, value, self.unresolved, self.presets)
+            elif key.group(2) == "rules":
+                rules.rules = self.rules_object(value_start, item_end, 0)
+            elif key.group(2) == "overrides":
+                self.unresolved.append(f"{self.path}: compat `overrides` scopes are not read")
+        return found + [rules]
 
     def compat_extends(self, start: int, end: int) -> list[Layer]:
         found = []
@@ -1345,6 +1507,10 @@ class FlatConfig:
                 spread = self.evaluate(item_start + 3, item_end, depth + 1)
                 if spread:
                     copied = spread[-1]
+                    # Layers before the copied object came from its own `extends`, which travel with the spread.
+                    before += [Layer(extended.base, extended.files, extended.ignores, dict(extended.rules)) for extended in spread[:-1]]
+                    for extended, original in zip(before[len(before) - len(spread) + 1:], spread[:-1]):
+                        extended.presets, extended.evidence, extended.keys = list(original.presets), list(original.evidence), set(original.keys)
                     for name in ("files", "ignores"):
                         if name in copied.keys:
                             setattr(layer, name, None if getattr(copied, name) is None else list(getattr(copied, name)))
@@ -1456,12 +1622,13 @@ def legacy_json_layers(path: str, base: str, config: dict[str, Any], unresolved:
                     if f'"{rule}"' in raw:
                         layer.evidence.append(cite_file(path, f'"{rule}"'))
         layers.append(layer)
-    for override in config.get("overrides") or []:
+    overrides = config.get("overrides")
+    for override in overrides if isinstance(overrides, list) else []:
         if isinstance(override, dict):
             patterns = override.get("files")
-            patterns = [patterns] if isinstance(patterns, str) else [item for item in patterns or [] if isinstance(item, str)]
+            patterns = [patterns] if isinstance(patterns, str) else [item for item in patterns if isinstance(item, str)] if isinstance(patterns, list) else []
             ignored = override.get("excludedFiles")
-            ignored = [ignored] if isinstance(ignored, str) else [item for item in ignored or [] if isinstance(item, str)]
+            ignored = [ignored] if isinstance(ignored, str) else [item for item in ignored if isinstance(item, str)] if isinstance(ignored, list) else []
             layers += legacy_json_layers(path, base, override, unresolved, presets, patterns or None, ignored or None, raw)
     return layers
 
@@ -1519,10 +1686,12 @@ def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str], p
     layers: list[Layer] = []
     if path.endswith((".js", ".cjs")) and re.search(r"\bmodule\s*\.\s*exports\s*=", content) and not re.search(r"\bmodule\s*\.\s*exports\s*=\s*\{", content):
         unresolved.append(f"{path} exports something other than an object literal, which the collector cannot read")
+    if path.endswith((".js", ".cjs")) and re.search(r"\.\.\.\s*[A-Za-z_$(]", content):
+        unresolved.append(f"{path} spreads a value, such as a required shared configuration, that the collector cannot read")
     for entry in legacy_extends_values(content, unresolved, path):
         layers += legacy_extends(path, base, entry, unresolved, presets)
     layer = Layer(base)
-    for match in re.finditer(r"""(['"]?)((?:react-hooks|react-compiler)/[\w-]+)\1\s*:\s*([^\n,}]+)""", content):
+    for match in re.finditer(r"""(['"]?)((?:react-hooks|react-compiler)/[\w-]+)\1[ \t]*:[ \t]*(?:\r?\n[ \t]*-[ \t]*)?([^\r\n,}]+)""", content):
         level = rule_level(match.group(3))
         if level:
             layer.rules[match.group(2)] = level
@@ -1542,6 +1711,7 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
         config = FlatConfig(path, read_text(root / path), presets)
         layers_by_config[path] = config.layers()
         unresolved += config.unresolved
+    roots: set[str] = set()
     for path in legacy:
         text = read_text(root / path)
         parsed: Any = None
@@ -1554,12 +1724,16 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
             legacy_json_layers(path, folder(path), parsed, unresolved, presets, raw=text) if isinstance(parsed, dict)
             else legacy_text_layers(path, folder(path), text, unresolved, presets)
         )
+        if (parsed.get("root") is True) if isinstance(parsed, dict) else re.search(r"""(?m)^[ \t]*['"]?root['"]?[ \t]*:[ \t]*true\b|[{,][ \t]*root[ \t]*:[ \t]*true\b""", mask_comments_only(text)[0]):
+            roots.add(path)
     for package in manifests.packages:
         if isinstance(package.data.get("eslintConfig"), dict):
             layers_by_config[package.manifest_path] = legacy_json_layers(
                 package.manifest_path, package.path, package.data["eslintConfig"], unresolved, presets, raw=package.raw
             )
             legacy.append(package.manifest_path)
+            if package.data["eslintConfig"].get("root") is True:
+                roots.add(package.manifest_path)
 
     def layers_for(sample: str) -> list[Layer]:
         """The nearest flat configuration, or else the cascade of legacy ones from the root down."""
@@ -1567,6 +1741,10 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
         if nearest:
             return layers_by_config[nearest[0]]
         cascade = sorted((path for path in legacy if not folder(path) or sample.startswith(folder(path) + "/")), key=lambda path: len(folder(path)))
+        # A configuration with `root: true` stops ESLint from reading the ones above it.
+        stops = [index for index, path in enumerate(cascade) if path in roots]
+        if stops:
+            cascade = cascade[stops[-1]:]
         return [layer for path in cascade for layer in layers_by_config[path]]
 
     effective: set[str] | None = None
@@ -1762,7 +1940,7 @@ def tsconfig_paths(config: Path, root: Path, depth: int = 0) -> tuple[list[tuple
             parent_aliases, parent_defined = tsconfig_paths(target, root, depth + 1)
             if parent_defined:
                 aliases, defined = parent_aliases, True
-    options = data.get("compilerOptions") or {}
+    options = data.get("compilerOptions") if isinstance(data.get("compilerOptions"), dict) else {}
     base_url = (config.parent / options["baseUrl"]).resolve() if isinstance(options.get("baseUrl"), str) else None
     paths = options.get("paths")
     if isinstance(paths, dict):
@@ -1779,6 +1957,22 @@ def tsconfig_paths(config: Path, root: Path, depth: int = 0) -> tuple[list[tuple
                             continue
                 aliases.append((pattern, resolved))
     return aliases, defined
+
+
+SERVER_CONDITIONS = {"react-server", "node", "workerd", "edge-light", "deno", "bun"}
+
+
+def browser_entries(conditions: dict[str, Any]) -> list[str]:
+    """The entry files a browser bundle resolves from conditional exports, in condition order; server conditions are skipped."""
+    found: list[str] = []
+    for condition, value in conditions.items():
+        if condition in SERVER_CONDITIONS:
+            continue
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict):
+            found += browser_entries(value)
+    return found
 
 
 class Resolver:
@@ -1806,7 +2000,7 @@ class Resolver:
                     if isinstance(main, str):
                         entries.append(main)
                     elif isinstance(main, dict):
-                        entries += [value for value in main.values() if isinstance(value, str)]
+                        entries += browser_entries(main)
                 self.packages[name] = (package.path, entries)
 
     def first(self, base: str) -> str | None:
@@ -1948,31 +2142,30 @@ def directives(source: Source) -> list[tuple[str, int]]:
         index = after
 
 
-MISPLACED_DIRECTIVE = re.compile(r"""(?m)^[ \t]*(['"])use (client|server)\1[ \t]*;?[ \t]*$""")
+MISPLACED_DIRECTIVE = re.compile(r"""(?m)^[ \t]*(['"])use (client|server)\1[ \t]*;?[ \t]*\r?$""")
 
 
 def misplaced_directives(source: Source, prologue: list[tuple[str, int]]) -> list[tuple[str, int]]:
     """Module-level `'use client'` or `'use server'` strings that sit below code, where React ignores them."""
     found = []
     effective_lines = {line for _, line in prologue}
+    depth = 0
+    scanned = 0
     for match in MISPLACED_DIRECTIVE.finditer(source.comment_masked):
+        # The brace depth is carried forward from the previous match, so the scan stays linear.
+        for character in source.code[scanned:match.start()]:
+            if character == "{":
+                depth += 1
+            elif character == "}":
+                depth = max(0, depth - 1)
+        scanned = match.start()
         line = source.line_of(match.start(1))
         if line in effective_lines:
             continue
         # Inside a function body it is a Server Function directive, which is valid: only top-level ones are flagged.
-        if match.start() > 0 and brace_depth(source.code, match.start()) == 0:
+        if match.start() > 0 and depth == 0:
             found.append((f"use {match.group(2)}", line))
     return found
-
-
-def brace_depth(code: str, index: int) -> int:
-    depth = 0
-    for character in code[:index]:
-        if character == "{":
-            depth += 1
-        elif character == "}":
-            depth = max(0, depth - 1)
-    return depth
 
 
 def is_component_file(path: str, source: Source) -> bool:
@@ -2017,6 +2210,9 @@ def framework_required_default(path: str, frameworks: list[dict[str, Any]], rout
             return "an Expo Router route"
         if "gatsby" in facts["frameworks"] and re.search(r"(^|/)src/(?:pages|templates)/", path):
             return "a Gatsby page or template"
+        waku = facts.get("wakuPagesDirectory")
+        if waku and path.startswith(waku + "/"):
+            return "a Waku page or layout"
     return None
 
 
@@ -2122,11 +2318,14 @@ def effects_in(source: Source, setters: set[str]) -> list[dict[str, Any]]:
         # A concise body returns its value, which may be a cleanup such as an unsubscribe function.
         cleanup = bool(re.search(r"\breturn\b\s*(?![\s;}]|$)", own)) or code[body_start:body_start + 1] != "{"
         flags = []
-        calls = [(call.group(1), call.start()) for call in re.finditer(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*\(", own) if call.group(1) not in CALL_KEYWORDS]
+        calls = [(call.group(1), call.start()) for call in re.finditer(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:\?\.\s*)?\(", own) if call.group(1) not in CALL_KEYWORDS]
         free_calls = [name for name, position in calls if preceding(own, position) != "."]
         member_calls = [name for name, position in calls if preceding(own, position) == "."]
         setter_calls = [name for name in free_calls if name in setters]
         callbacks = [name for name in free_calls if re.fullmatch(r"on[A-Z]\w*", name) and name not in effect_events]
+        prop_callbacks = re.findall(r"\bprops\s*(?:\?\.|\.)\s*(on[A-Z]\w*)\s*(?:\?\.\s*)?\(", own)
+        callbacks += prop_callbacks
+        member_calls = [name for name in member_calls if name not in prop_callbacks]
         async_work = bool(ASYNC_WORK.search(body))
         subscribes = bool(SUBSCRIPTION.search(own))
         if (setter_calls or callbacks) and not async_work and not subscribes and set(free_calls) <= set(setter_calls) | set(callbacks) | effect_events | {"Boolean", "Number", "String"} and not set(member_calls) & SIDE_EFFECT_MEMBERS and not re.search(r"\b(?:window|document|localStorage|sessionStorage|navigator)\b", own):
@@ -2180,7 +2379,7 @@ def state_facts(source: Source) -> tuple[set[str], list[dict[str, Any]], list[di
     return setters, groups, from_props
 
 
-SUPPRESSION = re.compile(r"(?:eslint-disable(?:-next-line|-line)?|biome-ignore\s+lint/correctness/useExhaustiveDependencies)\b")
+SUPPRESSION = re.compile(r"^(?://|/\*)\s*\**\s*(?:eslint-disable(?:-next-line|-line)?|biome-ignore\s+lint/correctness/useExhaustiveDependencies)\b")
 
 
 def suppressions_in(source: Source) -> list[dict[str, Any]]:
@@ -2192,7 +2391,7 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
         comment_lines.setdefault(source.line_of(start), []).append((start, end))
     for start, end in source.comments:
         body = text[start:end]
-        directive = SUPPRESSION.search(body)
+        directive = SUPPRESSION.match(body)
         if not directive:
             continue
         if "biome-ignore" in directive.group(0):
@@ -2208,7 +2407,7 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
         if not justified:
             for neighbour in (line - 1, line):
                 for other_start, other_end in comment_lines.get(neighbour, []):
-                    if other_start != start and not SUPPRESSION.search(text[other_start:other_end]) and text[other_start:other_end].strip("/* \n\t"):
+                    if other_start != start and not SUPPRESSION.match(text[other_start:other_end]) and text[other_start:other_end].strip("/* \r\n\t"):
                         justified = True
         whole_file = bool(re.match(r"\s*/\*\s*eslint-disable\s", body))
         quote = "react-hooks/exhaustive-deps" if "react-hooks/exhaustive-deps" in source.lines.line(line) else fragment(source.lines.line(line).strip().lstrip("/* "), 50)
@@ -2220,6 +2419,7 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
 # Server and client boundaries
 
 
+DESTRUCTURED_ENVIRONMENT = re.compile(r"\{([^{}]*)\}\s*=\s*process\s*\.\s*env\b")
 ENVIRONMENT_READ = re.compile(r"\bprocess\s*\.\s*env\s*\.\s*([A-Z_][A-Z0-9_]*)|\bprocess\s*\.\s*env\s*\[\s*['\"]([A-Z_][A-Z0-9_]*)['\"]\s*\]")
 
 
@@ -2248,14 +2448,18 @@ def server_markers(source: Source, imports: list[Import], inlined: frozenset[str
         if specifier.startswith("node:") or bare in NODE_BUILTINS or specifier in SERVER_PACKAGES or specifier.split("/")[0] in ("pg", "mongoose", "mongodb"):
             line_text = source.lines.line(item.line)
             markers.append((item.line, quotable(line_text, f'"{specifier}"', f"'{specifier}'", specifier) or specifier, f"imports {specifier}"))
-    for match in ENVIRONMENT_READ.finditer(source.comment_masked):
-        name = match.group(1) or match.group(2)
-        if not source.code[match.start():match.start() + 1].strip():
-            continue
+    reads = [(match.start(), match.group(1) or match.group(2), match.start(1) if match.group(1) else match.start(2))
+             for match in ENVIRONMENT_READ.finditer(source.comment_masked)]
+    for match in DESTRUCTURED_ENVIRONMENT.finditer(source.comment_masked):
+        for name in re.finditer(r"(?:^|,)\s*([A-Z_][A-Z0-9_]*)\b", match.group(1)):
+            reads.append((match.start(), name.group(1), match.start(1) + name.start(1)))
+    for start, name, name_start in reads:
+        if not source.code[start:start + 1].strip():
+            continue  # inside a string or template text
         if name in ALWAYS_INLINED_ENVIRONMENT or name in inlined or name.startswith(PUBLIC_ENVIRONMENT_PREFIXES):
             continue
-        line = source.line_of(match.start())
-        markers.append((line, quotable(source.lines.line(line), match.group(0), name) or name, f"reads the private environment variable {name}"))
+        line = source.line_of(name_start)
+        markers.append((line, name, f"reads the private environment variable {name}"))
     return sorted(set(markers))
 
 
@@ -2367,7 +2571,7 @@ def degrade(result: dict[str, Any], large: list[str]) -> dict[str, Any]:
 def collect(root: Path, months: int = 6) -> dict[str, Any]:
     files = listed_files(root)
     file_set = set(files)
-    manifests = Manifests(root)
+    manifests = Manifests(root, files)
     lockfiles = Lockfiles(root)
     checks: dict[str, Any] = {}
     snapshot: dict[str, Any] = {}
