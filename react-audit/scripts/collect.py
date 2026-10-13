@@ -3205,6 +3205,8 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
         loaded_imports: dict[str, list[Import]] = dict(imports_by_file)
         unreadable: list[str] = []
         large_set = set(large)
+        # A source file that was never read may itself be a 'use client' entry, so the graph cannot be known complete.
+        uninspected = sorted(large)
 
         def module_source(path: str) -> Source | None:
             if path in loaded:
@@ -3288,6 +3290,8 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                 reasons.append(f"{len(unresolved_in_graph)} import(s) in the client graph could not be resolved, such as `{unresolved_in_graph[0][1]}` in {unresolved_in_graph[0][0]}")
             if unreadable:
                 reasons.append(f"{len(unreadable)} module(s) in the client graph could not be read, such as {unreadable[0]}")
+            if uninspected:
+                reasons.append(f"{len(uninspected)} source file(s) could not be read, so whether they are 'use client' entries is unknown, such as {uninspected[0]}")
             if reasons:
                 checks[SERVER_IMPORTS]["degradedReason"] = "; ".join(reasons)
                 checks[SERVER_IMPORTS]["evidenceTier"] = "supported"
@@ -3302,6 +3306,8 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                 reasons.append(f"{len(unresolved_in_graph)} import(s) in the client graph could not be resolved, such as `{unresolved_in_graph[0][1]}` in {unresolved_in_graph[0][0]}")
             if unreadable:
                 reasons.append(f"{len(unreadable)} module(s) in the client graph could not be read, such as {unreadable[0]}")
+            if uninspected:
+                reasons.append(f"{len(uninspected)} source file(s) could not be read, so whether they are 'use client' entries is unknown, such as {uninspected[0]}")
             if reasons:
                 result["degradedReason"] = "; ".join(reasons)
                 result["evidenceTier"] = "supported"

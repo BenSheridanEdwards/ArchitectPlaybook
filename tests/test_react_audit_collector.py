@@ -1132,6 +1132,9 @@ class SecondReviewTests(CollectorTestCase):
         result = collector.collect(self.root)
         self.assertEqual(result["snapshot"]["unreadableFiles"], ["src/components/Leak.tsx"])
         self.assertIn("src/components/Leak.tsx", self.check(result, "no-silenced-exhaustive-deps")["degradedReason"])
+        boundary = self.check(result, "client-modules-import-no-server-code")
+        self.assertEqual(boundary["evidenceTier"], "supported", "an unread 'use client' entry leaves the graph incomplete")
+        self.assertIn("whether they are 'use client' entries is unknown, such as src/components/Leak.tsx", boundary["degradedReason"])
 
     def test_detection_notes_state_the_known_limits(self) -> None:
         notes = (ROOT / "react-audit" / "references" / "detection.md").read_text(encoding="utf-8")
