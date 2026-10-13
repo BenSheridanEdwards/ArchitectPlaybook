@@ -1001,7 +1001,67 @@ def read_options(block: str, facts: dict[str, Any], where: str) -> None:
         facts["scoped"] = True
 
 
-def compiler_facts(root: Path, package: Package, files: list[str], manifests: Manifests) -> dict[str, Any]:
+def statement_end(code: str, start: int) -> int:
+    """The end of the expression starting at `start`: the first `;`, or newline, at depth zero."""
+    depth = 0
+    for index in range(start, len(code)):
+        character = code[index]
+        if character in "([{":
+            depth += 1
+        elif character in ")]}":
+            if depth == 0:
+                return index
+            depth -= 1
+        elif depth == 0 and (character == ";" or (character in "\r\n" and code[start:index].strip())):
+            return index
+    return len(code)
+
+
+def exported_spans(code: str) -> list[tuple[int, int]] | None:
+    """The spans of a configuration file's exported value and the top-level variables it uses, or None without an export."""
+    export = re.search(r"\bexport\s+default\s+|\bmodule\s*\.\s*exports\s*=\s*", code)
+    if not export:
+        return None
+    spans = [(export.end(), statement_end(code, export.end()))]
+    variables = {
+        match.group(1): (match.end(), statement_end(code, match.end()))
+        for match in re.finditer(r"(?m)^[ \t]*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=(?!=)\s*", code)
+    }
+    seen: set[str] = set()
+    for _ in range(6):
+        added = False
+        for start, end in list(spans):
+            for name in re.findall(r"(?<![\w$.])([A-Za-z_$][\w$]*)", code[start:end].replace("...", "   ")):
+                if name in variables and name not in seen:
+                    seen.add(name)
+                    spans.append(variables[name])
+                    added = True
+        if not added:
+            break
+    return spans
+
+
+def enclosing_key(code: str, index: int) -> str | None:
+    """The object key whose value encloses `index`, such as `experimental` for `experimental: { reactCompiler: true }`."""
+    depth = 0
+    position = index - 1
+    while position >= 0:
+        character = code[position]
+        if character in ")]}":
+            depth += 1
+        elif character in "([{":
+            if depth:
+                depth -= 1
+            elif character == "{":
+                key = re.search(r"""['"]?([A-Za-z_$][\w$]*)['"]?\s*:\s*$""", code[max(0, position - 60):position])
+                return key.group(1) if key else None
+            else:
+                return None
+        position -= 1
+    return None
+
+
+def compiler_facts(root: Path, package: Package, files: list[str], manifests: Manifests, lockfiles: Lockfiles | None = None) -> dict[str, Any]:
     """Whether the React Compiler is on for a package's components, and in which mode.
 
     `enabled` is True only when a configuration file turns it on with a literal
@@ -1057,13 +1117,48 @@ def compiler_facts(root: Path, package: Package, files: list[str], manifests: Ma
         babel = Path(path).name.startswith(("babel.config", ".babelrc"))
         if babel and re.search(r"\b(?:overrides|env|test|include|exclude|only|ignore)\s*:", content):
             facts["scoped"] = True  # Babel applies the plugin to some files only
+        spans = exported_spans(source.code)
+        next_config = Path(path).name.startswith("next.config")
+        next_version = resolved_version(root, lockfiles, package, "next")[2] if next_config and lockfiles else None
+        # A plugin imported under a name counts where the exported configuration uses that name.
+        for imported in re.finditer(r"""\bimport\s+([A-Za-z_$][\w$]*)\s+from\s*['"]babel-plugin-react-compiler['"]|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"]babel-plugin-react-compiler['"]""", content):
+            name = imported.group(1) or imported.group(2)
+            for start, end in spans or []:
+                use = re.search(rf"(?<![\w$.]){re.escape(name)}(?![\w$])", source.code[start:end])
+                if use:
+                    use_line = lines.number(start + use.start())
+                    facts["enabled"] = True
+                    facts["evidence"].append(cite(path, use_line, name))
+                    break
         for match in COMPILER_REFERENCE.finditer(content):
             line = lines.number(match.start())
             token = match.group(0)
             after = content[match.end():match.end() + 400]
+            if re.match(r"[ \t]*(?:import|export\s+\{)", content[content.rfind("\n", 0, match.start()) + 1:match.start()]) or (
+                    token == "babel-plugin-react-compiler" and re.search(r"\bfrom\s*$|\brequire\s*\(\s*$", content[max(0, match.start() - 20):match.start() - 1])):
+                continue  # an import statement, not configuration
+            if token == "reactCompilerPreset" and not re.match(r"\s*\(", after):
+                continue  # named but never called
+            if spans is None:
+                facts["unread"].append(f"{path}:{line} has no export the collector can follow")
+                continue
+            if not any(start <= match.start() < end for start, end in spans):
+                continue  # in a value the exported configuration never uses
             if conditional_context(source.code, match.start()):
                 facts["unread"].append(f"{path}:{line} configures the compiler inside a condition or a function, which the collector does not evaluate")
                 continue
+            if token == "reactCompiler" and next_config:
+                # Next.js 16 reads the top-level key; Next.js 15 reads only experimental.reactCompiler.
+                nested = enclosing_key(source.code, match.start()) == "experimental"
+                if next_version is None:
+                    facts["unread"].append(f"{path}:{line} sets reactCompiler, but the Next.js version, which decides where it is read, is unknown")
+                    continue
+                if nested != (next_version < (16, 0)):
+                    facts["unread"].append(
+                        f"{path}:{line} sets {'experimental.' if nested else 'top-level '}reactCompiler, which Next.js "
+                        f"{next_version[0]} does not read"
+                    )
+                    continue
             if token == "reactCompiler":
                 value = re.match(r"""\s*[:=]\s*(true|false|\{)""", after)
                 if not value:
@@ -1199,38 +1294,52 @@ def rule_level(value: str) -> str | None:
 class PresetCatalog:
     """The react-hooks rules each known shared configuration enables, by the installed version.
 
-    eslint-plugin-react-hooks 7 puts the React Compiler rules in `recommended`;
-    6.1.1 had them only in `recommended-latest`; 5 and earlier enable the two
-    classic rules. eslint-config-next 16 spreads the 7.x `recommended`; 15 and
-    earlier extend the 5.x one. An unresolved version is read as the latest and
-    recorded, so the result can be degraded.
+    eslint-plugin-react-hooks 7 puts the React Compiler rules in `recommended`
+    and `recommended-latest`. In 6.1, `recommended` became a flat configuration
+    with the two classic rules, `recommended-legacy` the eslintrc one, and
+    `recommended-latest` gained the compiler rules; a 6.1 eslintrc that extends
+    `plugin:react-hooks/recommended` does not load, so it is unknown. 6.0 and
+    earlier enable the two classic rules in every preset. eslint-config-next 16
+    and eslint-config-expo 57 spread the 7.x `recommended` rules; earlier
+    versions spread or extend the 5.x ones. An unresolved version is read as the
+    latest and recorded, so the result can be degraded.
     """
 
     def __init__(self, versions: dict[str, tuple[int, int] | None]) -> None:
         self.versions = versions
         self.assumed: set[str] = set()
 
-    def major(self, package: str) -> int:
+    def version(self, package: str) -> tuple[int, int]:
         version = self.versions.get(package)
         if version is None:
             self.assumed.add(package)
-            return 99
-        return version[0]
+            return (99, 0)
+        return version
 
-    def hooks_preset(self, name: str) -> set[str]:
+    def major(self, package: str) -> int:
+        return self.version(package)[0]
+
+    def hooks_preset(self, name: str, legacy: bool = False) -> set[str] | None:
+        """The rules a react-hooks preset enables, or None when that preset does not load in this format and version."""
         name = name.split("/")[-1]
-        major = self.major("eslint-plugin-react-hooks")
+        version = self.version("eslint-plugin-react-hooks")
         full = set(REQUIRED_HOOK_RULES)
-        if major >= 7:
+        core = set(CORE_HOOK_RULES)
+        if version >= (7, 0):
             return full if name in ("recommended", "recommended-latest", "recommended-legacy") else set()
-        if major == 6:
+        if version >= (6, 1):
+            if legacy and name in ("recommended", "recommended-latest"):
+                return None
             if name in ("recommended-latest", "recommended-latest-legacy"):
                 return full
-            return set(CORE_HOOK_RULES) if name in ("recommended", "recommended-legacy") else set()
-        return set(CORE_HOOK_RULES) if name in ("recommended", "recommended-legacy", "recommended-latest") else set()
+            return core if name in ("recommended", "recommended-legacy") else set()
+        return core if name in ("recommended", "recommended-legacy", "recommended-latest") else set()
 
     def next_preset(self) -> set[str]:
         return set(REQUIRED_HOOK_RULES) if self.major("eslint-config-next") >= 16 else set(CORE_HOOK_RULES)
+
+    def expo_preset(self) -> set[str]:
+        return set(REQUIRED_HOOK_RULES) if self.major("eslint-config-expo") >= 57 else set(CORE_HOOK_RULES)
 
 
 def preset_layer(base: str, rules: set[str], label: str, evidence: str, plugin: str = "react-hooks") -> Layer:
@@ -1291,10 +1400,15 @@ class FlatConfig:
     configuration package or a helper function, is recorded as unresolved.
     """
 
-    def __init__(self, path: str, text: str, presets: PresetCatalog) -> None:
+    def __init__(self, path: str, text: str, presets: PresetCatalog, resolver: Resolver | None = None,
+                 root: Path | None = None, nesting: int = 0) -> None:
         self.path = path
         self.base = folder(path)
         self.presets = presets
+        self.resolver = resolver
+        self.root = root
+        self.nesting = nesting
+        self.imported: dict[str, str] = {}
         source = Source(path if path.endswith(SOURCE_SUFFIXES) else path + ".js", text)
         self.content = source.comment_masked
         # The code view, with string delimiters kept so a string value is still an expression.
@@ -1307,12 +1421,16 @@ class FlatConfig:
             clause = match.group("clause")
             for name in re.findall(r"(?:^|,)\s*([A-Za-z_$][\w$]*)\s*(?=,|$)", clause) + re.findall(r"\*\s*as\s+([A-Za-z_$][\w$]*)", clause):
                 self.bindings[name] = match.group("source")
+                self.imported[name] = "default"
             braced = re.search(r"\{([^}]*)\}", clause)
             for item in (braced.group(1).split(",") if braced else []):
                 if item.strip():
-                    self.bindings[item.split(" as ")[-1].strip()] = match.group("source")
+                    imported, _, local = item.partition(" as ")
+                    self.bindings[(local or imported).strip()] = match.group("source")
+                    self.imported[(local or imported).strip()] = imported.strip()
         for match in re.finditer(r"""\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*(['"])([^'"]+)\2\s*\)""", self.content):
             self.bindings[match.group(1)] = match.group(3)
+            self.imported[match.group(1)] = "default"
         self.variables: dict[str, tuple[int, int]] = {}
         for match in re.finditer(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=(?!=)\s*", self.structure):
             if match.group(1) not in self.bindings:
@@ -1365,7 +1483,33 @@ class FlatConfig:
         source = self.bindings.get(name, "")
         if source in ("eslint-config-next", "eslint-config-next/core-web-vitals"):
             return [preset_layer(self.base, self.presets.next_preset(), f"{source}", cite_file(self.path, expression))]
-        return None
+        if source in ("eslint-config-expo/flat", "eslint-config-expo/flat.js"):
+            return [preset_layer(self.base, self.presets.expo_preset(), "eslint-config-expo", cite_file(self.path, expression))]
+        return self.workspace_layers(name)
+
+    def workspace_layers(self, name: str) -> list[Layer] | None:
+        """Layers from a configuration imported from a file in the repository, such as a workspace `@repo/eslint-config`."""
+        source = self.bindings.get(name)
+        if not source or self.resolver is None or self.nesting >= 4:
+            return None
+        target = self.resolver.resolve(self.path, source)
+        if target is None or self.root is None:
+            return None
+        other = FlatConfig(target, read_text(self.root / target), self.presets, self.resolver, self.root, self.nesting + 1)
+        layers = other.export_layers(self.imported.get(name, "default"))
+        self.unresolved += other.unresolved
+        for layer in layers:
+            # Flat configuration globs are relative to the configuration ESLint loads, not to the shared file.
+            layer.base = self.base
+        return layers
+
+    def export_layers(self, name: str) -> list[Layer]:
+        if name == "default":
+            return self.layers()
+        if name in self.variables:
+            return self.evaluate(*self.variables[name], 0)
+        self.unresolved.append(f"{self.path} has no export `{name}` the collector can read")
+        return []
 
     def evaluate(self, start: int, end: int, depth: int) -> list[Layer]:
         start, end = self.strip_span(start, end)
@@ -1385,7 +1529,7 @@ class FlatConfig:
             value = literal.group(2)
             plugin, _, preset = value.rpartition("/")
             if plugin == "react-hooks":
-                return [preset_layer(self.base, self.presets.hooks_preset(preset), f"react-hooks:{preset}", cite_file(self.path, value))]
+                return [preset_layer(self.base, self.presets.hooks_preset(preset) or set(), f"react-hooks:{preset}", cite_file(self.path, value))]
             if plugin == "react-compiler":
                 return [preset_layer(self.base, {"react-compiler"}, "react-compiler", cite_file(self.path, value), "react-compiler")]
             return []
@@ -1394,7 +1538,7 @@ class FlatConfig:
             source = self.bindings.get(preset.group(1), "")
             name = preset.group(3) or preset.group(4)
             if source == "eslint-plugin-react-hooks":
-                return [preset_layer(self.base, self.presets.hooks_preset(name), f"react-hooks:{name}", cite_file(self.path, expression))]
+                return [preset_layer(self.base, self.presets.hooks_preset(name) or set(), f"react-hooks:{name}", cite_file(self.path, expression))]
             if source == "eslint-plugin-react-compiler":
                 return [preset_layer(self.base, {"react-compiler"}, "react-compiler", cite_file(self.path, expression), "react-compiler")]
         call = re.match(r"([A-Za-z_$][\w$.]*)\s*\(", self.structure[start:end])
@@ -1423,7 +1567,7 @@ class FlatConfig:
             if base in self.variables and not name.group(2):
                 variable_start, variable_end = self.variables[base]
                 return self.evaluate(variable_start, variable_end, depth + 1)
-            known = self.package_preset(base, expression)
+            known = self.package_preset(base, expression) if not name.group(2) else None
             if known is not None:
                 return known
             if self.neutral(base) or self.bindings.get(base) in ("eslint-plugin-react-hooks", "eslint-plugin-react-compiler"):
@@ -1551,7 +1695,7 @@ class FlatConfig:
         package = self.bindings.get(source.group(1), "")
         name = source.group(3) or source.group(4)
         if package == "eslint-plugin-react-hooks":
-            return preset_layer(self.base, self.presets.hooks_preset(name), "", "").rules
+            return preset_layer(self.base, self.presets.hooks_preset(name) or set(), "", "").rules
         if package == "eslint-plugin-react-compiler":
             return {"react-compiler/react-compiler": "error"}
         return None
@@ -1590,7 +1734,13 @@ class FlatConfig:
 def legacy_extends(path: str, base: str, value: str, unresolved: list[str], presets: PresetCatalog) -> list[Layer]:
     preset = re.fullmatch(r"plugin:react-hooks/([\w/-]+)", value)
     if preset:
-        return [preset_layer(base, presets.hooks_preset(preset.group(1)), f"react-hooks:{preset.group(1)}", cite_file(path, value))]
+        rules = presets.hooks_preset(preset.group(1), legacy=True)
+        if rules is None:
+            unresolved.append(f"{path} extends `{value}`, which eslint-plugin-react-hooks 6.1 and later ship as a flat configuration that an eslintrc file cannot load")
+            return []
+        return [preset_layer(base, rules, f"react-hooks:{preset.group(1)}", cite_file(path, value))]
+    if value in ("expo", "eslint-config-expo"):
+        return [preset_layer(base, presets.expo_preset(), "eslint-config-expo", cite_file(path, value))]
     if value == "plugin:react-compiler/recommended":
         return [preset_layer(base, {"react-compiler"}, "react-compiler", cite_file(path, value), "react-compiler")]
     if value in ("next", "next/core-web-vitals"):
@@ -1680,7 +1830,33 @@ def legacy_extends_values(content: str, unresolved: list[str] | None = None, pat
     return [item.strip().strip(",").strip().strip("'\"") for item in items if item.strip().strip(",").strip()]
 
 
-def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str], presets: PresetCatalog) -> list[Layer]:
+def override_scopes(content: str) -> list[list[str]] | None:
+    """The literal `files` lists of each override in a YAML or JavaScript legacy configuration, or None if one is unreadable."""
+    key = re.search(r"""\boverrides['"]?\s*:""", content)
+    if not key:
+        return []
+    rest = content[key.end():]
+    scopes: list[list[str]] = []
+    for match in re.finditer(r"""\bfiles['"]?[ \t]*:[ \t]*(.*)""", rest):
+        value = match.group(1).strip()
+        if value.startswith("["):
+            closing = rest.find("]", match.start(1))
+            items = re.findall(r"""(['"])([^'"]+)\1""", rest[match.start(1):closing])
+            if closing == -1 or not items:
+                return None
+            scopes.append([item for _, item in items])
+        elif value[:1] in ("'", '"'):
+            scopes.append([value[1:value.find(value[0], 1)]])
+        elif re.fullmatch(r"[^\s,{}\[\]'\"]+", value):
+            scopes.append([value])  # an unquoted YAML value
+        else:
+            return None
+    overrides = len(re.findall(r"(?m)^[ \t]*-[ \t]*files\b|\{\s*files\b", rest))
+    return scopes if scopes and len(scopes) >= overrides else None
+
+
+def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str], presets: PresetCatalog,
+                       samples: list[str] | None = None) -> list[Layer]:
     """YAML and JavaScript legacy configuration, read as text: shared configurations first, then rules."""
     content = mask_comments_only(text)[0] if path.endswith((".js", ".cjs")) else re.sub(r"(?m)(^|\s)#.*$", r"\1", text)
     layers: list[Layer] = []
@@ -1688,27 +1864,86 @@ def legacy_text_layers(path: str, base: str, text: str, unresolved: list[str], p
         unresolved.append(f"{path} exports something other than an object literal, which the collector cannot read")
     if path.endswith((".js", ".cjs")) and re.search(r"\.\.\.\s*[A-Za-z_$(]", content):
         unresolved.append(f"{path} spreads a value, such as a required shared configuration, that the collector cannot read")
-    for entry in legacy_extends_values(content, unresolved, path):
+    # Settings inside `overrides` apply only to their files, so they are not top-level settings.
+    key = re.search(r"""\boverrides['"]?\s*:\s*""", content)
+    overrides_start = key.start() if key else len(content)
+    overrides_end = len(content)
+    if key and content[key.end():key.end() + 1] == "[":
+        closing = matching(content, key.end())
+        overrides_end = closing if closing != -1 else len(content)
+    elif key and not path.endswith((".js", ".cjs")):
+        block_end = re.search(r"(?m)^\S", content[key.end():])
+        overrides_end = key.end() + block_end.start() if block_end else len(content)
+    top_level = content[:overrides_start] + re.sub(r"[^\r\n]", " ", content[overrides_start:overrides_end]) + content[overrides_end:]
+    for entry in legacy_extends_values(top_level, unresolved, path):
         layers += legacy_extends(path, base, entry, unresolved, presets)
     layer = Layer(base)
     for match in re.finditer(r"""(['"]?)((?:react-hooks|react-compiler)/[\w-]+)\1[ \t]*:[ \t]*(?:\r?\n[ \t]*-[ \t]*)?([^\r\n,}]+)""", content):
+        if overrides_start <= match.start() < overrides_end:
+            continue
         level = rule_level(match.group(3))
         if level:
             layer.rules[match.group(2)] = level
             layer.evidence.append(cite_file(path, match.group(2)))
+    overrides: list[Layer] = []
     if re.search(r"\boverrides\b", content):
-        unresolved.append(f"{path} has overrides whose file scopes the collector does not read in this format")
-    return layers + [layer]
+        javascript = javascript_overrides(path, base, content, unresolved, presets) if path.endswith((".js", ".cjs")) else None
+        if javascript is not None:
+            overrides = javascript
+        else:
+            scopes = override_scopes(content)
+            local = [sample[len(base) + 1:] if base else sample for sample in samples or [] if not base or sample.startswith(base + "/")]
+            if scopes is None:
+                unresolved.append(f"{path} has overrides whose file scopes the collector cannot read")
+            elif any(glob_matches(pattern, sample, True) for scope in scopes for pattern in scope for sample in local):
+                unresolved.append(f"{path} has overrides for component files, whose settings the collector does not read in this format")
+    return layers + [layer] + overrides
 
 
-def eslint_configuration(root: Path, files: list[str], manifests: Manifests, samples: list[str], presets: PresetCatalog) -> dict[str, Any]:
+def javascript_overrides(path: str, base: str, content: str, unresolved: list[str], presets: PresetCatalog) -> list[Layer] | None:
+    """The overrides of a JavaScript legacy configuration as scoped layers, or None when one cannot be read."""
+    key = re.search(r"""\boverrides['"]?\s*:\s*\[""", content)
+    if not key:
+        return None
+    closing = matching(content, key.end() - 1)
+    if closing == -1:
+        return None
+    layers: list[Layer] = []
+    for item_start, item_end in split_arguments(content, key.end(), closing):
+        item = content[item_start:item_end].strip()
+        if not item.startswith("{"):
+            return None
+        files = re.search(r"""\bfiles['"]?\s*:\s*(\[[^\]]*\]|(['"])[^'"]*\2)""", item)
+        if not files:
+            return None
+        patterns = [value for _, value in re.findall(r"""(['"])([^'"]+)\1""", files.group(1))]
+        if not patterns:
+            return None
+        if re.search(r"\.\.\.\s*[A-Za-z_$(]", item):
+            return None
+        for entry in legacy_extends_values(item, unresolved, path):
+            for layer in legacy_extends(path, base, entry, unresolved, presets):
+                layer.files, layer.match_base = patterns, True
+                layers.append(layer)
+        scoped = Layer(base, files=patterns, match_base=True)
+        for match in re.finditer(r"""(['"])((?:react-hooks|react-compiler)/[\w-]+)\1\s*:\s*([^\r\n,}]+)""", item):
+            level = rule_level(match.group(3))
+            if level:
+                scoped.rules[match.group(2)] = level
+                scoped.evidence.append(cite_file(path, match.group(2)))
+        layers.append(scoped)
+    return layers
+
+
+def eslint_configuration(root: Path, files: list[str], manifests: Manifests, samples: list[str], presets: PresetCatalog,
+                         resolver: Resolver | None = None) -> dict[str, Any]:
     """Decide which react-hooks rules apply to every sampled component file, reading configuration as text."""
     flat = [path for path in files if re.fullmatch(r"eslint\.config\.[cm]?[jt]s", Path(path).name)]
     legacy = [path for path in files if Path(path).name in ESLINT_CONFIG_NAMES and path not in flat]
     unresolved: list[str] = []
     layers_by_config: dict[str, list[Layer]] = {}
     for path in flat:
-        config = FlatConfig(path, read_text(root / path), presets)
+        config = FlatConfig(path, read_text(root / path), presets, resolver, root)
         layers_by_config[path] = config.layers()
         unresolved += config.unresolved
     roots: set[str] = set()
@@ -1722,7 +1957,7 @@ def eslint_configuration(root: Path, files: list[str], manifests: Manifests, sam
                 parsed = None
         layers_by_config[path] = (
             legacy_json_layers(path, folder(path), parsed, unresolved, presets, raw=text) if isinstance(parsed, dict)
-            else legacy_text_layers(path, folder(path), text, unresolved, presets)
+            else legacy_text_layers(path, folder(path), text, unresolved, presets, samples)
         )
         if (parsed.get("root") is True) if isinstance(parsed, dict) else re.search(r"""(?m)^[ \t]*['"]?root['"]?[ \t]*:[ \t]*true\b|[{,][ \t]*root[ \t]*:[ \t]*true\b""", mask_comments_only(text)[0]):
             roots.add(path)
@@ -1818,14 +2053,15 @@ def biome_rules(root: Path, files: list[str]) -> dict[str, Any] | None:
     return {"path": path, "enabled": enabled, "evidence": cite_file(path)}
 
 
-def hooks_lint_check(root: Path, files: list[str], manifests: Manifests, samples: list[str], lockfiles: Lockfiles) -> tuple[dict[str, Any], dict[str, Any]]:
+def hooks_lint_check(root: Path, files: list[str], manifests: Manifests, samples: list[str], lockfiles: Lockfiles,
+                     resolver: Resolver | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     versions: dict[str, tuple[int, int] | None] = {}
-    for name in ("eslint-plugin-react-hooks", "eslint-config-next"):
+    for name in ("eslint-plugin-react-hooks", "eslint-config-next", "eslint-config-expo"):
         declaring = manifests.declares(name)
         if declaring:
             versions[name] = resolved_version(root, lockfiles, declaring[0], name)[2]
     presets = PresetCatalog(versions)
-    facts = eslint_configuration(root, files, manifests, samples, presets)
+    facts = eslint_configuration(root, files, manifests, samples, presets, resolver)
     biome = biome_rules(root, files)
     oxlint = next((path for path in files if Path(path).name in (".oxlintrc.json", "oxlintrc.json", "oxlint.config.ts")), None)
     snapshot = {
@@ -1959,20 +2195,32 @@ def tsconfig_paths(config: Path, root: Path, depth: int = 0) -> tuple[list[tuple
     return aliases, defined
 
 
-SERVER_CONDITIONS = {"react-server", "node", "workerd", "edge-light", "deno", "bun"}
+# Conditions a browser bundle applies when it resolves a package's `exports`; `types` and server conditions never apply.
+BROWSER_CONDITIONS = {"browser", "import", "module", "default", "require", "development", "production"}
 
 
-def browser_entries(conditions: dict[str, Any]) -> list[str]:
-    """The entry files a browser bundle resolves from conditional exports, in condition order; server conditions are skipped."""
-    found: list[str] = []
-    for condition, value in conditions.items():
-        if condition in SERVER_CONDITIONS:
-            continue
-        if isinstance(value, str):
-            found.append(value)
-        elif isinstance(value, dict):
-            found += browser_entries(value)
-    return found
+def browser_target(value: Any) -> str | None:
+    """The file a browser bundle takes from an `exports` value: the first applicable condition, in object order."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return next((target for item in value if (target := browser_target(item))), None)
+    if isinstance(value, dict):
+        for condition, nested in value.items():
+            if condition in BROWSER_CONDITIONS:
+                target = browser_target(nested)
+                if target:
+                    return target
+    return None
+
+
+def export_map(exports: Any) -> dict[str, Any] | None:
+    """A package's `exports` as subpath to value, or None when it declares none."""
+    if exports is None:
+        return None
+    if isinstance(exports, dict) and any(isinstance(key, str) and key.startswith(".") for key in exports):
+        return {key: value for key, value in exports.items() if isinstance(key, str) and key.startswith(".")}
+    return {".": exports}
 
 
 class Resolver:
@@ -1987,21 +2235,15 @@ class Resolver:
                 if aliases:
                     self.scopes.append((package.path, aliases))
         self.scopes.sort(key=lambda scope: -len(scope[0]))
-        self.packages: dict[str, tuple[str, list[str]]] = {}
+        # name -> (folder, legacy entry fields, exports map or None)
+        self.packages: dict[str, tuple[str, list[str], dict[str, Any] | None]] = {}
         for package in packages:
             name = package.data.get("name")
             if isinstance(name, str) and name and package.path:
-                entries = [value for field in ("source", "types", "module", "main") if isinstance(value := package.data.get(field), str)]
-                exports = package.data.get("exports")
-                if isinstance(exports, str):
-                    entries.append(exports)
-                elif isinstance(exports, dict):
-                    main = exports.get(".", exports)
-                    if isinstance(main, str):
-                        entries.append(main)
-                    elif isinstance(main, dict):
-                        entries += browser_entries(main)
-                self.packages[name] = (package.path, entries)
+                browser = package.data.get("browser")
+                entries = [browser] if isinstance(browser, str) else []
+                entries += [value for field in ("module", "main", "source") if isinstance(value := package.data.get(field), str)]
+                self.packages[name] = (package.path, entries, export_map(package.data.get("exports")))
 
     def first(self, base: str) -> str | None:
         parts: list[str] = []
@@ -2021,21 +2263,45 @@ class Resolver:
             candidates += [bare + suffix for suffix in (".ts", ".tsx", ".mts", ".cts")]
         return next((candidate for candidate in candidates if candidate in self.files), None)
 
+    def entry(self, directory: str, entry: str) -> str | None:
+        entry = entry[2:] if entry.startswith("./") else entry
+        found = self.first(f"{directory}/{entry}")
+        if not found and entry.split("/")[0] in ("dist", "build", "lib", "out"):
+            found = self.first(f"{directory}/src/{'/'.join(entry.split('/')[1:])}")
+        return found
+
+    def workspace_package(self, specifier: str) -> str | None:
+        """The workspace package name a specifier imports, if any."""
+        return next((name for name in self.packages if specifier == name or specifier.startswith(name + "/")), None)
+
     def package(self, specifier: str) -> str | None:
-        for name, (directory, entries) in self.packages.items():
-            if specifier == name:
-                for entry in entries:
-                    entry = entry[2:] if entry.startswith("./") else entry
-                    found = self.first(f"{directory}/{entry}")
-                    if not found and entry.split("/")[0] in ("dist", "build", "lib", "out"):
-                        found = self.first(f"{directory}/src/{'/'.join(entry.split('/')[1:])}")
-                    if found:
-                        return found
-                return self.first(f"{directory}/src/index") or self.first(f"{directory}/index")
-            if specifier.startswith(name + "/"):
-                rest = specifier[len(name) + 1:]
-                return self.first(f"{directory}/src/{rest}") or self.first(f"{directory}/{rest}")
-        return None
+        name = self.workspace_package(specifier)
+        if name is None:
+            return None
+        directory, entries, exports = self.packages[name]
+        subpath = "." if specifier == name else "./" + specifier[len(name) + 1:]
+        if exports is not None:
+            # With `exports`, only exported subpaths resolve, through the conditions a browser bundle applies.
+            value = exports.get(subpath)
+            if value is None:
+                for pattern, candidate in exports.items():
+                    if pattern.count("*") == 1:
+                        prefix, _, suffix = pattern.partition("*")
+                        if subpath.startswith(prefix) and subpath.endswith(suffix) and len(subpath) >= len(prefix) + len(suffix):
+                            middle = subpath[len(prefix):len(subpath) - len(suffix) if suffix else None]
+                            target = browser_target(candidate)
+                            return self.entry(directory, target.replace("*", middle)) if target else None
+                return None
+            target = browser_target(value)
+            return self.entry(directory, target) if target else None
+        if subpath == ".":
+            for entry in entries:
+                found = self.entry(directory, entry)
+                if found:
+                    return found
+            return self.first(f"{directory}/src/index") or self.first(f"{directory}/index")
+        rest = subpath[2:]
+        return self.first(f"{directory}/src/{rest}") or self.first(f"{directory}/{rest}")
 
     def resolve(self, importer: str, specifier: str) -> str | None:
         if specifier.startswith("."):
@@ -2061,7 +2327,7 @@ class Resolver:
 
     def looks_local(self, specifier: str) -> bool:
         """Whether an unresolved specifier probably names a repository file rather than a package."""
-        return specifier.startswith((".", "@/", "~/", "#")) or any(
+        return specifier.startswith((".", "@/", "~/", "#")) or self.workspace_package(specifier) is not None or any(
             "*" in pattern and specifier.startswith(pattern.partition("*")[0]) for _, aliases in self.scopes for pattern, _ in aliases
         )
 
@@ -2243,7 +2509,7 @@ LAZY_IMPORT = re.compile(r"""\b(?:React\s*\.\s*)?(?:lazy|dynamic)\s*\(\s*(?:asyn
 
 EFFECT_CALL = re.compile(r"(?<![\w$.])(?:React\s*\.\s*)?(use(?:Layout|Insertion)?Effect)\s*\(")
 STATE_CALL = re.compile(
-    r"\b(?:const|let)\s*\[\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)\s*\]\s*=\s*(?:React\s*\.\s*)?useState\s*(?:<[^()]*?>)?\s*\("
+    r"\b(?:const|let)\s*\[\s*([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*)\s*)?\]\s*=\s*(?:React\s*\.\s*)?useState\s*(?:<[^()]*?>)?\s*\("
 )
 NESTED_FUNCTION = re.compile(r"=>\s*\{|\bfunction\b[^{(]*\([^)]*\)\s*\{")
 SUBSCRIPTION = re.compile(
@@ -2362,14 +2628,18 @@ def state_facts(source: Source) -> tuple[set[str], list[dict[str, Any]], list[di
         for name in re.findall(r"(?:^|,)\s*([A-Za-z_$][\w$]*)", match.group(1)):
             parameters.add(name)
     for match in STATE_CALL.finditer(code):
-        setters.add(match.group(2))
+        if match.group(2):
+            setters.add(match.group(2))
         opening = match.end() - 1
         closing = source.close(opening)
         argument = " ".join(source.text[opening + 1:closing].split()) if closing != -1 else ""
         line = source.line_of(match.start())
         if argument in ("true", "false"):
             booleans.append((match.group(1), line))
-        if re.fullmatch(r"props\.[A-Za-z_$][\w$]*", argument) or (argument in parameters and argument):
+        # A prop, or a member read from one, such as `props.user.name` or `user.name` with `user` destructured.
+        root_name = re.match(r"[A-Za-z_$][\w$]*", argument)
+        if re.fullmatch(r"props(?:\??\.[A-Za-z_$][\w$]*)+", argument) or (
+                root_name and root_name.group(0) in parameters and re.fullmatch(r"[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*", argument)):
             from_props.append({"path": source.path, "line": line, "state": match.group(1), "initialisedFrom": argument})
     for match in re.finditer(r"\b(?:const|let)\s*\[\s*[A-Za-z_$][\w$]*\s*,\s*([A-Za-z_$][\w$]*)\s*\]\s*=\s*(?:React\s*\.\s*)?useReducer\b", code):
         setters.add(match.group(1))
@@ -2377,6 +2647,12 @@ def state_facts(source: Source) -> tuple[set[str], list[dict[str, Any]], list[di
     if len(booleans) >= 3:
         groups.append({"path": source.path, "line": booleans[0][1], "booleans": [name for name, _ in booleans][:8]})
     return setters, groups, from_props
+
+
+def specific(reason: str) -> bool:
+    """Whether a comment gives a reason: at least three words once markers such as TODO and FIXME are removed."""
+    words = re.sub(r"(?i)\b(?:todo|fixme|xxx|hack|note)\b[:(\w)]*", " ", reason.strip("/* \r\n\t"))
+    return len(re.findall(r"[A-Za-z]{2,}", words)) >= 3
 
 
 SUPPRESSION = re.compile(r"^(?://|/\*)\s*\**\s*(?:eslint-disable(?:-next-line|-line)?|biome-ignore\s+lint/correctness/useExhaustiveDependencies)\b")
@@ -2397,17 +2673,18 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
         if "biome-ignore" in directive.group(0):
             explanation = body[directive.end():].strip(" */\n\t")
             reason = explanation.lstrip(":").strip()
-            justified = bool(reason) and reason != "<explanation>"
+            justified = reason != "<explanation>" and specific(reason)
         else:
             if "react-hooks/exhaustive-deps" not in body:
                 continue  # a disable without rule names is a blanket disable, which /linting-audit owns
             # ESLint's own form puts the reason after ` -- `; a separate comment on the line above or the same line also counts.
-            justified = bool(re.search(r"\s--\s*\S", body))
+            description = re.search(r"\s--\s*(.*)", body, re.S)
+            justified = bool(description) and specific(description.group(1))
         line = source.line_of(start)
         if not justified:
             for neighbour in (line - 1, line):
                 for other_start, other_end in comment_lines.get(neighbour, []):
-                    if other_start != start and not SUPPRESSION.match(text[other_start:other_end]) and text[other_start:other_end].strip("/* \r\n\t"):
+                    if other_start != start and not SUPPRESSION.match(text[other_start:other_end]) and specific(text[other_start:other_end]):
                         justified = True
         whole_file = bool(re.match(r"\s*/\*\s*eslint-disable\s", body))
         quote = "react-hooks/exhaustive-deps" if "react-hooks/exhaustive-deps" in source.lines.line(line) else fragment(source.lines.line(line).strip().lstrip("/* "), 50)
@@ -2419,6 +2696,7 @@ def suppressions_in(source: Source) -> list[dict[str, Any]]:
 # Server and client boundaries
 
 
+FUNCTION_OPT_OUT = re.compile(r"""\{(\s*)(['"])use no (memo|forget)\2""")
 DESTRUCTURED_ENVIRONMENT = re.compile(r"\{([^{}]*)\}\s*=\s*process\s*\.\s*env\b")
 ENVIRONMENT_READ = re.compile(r"\bprocess\s*\.\s*env\s*\.\s*([A-Z_][A-Z0-9_]*)|\bprocess\s*\.\s*env\s*\[\s*['\"]([A-Z_][A-Z0-9_]*)['\"]\s*\]")
 
@@ -2463,25 +2741,8 @@ def server_markers(source: Source, imports: list[Import], inlined: frozenset[str
     return sorted(set(markers))
 
 
-def client_graph(entries: list[str], edges: dict[str, list[tuple[str, Import]]], server_modules: set[str]) -> dict[str, tuple[str, Import] | None]:
-    """Every module a client entry pulls into the browser bundle, with the import that first reached it.
-
-    Traversal stops at `'use server'` modules: importing a Server Function from a client module is allowed.
-    """
-    reached: dict[str, tuple[str, Import] | None] = {entry: None for entry in entries}
-    queue = deque(entries)
-    while queue:
-        current = queue.popleft()
-        for target, item in edges.get(current, []):
-            if target in reached or target in server_modules:
-                continue
-            reached[target] = (current, item)
-            queue.append(target)
-    return reached
-
-
 JSX_OPENING = re.compile(r"<([A-Z][\w$]*(?:\.[A-Z][\w$]*)?)(?=[\s/>])")
-SERIALISABLE_CONSTRUCTORS = {"Date", "Map", "Set", "Array", "FormData", "Uint8Array", "Int8Array", "Uint16Array", "Int16Array",
+SERIALISABLE_CONSTRUCTORS = {"Date", "Map", "Set", "Array", "Uint8Array", "Int8Array", "Uint16Array", "Int16Array",
                              "Uint32Array", "Int32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
                              "ArrayBuffer", "Promise", "String", "Number", "Boolean"}
 
@@ -2610,7 +2871,7 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
             version = lowest_version(resolved) if resolved else None
         facts = framework_facts(root, package, file_set)
         frameworks.append(facts)
-        compiler = compiler_facts(root, package, files, manifests)
+        compiler = compiler_facts(root, package, files, manifests, lockfiles)
         compilers.append(compiler)
         packages_facts.append({
             "package": package.manifest_path,
@@ -2764,7 +3025,7 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
         for key in sorted(by_package):
             if by_package[key] and len(chosen) < LINT_SAMPLE_SIZE:
                 chosen.append(by_package[key].pop(0))
-    checks[HOOKS_LINT], snapshot["hooksLint"] = hooks_lint_check(root, files, manifests, chosen, lockfiles)
+    checks[HOOKS_LINT], snapshot["hooksLint"] = hooks_lint_check(root, files, manifests, chosen, lockfiles, resolver)
 
     # Layer 1: a maintained toolchain.
     create_react_app = [package for package in manifests.packages if package.declares("react-scripts")]
@@ -2814,16 +3075,24 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
             "judgement": "consider",
         }, large)
 
-    # Layer 2: whether effect dependencies are stable matters only without the compiler.
-    opted_out = sorted(path for path, prologue in prologues.items() if any(name == "use no memo" for name, _ in prologue))
-    if opted_out:
-        snapshot["compilerOptOuts"] = opted_out[:20]
-    if compilers and all(item["everywhere"] for item in compilers) and not opted_out:
-        checks[STABLE] = not_applicable(
-            "The React Compiler is on for every React package ("
-            + "; ".join(item["evidence"][0] if item["evidence"] else item["package"] for item in compilers[:3])
-            + "), so it memoizes the objects and functions effects depend on."
-        )
+    # Layer 2: the compiler is context for judging effect dependencies, never an applicability gate. React keeps
+    # useMemo and useCallback as the escape hatch for effect dependencies, and the compiler skips what it cannot compile.
+    opt_outs = []
+    for path, source in sources.items():
+        for name, line in prologues.get(path, []):
+            if name in ("use no memo", "use no forget"):
+                opt_outs.append(cite(path, line, name))
+        for match in FUNCTION_OPT_OUT.finditer(source.comment_masked):
+            if source.code[match.start():match.start() + 1] == "{":
+                opt_outs.append(cite(path, source.line_of(match.start(2)), f"use no {match.group(3)}"))
+    if opt_outs:
+        snapshot["compilerOptOuts"] = opt_outs[:20]
+        for item in compilers:
+            owner_path = item["package"].rsplit("/", 1)[0] if "/" in item["package"] else ""
+            if any(not owner_path or entry.startswith(owner_path + "/") or entry.startswith("`" + owner_path + "/") for entry in opt_outs):
+                item["everywhere"] = False
+                item["optOuts"] = True
+        snapshot["compiler"] = [{key: value for key, value in item.items() if key != "unread" or value} for item in compilers]
 
     # Layer 4: ref as a prop.
     react19_forward_refs = [(path, line) for path, line in forward_refs if (item := package_of(path)) is not None and item["_version"] and item["_version"] >= (19, 0)]
@@ -2901,20 +3170,55 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
         for check in SERVER_COMPONENT_CHECKS:
             checks[check] = not_applicable(reason)
     else:
+        # The folder exclusions only choose candidates for the model; the boundary follows every runtime import,
+        # into tooling, fixture, or test folders too, and a module it cannot read degrades the result.
+        loaded: dict[str, Source] = dict(sources)
+        loaded_imports: dict[str, list[Import]] = dict(imports_by_file)
+        unreadable: list[str] = []
+        large_set = set(large)
+
+        def module_source(path: str) -> Source | None:
+            if path in loaded:
+                return loaded[path]
+            if path in large_set or not (root / path).is_file():
+                if path not in unreadable:
+                    unreadable.append(path)
+                return None
+            source = Source(path, read_text(root / path))
+            loaded[path] = source
+            loaded_imports[path] = imports_of(source)
+            prologues.setdefault(path, directives(source))
+            return source
+
         edges: dict[str, list[tuple[str, Import]]] = {}
         unresolved_local: list[tuple[str, str]] = []
-        for path, imports in imports_by_file.items():
-            for item in imports:
-                target = resolver.resolve(path, item.specifier)
-                if target and target in sources:
-                    edges.setdefault(path, []).append((target, item))
-                elif target is None and resolver.looks_local(item.specifier):
-                    unresolved_local.append((path, item.specifier))
-        reached = client_graph(client_entries, edges, server_modules)
+        reached: dict[str, tuple[str, Import] | None] = {entry: None for entry in client_entries}
+        queue = deque(client_entries)
+        while queue:
+            current = queue.popleft()
+            if module_source(current) is None:
+                continue
+            for item in loaded_imports.get(current, []):
+                target = resolver.resolve(current, item.specifier)
+                if target is None:
+                    if resolver.looks_local(item.specifier):
+                        unresolved_local.append((current, item.specifier))
+                    continue
+                if target == current:
+                    continue
+                edges.setdefault(current, []).append((target, item))
+                if target in reached:
+                    continue
+                if module_source(target) is not None and any(name == "use server" for name, _ in prologues.get(target, [])):
+                    continue  # a Server Function module: the client receives references, not its code
+                reached[target] = (current, item)
+                queue.append(target)
         inlined = frozenset(next_inlined_environment(root, files))
         leaks = []
         for module in sorted(reached, key=lambda path: (risk_of.get(path, len(risk_of)), path)):
-            markers = server_markers(sources[module], imports_by_file.get(module, []), inlined)
+            if module not in loaded:
+                continue
+            markers = server_markers(loaded[module], loaded_imports.get(module, []), inlined)
             if not markers:
                 continue
             chain = [module]
@@ -2923,7 +3227,7 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                 chain.append(step[0])
                 step = reached[step[0]]
             leaks.append((module, list(reversed(chain)), markers))
-        unresolved_in_graph = [(path, specifier) for path, specifier in unresolved_local if path in reached]
+        unresolved_in_graph = unresolved_local
         snapshot["directives"]["clientGraphModules"] = len(reached)
         snapshot["directives"]["serverOnlyReachedFromClient"] = [
             {"module": module, "chain": chain, "markers": [description for _, _, description in markers][:3]} for module, chain, markers in leaks[:10]
@@ -2938,7 +3242,7 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                     item = next((item for target, item in edges.get(importer, []) if target == module), None)
                     if item:
                         note = "in a 'use client' module" if importer in client_entries else "in a module a 'use client' file imports"
-                        evidence.append(cite(importer, item.line, quotable(sources[importer].lines.line(item.line), item.specifier) or item.specifier, note))
+                        evidence.append(cite(importer, item.line, quotable(loaded[importer].lines.line(item.line), item.specifier) or item.specifier, note))
                 line, quote, description = markers[0]
                 evidence.append(cite(module, line, quote, f"{description}, and it is bundled for the browser"))
             checks[SERVER_IMPORTS] = {
@@ -2949,8 +3253,13 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
                 + "Chain: " + " → ".join(leaks[0][1]) + ".",
                 "remediation": "Keep server code behind the boundary: move the server-only part into a module that imports `server-only`, call it from a Server Component or Server Function, and pass only plain data to the client component.",
             }
+            reasons = []
             if unresolved_in_graph:
-                checks[SERVER_IMPORTS]["degradedReason"] = f"{len(unresolved_in_graph)} import(s) in the client graph could not be resolved, such as `{unresolved_in_graph[0][1]}` in {unresolved_in_graph[0][0]}"
+                reasons.append(f"{len(unresolved_in_graph)} import(s) in the client graph could not be resolved, such as `{unresolved_in_graph[0][1]}` in {unresolved_in_graph[0][0]}")
+            if unreadable:
+                reasons.append(f"{len(unreadable)} module(s) in the client graph could not be read, such as {unreadable[0]}")
+            if reasons:
+                checks[SERVER_IMPORTS]["degradedReason"] = "; ".join(reasons)
                 checks[SERVER_IMPORTS]["evidenceTier"] = "supported"
         else:
             result = {
@@ -2961,8 +3270,8 @@ def collect(root: Path, months: int = 6) -> dict[str, Any]:
             reasons = []
             if unresolved_in_graph:
                 reasons.append(f"{len(unresolved_in_graph)} import(s) in the client graph could not be resolved, such as `{unresolved_in_graph[0][1]}` in {unresolved_in_graph[0][0]}")
-            if large:
-                reasons.append(f"{len(large)} source file(s) over 2 MB were not read")
+            if unreadable:
+                reasons.append(f"{len(unreadable)} module(s) in the client graph could not be read, such as {unreadable[0]}")
             if reasons:
                 result["degradedReason"] = "; ".join(reasons)
                 result["evidenceTier"] = "supported"

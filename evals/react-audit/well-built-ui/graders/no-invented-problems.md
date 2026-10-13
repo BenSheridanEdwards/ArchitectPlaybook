@@ -12,4 +12,6 @@ reached from client components only through 'use server' modules; the only funct
 component is the Server Function exportOrders; components take ref as a prop and export by name. Pass if the
 report raises no violation, lists at most two act-on findings, and every act-on or consider finding points to a
 real, specific weakness in the cited code rather than a preference, a memoization tip, or a misreading. Fail if
-it reports a problem the cited code does not have.
+it reports a problem the cited code does not have. The refund reservation is one conditional UPDATE and the
+total comes only from the order lines; data-layer details such as SQL are outside this audit and are not
+React findings.

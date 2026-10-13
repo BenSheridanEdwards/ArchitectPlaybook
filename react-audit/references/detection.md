@@ -45,17 +45,31 @@ which components to read first.
     copies `files`, `ignores`, `rules`, and its own `extends` in JavaScript
     spread order. Globs support brace lists and extglobs such as `*.ts?(x)`.
     `FlatCompat`'s `compat.extends(...)` and `compat.config({ extends, rules })`
-    are read as legacy configuration.
+    are read as legacy configuration. A configuration imported from a file in
+    the repository, such as a workspace `@repo/eslint-config` resolved through
+    its `exports`, or a relative module, is followed: its default or named
+    export is read, with globs relative to the configuration ESLint loads.
   - Presets it knows, by the installed version:
     - eslint-plugin-react-hooks 7 `recommended` and `recommended-latest`,
       written `reactHooks.configs.flat.recommended`, `"react-hooks/recommended"`
       in a flat `extends`, or `plugin:react-hooks/recommended` in a legacy
-      file: the two classic rules and the fourteen compiler rules below.
-    - Version 6: `recommended-latest` has the compiler rules; `recommended`
-      has only the classic two. Version 5 and earlier: the classic two.
+      file: the two classic rules and the fourteen compiler rules below. 7.0's
+      `recommended` also enables `component-hook-factories`; 7.1.0 dropped it,
+      and 7.1.1 restored it as a deprecated rule outside every preset. The
+      required rules are in every 7.x preset.
+    - Version 6.1: `recommended` became a flat configuration with the classic
+      two rules, `recommended-legacy` is the eslintrc form, and
+      `recommended-latest` has the compiler rules. A 6.1 eslintrc file that
+      extends `plugin:react-hooks/recommended` or `recommended-latest` does not
+      load those flat configurations, so the collector records it as
+      unreadable. Version 6.0 and earlier: every preset has the classic two,
+      including 6.0's `recommended-latest`.
     - eslint-config-next 16 spreads the 7.x `recommended`; 15 and earlier
-      extend the classic two. `react-app` and `airbnb/hooks` enable the
-      classic two.
+      extend the classic two. eslint-config-expo (`eslint-config-expo/flat`,
+      or `extends: 'expo'`) spreads the `recommended` rules of the plugin it
+      ships: 57 and later ship plugin 7, so the full set; 56 and earlier, and
+      the 10.x line for Expo SDK 54, ship plugin 5, so the classic two.
+      `react-app` and `airbnb/hooks` enable the classic two.
     - The retired `eslint-plugin-react-compiler` rule counts for the
       compiler rules.
   - The rules required for present: `rules-of-hooks`, `exhaustive-deps`,
@@ -66,7 +80,11 @@ which components to read first.
     `void-use-memo`, which is not required.
   - In the legacy cascade, a file with `root: true` stops ESLint from reading
     the configurations above it. A JavaScript legacy file that spreads a value,
-    such as a required shared configuration, is unreadable.
+    such as a required shared configuration, is unreadable. In YAML and
+    JavaScript legacy files, overrides whose literal `files` patterns match no
+    component file, such as stories or tests only, are ignored; an override
+    that matches one, or whose `files` cannot be read, makes the check not
+    evaluated.
   - Missing: no hook rule applies to the component files. Partial: a rule is
     off for some file, or the classic rules are on without the compiler
     rules.
@@ -95,7 +113,9 @@ which components to read first.
   `react-hooks/exhaustive-deps`, and Biome `useExhaustiveDependencies`
   ignores. A reason is ESLint's ` -- reason` form, Biome's text after the
   colon (not the `<explanation>` placeholder), or a separate comment on the
-  same line or the line above. A disable that names no rule is a blanket
+  same line or the line above, and it must be specific: at least three words
+  once markers such as `TODO` and `FIXME` are removed, so `// TODO` or a
+  heading such as `// Load users` does not count. A disable that names no rule is a blanket
   disable, which `/linting-audit` owns. Whether a suppression hides a bug is
   judged under "Effect dependencies are honest".
 
@@ -152,14 +172,17 @@ returns its value and is treated as having a cleanup.
   event-like logic belongs in it. Before 19.2, the fix is restructuring or a
   ref. Violation: a suppressed array whose effect reads a changing value and
   acts on it. Partial: a suppression that is defensible but unexplained.
-- **Effect dependencies are stable without the compiler.** Not applicable
-  when the collector found the React Compiler compiling every component (mode
-  `infer` or `all`, with no `sources` or `gating` filter and no
-  `'use no memo'` files). Otherwise look for objects, arrays, and functions
-  created during render and listed as dependencies. The fix is to create them
-  inside the effect, hoist them, or wrap them in `useMemo` or `useCallback`;
-  react.dev keeps these hooks as the escape hatch for exactly this case. Do
-  not recommend memoization for speed.
+- **Effect dependencies are stable.** Always applicable. Look for objects,
+  arrays, and functions created during render and listed as dependencies.
+  The React Compiler is context, not an exemption: read `compiler` in the
+  snapshot. Where it compiles a component, it memoizes those values by
+  analysis, so a render-created dependency there is usually fine. It does not
+  cover components it skips (bail-outs show only when the compiler lint rules
+  are on), files or functions with `'use no memo'` (listed in
+  `compilerOptOuts`), annotation mode, or code outside its `sources`, and
+  react.dev keeps `useMemo` and `useCallback` as the escape hatch for a value
+  an effect must not re-fire on. The fix is to create the value inside the
+  effect, hoist it, or memoize it. Do not recommend memoization for speed.
 - **Custom hooks encapsulate one concern.** Partial when hooks mix unrelated
   state, return different shapes for the same kind of value, or wrap
   lifecycles (`useMount`, `useUpdateEffect`) instead of naming the
@@ -169,6 +192,7 @@ returns its value and is treated as having a cleanup.
 ## Layer 3: state
 
 - **Each value has one source of truth.** Use `state.stateInitialisedFromProps`
+  (state seeded from a prop or a member of one, such as `useState(user.name)`)
   and the `only-sets-state` effects. Violation: a prop copied into state and
   re-synchronised by an effect, two state variables that hold the same
   value, or local state mirroring a store or the URL and drifting from it. A
@@ -235,8 +259,16 @@ returns its value and is treated as having a cleanup.
     without a public prefix (`NEXT_PUBLIC_`, `VITE_`, `EXPO_PUBLIC_`,
     `PUBLIC_`, `REACT_APP_`) other than `NODE_ENV` and names a Next.js
     configuration's `env` option inlines into the client bundle.
+  - The client graph follows every runtime import, including into tooling,
+    fixture, and test folders that candidate discovery skips. Workspace
+    packages resolve through their `exports` (exact and wildcard subpaths,
+    with the `browser`, `import`, `module`, `default`, and `require`
+    conditions in object order, never `types`, `react-server`, or `node`)
+    before `browser`, `module`, and `main`.
   - Violation cites the client import and the marker line. An import the
-    collector cannot resolve inside the client graph degrades the result.
+    collector cannot resolve inside the client graph, including a workspace
+    subpath the package does not export, or a module too large to read,
+    degrades the result.
   - Whether a secret or private field actually reaches the browser is
     `/security-audit`'s `server-only-data-stays-on-server`; this check rates
     the module graph.
@@ -245,9 +277,10 @@ returns its value and is treated as having a cleanup.
   to a component imported from a `'use client'` module whose value is an
   inline function, a function declared in the file that is not a Server
   Function, or a `new` instance of a class other than `Date`, `Map`, `Set`, a
-  typed array, `FormData`, or `Promise`. Serialisable values are primitives,
-  plain objects and arrays, `Date`, `Map`, `Set`, typed arrays, Promises,
-  JSX, and Server Functions. Also read what the page passes: a whole record
+  typed array, or `Promise`. Serialisable values are primitives, plain
+  objects and arrays, `Date`, `Map`, `Set`, typed arrays, Promises, JSX, and
+  Server Functions. `FormData` is not on react.dev's list for client
+  component props; it is allowed only as a Server Function argument. Also read what the page passes: a whole record
   from the database passed as a prop ships every field. Violation: a plain
   function or class instance crosses. Partial: an unshaped record crosses.
 - **'use client' marks small interactive leaves.** Read
@@ -297,18 +330,23 @@ collector reads.
   `backend/` folders.
 - Files are read without newline translation, so a lone carriage return
   never shifts a cited line. Lockfiles are read up to 100 MB.
-- React Compiler adoption is read from `next.config.*` (`reactCompiler`, top
-  level in Next.js 16, under `experimental` in 15), Babel configuration
+- React Compiler adoption is snapshot context, never an applicability gate.
+  It is read from the value a configuration file exports, and the top-level
+  variables that value uses; an object nothing exports, or a preset imported
+  but never called, does not count. In `next.config.*`, the top-level
+  `reactCompiler` counts only for Next.js 16 and later, and
+  `experimental.reactCompiler` only before 16; the other combination, or an
+  unknown Next.js version, is recorded as unknown. Babel configuration
   (`babel-plugin-react-compiler`), Vite configuration (the Babel plugin, or
   `reactCompilerPreset` with `@vitejs/plugin-react` 6), Expo's `app.json`,
   and other bundler configuration files. A value it cannot read, such as
   `reactCompiler: process.env.COMPILER === "1"`, options held in a variable
   it cannot find, or configuration inside a condition, a spread ternary, or a
-  function, makes adoption unknown, never off; the stable-dependencies check
-  then stays with the model. Mode `annotation` or `syntax`, a `sources` or
-  `gating` option, a Babel `overrides`, `env`, `test`, `include`, or `exclude`
-  scope, or any `'use no memo'` file means the compiler does not cover every
-  component.
+  function, makes adoption unknown, never off. Mode `annotation` or `syntax`,
+  a `sources` or `gating` option, a Babel `overrides`, `env`, `test`,
+  `include`, or `exclude` scope, or any file- or function-level
+  `'use no memo'` or `'use no forget'` directive means the compiler does not
+  cover every component (`everywhere` is false).
 - Versions come from `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, and
   `bun.lock` as text, then from the manifest range; pnpm `catalog:` ranges
   are read from `pnpm-workspace.yaml`. `node_modules` is never read.

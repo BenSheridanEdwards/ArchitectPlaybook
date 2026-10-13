@@ -202,10 +202,21 @@ export async function getOrder(id: string): Promise<Order | null> {
   return result.rows[0] ?? null;
 }
 
-export async function recordRefund(id: string, cents: number): Promise<void> {
-  await pool.query(
+export async function reserveRefund(id: string, cents: number, totalCents: number): Promise<boolean> {
+  const result = await pool.query(
     `UPDATE orders SET refunded_cents = refunded_cents + $2,
-       status = CASE WHEN refunded_cents + $2 >= total_cents THEN 'refunded' ELSE 'partially_refunded' END
+       status = CASE WHEN refunded_cents + $2 >= $3 THEN 'refunded' ELSE 'partially_refunded' END
+     WHERE id = $1 AND refunded_cents + $2 <= $3
+     RETURNING id`,
+    [id, cents, totalCents],
+  );
+  return result.rowCount === 1;
+}
+
+export async function releaseRefund(id: string, cents: number): Promise<void> {
+  await pool.query(
+    `UPDATE orders SET refunded_cents = refunded_cents - $2,
+       status = CASE WHEN refunded_cents - $2 = 0 THEN 'paid' ELSE 'partially_refunded' END
      WHERE id = $1`,
     [id, cents],
   );
@@ -217,8 +228,8 @@ import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
 
-export async function refundPayment(paymentIntentId: string, cents: number): Promise<string> {
-  const refund = await stripe.refunds.create({ payment_intent: paymentIntentId, amount: cents });
+export async function refundPayment(paymentIntentId: string, cents: number, idempotencyKey: string): Promise<string> {
+  const refund = await stripe.refunds.create({ payment_intent: paymentIntentId, amount: cents }, { idempotencyKey });
   return refund.id;
 }
 EOF
@@ -475,7 +486,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireStaff } from "@/lib/auth";
 import { orderTotal } from "@/lib/money";
-import { getOrder, recordRefund } from "@/lib/orders";
+import { getOrder, releaseRefund, reserveRefund } from "@/lib/orders";
 import { refundPayment } from "@/lib/payments";
 
 export type RefundState =
@@ -495,11 +506,16 @@ export async function refundOrder(_previous: RefundState, formData: FormData): P
   const order = await getOrder(parsed.data.orderId);
   if (!order) return { status: "error", message: "This order no longer exists." };
   const cents = Math.round(parsed.data.amount * 100);
-  if (cents > orderTotal(order.lines) - order.refundedCents) {
+  // The reservation and the limit check are one statement, so two refunds at once cannot exceed the total.
+  if (!(await reserveRefund(order.id, cents, orderTotal(order.lines)))) {
     return { status: "error", message: "That is more than the refundable amount." };
   }
-  await refundPayment(order.paymentIntentId, cents);
-  await recordRefund(order.id, cents);
+  try {
+    await refundPayment(order.paymentIntentId, cents, `refund-${order.id}-${order.refundedCents}-${cents}`);
+  } catch {
+    await releaseRefund(order.id, cents);
+    return { status: "error", message: "The payment provider declined the refund. Nothing was refunded." };
+  }
   revalidatePath(`/orders/${order.id}`);
   return { status: "refunded", cents };
 }

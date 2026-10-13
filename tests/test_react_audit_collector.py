@@ -244,7 +244,8 @@ class ApplicabilityTests(CollectorTestCase):
         named = self.check(result, "named-exports-for-components")
         self.assertEqual(named["status"], "partial")
         self.assertEqual(named["evidence"], ["components/Row.tsx:2 — `export default`"], "Expo Router routes are exempt")
-        self.assertEqual(self.check(result, "memoization-for-correctness")["applicability"], "not-applicable")
+        self.assertTrue(result["snapshot"]["compiler"][0]["everywhere"], "Expo's app.json flag turns the compiler on")
+        self.assertNotIn(CHECK + "memoization-for-correctness", result["checks"])
 
     def test_tooling_folders_count_only_at_a_package_root(self) -> None:
         self.package({"name": "web", "dependencies": {"react": "19.3.0"}})
@@ -392,47 +393,80 @@ class HooksLintTests(CollectorTestCase):
 
 
 class CompilerTests(CollectorTestCase):
-    def stable(self) -> dict[str, Any] | None:
+    """Compiler adoption is snapshot context for the model; it never makes the stable-dependencies check not applicable."""
+
+    def facts(self) -> dict[str, Any]:
         self.commit()
         result = self.collect()
-        return result["checks"].get(CHECK + "memoization-for-correctness"), result["snapshot"]["compiler"][0]
+        self.assertNotIn(CHECK + "memoization-for-correctness", result["checks"], "the check always stays with the model")
+        return result["snapshot"]["compiler"][0]
 
-    def test_next_react_compiler_true_makes_the_stable_check_not_applicable(self) -> None:
+    def test_next_16_top_level_react_compiler_is_on_everywhere_but_the_check_stays_applicable(self) -> None:
         self.next_app()
         self.write("next.config.ts", "import type { NextConfig } from 'next';\nconst nextConfig: NextConfig = {\n  reactCompiler: true,\n};\nexport default nextConfig;\n")
-        item, facts = self.stable()
-        self.assertEqual(item["applicability"], "not-applicable")
+        facts = self.facts()
         self.assertTrue(facts["everywhere"])
-        self.assertIn("next.config.ts:3", item["reason"])
+        self.assertEqual(facts["evidence"], ["next.config.ts:3 — `reactCompiler: true,`"])
 
-    def test_annotation_mode_unreadable_values_and_opt_outs_keep_it_applicable(self) -> None:
+    def test_the_next_version_decides_which_key_is_read(self) -> None:
+        self.next_app()
+        self.write("next.config.ts", "export default { experimental: { reactCompiler: true } };\n")
+        facts = self.facts()
+        self.assertIsNone(facts["enabled"], "Next.js 16 reads only the top-level key")
+        self.assertIn("does not read", facts["unread"][0])
+        self.package(dict(NEXT_PACKAGE, dependencies={"next": "15.5.4", "react": "19.1.0", "react-dom": "19.1.0"}))
+        self.assertTrue(self.facts()["everywhere"], "Next.js 15 reads experimental.reactCompiler")
+        self.write("next.config.ts", "const c = { reactCompiler: true };\nexport default c;\n")
+        facts = self.facts()
+        self.assertFalse(facts["everywhere"], "Next.js 15 ignores a top-level reactCompiler")
+        self.assertIsNone(facts["enabled"])
+
+    def test_an_unused_configuration_object_or_an_imported_but_unused_preset_is_not_enabled(self) -> None:
+        self.next_app()
+        self.write("next.config.ts", "const unused = { reactCompiler: true };\nexport default {};\n")
+        facts = self.facts()
+        self.assertFalse(facts["enabled"])
+        self.assertFalse(facts["everywhere"])
+        self.write("next.config.ts", "const base = { reactCompiler: true };\nconst nextConfig = { ...base };\nexport default withAnalyzer(nextConfig);\n")
+        self.assertTrue(self.facts()["enabled"], "a variable the exported value uses is followed")
+        (self.root / "next.config.ts").unlink()
+        self.write("vite.config.ts", "import react, { reactCompilerPreset } from '@vitejs/plugin-react';\nexport default { plugins: [react()] };\n")
+        self.assertFalse(self.facts()["enabled"])
+        self.write("vite.config.ts", "import ReactCompiler from 'babel-plugin-react-compiler';\nimport react from '@vitejs/plugin-react';\nexport default { plugins: [react({ babel: { plugins: [ReactCompiler] } })] };\n")
+        facts = self.facts()
+        self.assertTrue(facts["enabled"])
+        self.assertEqual(facts["evidence"], ["vite.config.ts:3 — `ReactCompiler`"])
+
+    def test_annotation_mode_unreadable_values_and_opt_outs_are_not_everywhere(self) -> None:
         self.next_app()
         self.write("next.config.ts", "export default { reactCompiler: { compilationMode: 'annotation' } };\n")
-        item, facts = self.stable()
-        self.assertIsNone(item)
+        facts = self.facts()
         self.assertEqual(facts["mode"], "annotation")
+        self.assertFalse(facts["everywhere"])
         self.write("next.config.ts", "export default { reactCompiler: process.env.COMPILER === '1' };\n")
-        item, facts = self.stable()
-        self.assertIsNone(item)
-        self.assertIsNone(facts["enabled"], "an unreadable value is unknown, never off")
-        self.write("next.config.ts", "export default { experimental: { reactCompiler: true } };\n")
+        self.assertIsNone(self.facts()["enabled"], "an unreadable value is unknown, never off")
+        self.write("next.config.ts", "export default { reactCompiler: true };\n")
         self.write("src/components/Legacy.tsx", "'use no memo';\nexport function Legacy() { return <p />; }\n")
-        item, _ = self.stable()
-        self.assertIsNone(item, "a 'use no memo' file is not compiled")
+        self.assertFalse(self.facts()["everywhere"], "a 'use no memo' file is not compiled")
+        (self.root / "src/components/Legacy.tsx").unlink()
+        self.write("src/components/Client.tsx", "export function Client() {\n  'use no forget';\n  return <p />;\n}\n")
+        self.commit()
+        result = self.collect()
+        self.assertFalse(result["snapshot"]["compiler"][0]["everywhere"], "a function-level opt-out is found")
+        self.assertEqual(result["snapshot"]["compilerOptOuts"], ["src/components/Client.tsx:2 — `use no forget`"])
+        for entry in result["snapshot"]["compilerOptOuts"]:
+            protocol.verify_evidence(self.root, entry)
 
     def test_babel_and_vite_configuration_are_read(self) -> None:
         self.package({"name": "web", "dependencies": {"react": "19.3.0"}, "devDependencies": {"vite": "8.0.0", "@vitejs/plugin-react": "6.0.0"}})
         self.write("src/App.tsx", "export function App() { return <p />; }\n")
         self.write("vite.config.ts", "import react, { reactCompilerPreset } from '@vitejs/plugin-react';\nimport babel from '@rolldown/plugin-babel';\nexport default { plugins: [react(), babel({ presets: [reactCompilerPreset()] })] };\n")
-        item, _ = self.stable()
-        self.assertEqual(item["applicability"], "not-applicable")
+        self.assertTrue(self.facts()["everywhere"])
         (self.root / "vite.config.ts").unlink()
         self.write("babel.config.json", '{"plugins": [["babel-plugin-react-compiler", {"compilationMode": "infer"}]]}\n')
-        item, _ = self.stable()
-        self.assertEqual(item["applicability"], "not-applicable")
+        self.assertTrue(self.facts()["everywhere"])
         self.write("babel.config.json", '{"plugins": [["babel-plugin-react-compiler", {"sources": ["src/new"]}]]}\n')
-        item, _ = self.stable()
-        self.assertIsNone(item)
+        self.assertFalse(self.facts()["everywhere"])
 
 
 class SuppressionTests(CollectorTestCase):
@@ -894,6 +928,155 @@ class ReviewRegressionTests(CollectorTestCase):
         self.assertEqual(len(found), 20_000)
 
 
+class PullRequestReviewTests(CollectorTestCase):
+    """Regression tests for the two independent reviews of the rewrite (#43)."""
+
+    def boundary(self) -> dict[str, Any]:
+        self.commit()
+        return self.check(self.collect(), "client-modules-import-no-server-code")
+
+    def test_imports_into_excluded_folders_are_followed_and_unreadable_modules_degrade(self) -> None:
+        self.next_app()
+        self.write("tools/secret.ts", "import 'server-only';\nexport const secret = () => process.env.SECRET;\n")
+        self.write("src/components/Leak.tsx", "'use client';\nimport { secret } from '../../tools/secret';\nexport function Leak() { return <p>{secret()}</p>; }\n")
+        item = self.boundary()
+        self.assertEqual(item["status"], "violation")
+        self.assertIn("tools/secret.ts:1 — `'server-only'` imports server-only, and it is bundled for the browser", item["evidence"])
+        (self.root / "tools/secret.ts").unlink()
+        self.write("src/fixtures/big.ts", "export const rows = [" + "1," * 1_100_000 + "];\n")
+        self.write("src/components/Leak.tsx", "'use client';\nimport { rows } from '../fixtures/big';\nexport function Leak() { return <p>{rows.length}</p>; }\n")
+        item = self.boundary()
+        self.assertEqual(item["status"], "present")
+        self.assertIn("could not be read, such as src/fixtures/big.ts", item["degradedReason"])
+
+    def test_workspace_exports_choose_the_browser_entry_and_resolve_subpaths(self) -> None:
+        self.package({"name": "root", "private": True, "workspaces": ["apps/*", "packages/*"]})
+        self.write("apps/web/package.json", '{"name":"web","dependencies":{"react":"19.1.0","next":"16.0.0","@acme/lib":"*"}}\n')
+        self.write("apps/web/app/page.tsx", 'import { C } from "./C";\nexport default function Page() { return <C />; }\n')
+        self.write("packages/lib/package.json", json.dumps({
+            "name": "@acme/lib", "main": "./src/server.ts",
+            "exports": {".": {"types": "./src/types.ts", "browser": "./src/browser.ts", "default": "./src/server.ts"},
+                        "./feature": "./src/implementation.ts", "./widgets/*": "./src/widgets/*.ts"},
+        }))
+        self.write("packages/lib/src/server.ts", "import { Pool } from 'pg';\nexport const load = () => new Pool();\n")
+        self.write("packages/lib/src/types.ts", "import 'server-only';\nexport type Row = { id: string };\n")
+        self.write("packages/lib/src/browser.ts", "export const load = () => fetch('/api');\n")
+        self.write("packages/lib/src/implementation.ts", "export const feature = () => process.env.PRIVATE_FEATURE_KEY;\n")
+        self.write("packages/lib/src/widgets/dial.ts", "export const dial = 1;\n")
+        self.write("apps/web/app/C.tsx", '"use client";\nimport { load } from "@acme/lib";\nimport { dial } from "@acme/lib/widgets/dial";\nexport function C() { return <button onClick={() => load()}>{dial}</button>; }\n')
+        item = self.boundary()
+        self.assertEqual(item["status"], "present", "the browser condition wins over main and default, and types is skipped")
+        self.assertNotIn("degradedReason", item)
+        self.write("apps/web/app/C.tsx", '"use client";\nimport { feature } from "@acme/lib/feature";\nexport function C() { return <p>{feature()}</p>; }\n')
+        item = self.boundary()
+        self.assertEqual(item["status"], "violation", "an exact exported subpath resolves")
+        self.write("apps/web/app/C.tsx", '"use client";\nimport { hidden } from "@acme/lib/internal";\nexport function C() { return <p>{hidden}</p>; }\n')
+        item = self.boundary()
+        self.assertEqual(item["status"], "present")
+        self.assertIn("@acme/lib/internal", item["degradedReason"], "a subpath the package does not export degrades the result")
+
+    def test_expo_configurations_are_known_presets(self) -> None:
+        self.package({"name": "app", "dependencies": {"expo": "~54.0.0", "react": "19.1.0", "react-native": "0.81.4"}, "devDependencies": {"eslint-config-expo": "~10.0.0"}})
+        self.write("components/Row.tsx", "import { Text } from 'react-native';\nexport function Row() { return <Text>Row</Text>; }\n")
+        self.write("eslint.config.js", "const { defineConfig } = require('eslint/config');\nconst expoConfig = require('eslint-config-expo/flat');\nmodule.exports = defineConfig([expoConfig, { ignores: ['dist/*'] }]);\n")
+        self.commit()
+        item = self.check(self.collect(), "react-hooks-plugin-enabled")
+        self.assertEqual(item["status"], "partial", "eslint-config-expo 10 ships react-hooks 5, the classic rules only")
+        self.package({"name": "app", "dependencies": {"expo": "~57.0.0", "react": "19.3.0", "react-native": "0.84.0"}, "devDependencies": {"eslint-config-expo": "~57.0.0"}})
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "present")
+        (self.root / "eslint.config.js").unlink()
+        self.write(".eslintrc.js", "module.exports = { extends: 'expo' };\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "present")
+
+    def test_a_workspace_shared_eslint_configuration_is_followed(self) -> None:
+        self.package({"name": "root", "private": True, "workspaces": ["apps/*", "packages/*"]})
+        self.write("apps/web/package.json", '{"name":"web","dependencies":{"react":"19.1.0","next":"16.0.0"},"devDependencies":{"@repo/eslint-config":"*","eslint-plugin-react-hooks":"7.1.1"}}\n')
+        self.write("apps/web/app/page.tsx", "export default function Page() { return <p />; }\n")
+        self.write("apps/web/components/Card.tsx", "export function Card() { return <p />; }\n")
+        self.write("apps/web/eslint.config.js", 'import { nextJsConfig } from "@repo/eslint-config/next-js";\nexport default nextJsConfig;\n')
+        self.write("packages/eslint-config/package.json", '{"name":"@repo/eslint-config","exports":{"./next-js":"./next.js"}}\n')
+        self.write("packages/eslint-config/next.js", (
+            'import pluginReactHooks from "eslint-plugin-react-hooks";\nimport js from "@eslint/js";\n'
+            'export const nextJsConfig = [\n  js.configs.recommended,\n'
+            '  { plugins: { "react-hooks": pluginReactHooks }, rules: { ...pluginReactHooks.configs.recommended.rules } },\n];\n'
+        ))
+        self.commit()
+        item = self.check(self.collect(), "react-hooks-plugin-enabled")
+        self.assertEqual(item["status"], "present")
+        skill = (ROOT / "react-audit" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("read that configuration chain yourself", skill)
+
+    def test_plugin_6_presets_by_format_and_minor_version(self) -> None:
+        self.next_app(None)
+        self.package(dict(NEXT_PACKAGE, devDependencies={"eslint-plugin-react-hooks": "6.1.1"}))
+        self.write(".eslintrc.json", '{"extends": ["plugin:react-hooks/recommended"]}\n')
+        self.commit()
+        item = self.check(self.collect(), "react-hooks-plugin-enabled")
+        self.assertEqual(item["evaluationState"], "not-evaluated", "a 6.1 eslintrc cannot load the flat recommended preset")
+        self.package(dict(NEXT_PACKAGE, devDependencies={"eslint-plugin-react-hooks": "6.0.0"}))
+        self.write(".eslintrc.json", "")
+        (self.root / ".eslintrc.json").unlink()
+        self.write("eslint.config.mjs", 'import reactHooks from "eslint-plugin-react-hooks";\nexport default [reactHooks.configs["recommended-latest"]];\n')
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "partial", "6.0's recommended-latest has no compiler rules")
+
+    def test_override_scopes_in_javascript_legacy_files(self) -> None:
+        self.next_app(None)
+        self.package(dict(NEXT_PACKAGE, devDependencies={"eslint-plugin-react-hooks": "7.1.1"}))
+        self.write(".eslintrc.cjs", "module.exports = {\n  extends: ['plugin:react-hooks/recommended'],\n  overrides: [{ files: ['**/*.stories.tsx'], rules: { 'react-hooks/rules-of-hooks': 'off' } }],\n};\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "present")
+        self.write(".eslintrc.cjs", "module.exports = {\n  extends: ['plugin:react-hooks/recommended'],\n  overrides: [{ files: ['*.tsx'], rules: { 'react-hooks/rules-of-hooks': 'off' } }],\n};\n")
+        self.commit()
+        item = self.check(self.collect(), "react-hooks-plugin-enabled")
+        self.assertEqual(item["status"], "partial", "an override for component files is read, and it turns a rule off")
+        self.assertIn("rules-of-hooks", item["gap"])
+        self.write(".eslintrc.cjs", "module.exports = {\n  extends: ['plugin:react-hooks/recommended'],\n  overrides: [{ files: sharedFiles, rules: {} }],\n};\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["status"], "present", "required rules are on; the unread override only degrades")
+        self.write(".eslintrc.cjs", "module.exports = {\n  overrides: [{ files: sharedFiles, extends: ['plugin:react-hooks/recommended'] }],\n};\n")
+        self.commit()
+        self.assertEqual(self.check(self.collect(), "react-hooks-plugin-enabled")["evaluationState"], "not-evaluated")
+
+    def test_form_data_member_reads_and_specific_reasons(self) -> None:
+        self.next_app()
+        self.write("src/components/Upload.tsx", "'use client';\nexport function Upload(props: { data: FormData }) { return <p />; }\n")
+        self.write("src/app/upload/page.tsx", "import { Upload } from '@/components/Upload';\nexport default function Page() {\n  return <Upload data={new FormData()} />;\n}\n")
+        self.write("src/components/UserCard.tsx", (
+            "import { forwardRef, useEffect, useState } from 'react';\n"
+            "export const UserCard = forwardRef(({ user }: { user: { name: string } }, ref) => {\n"
+            "  const [name, setName] = useState(user.name);\n"
+            "  // TODO\n"
+            "  // eslint-disable-next-line react-hooks/exhaustive-deps\n"
+            "  useEffect(() => setName(user.name), []);\n"
+            "  return <p>{name}</p>;\n"
+            "});\n"
+            "export function Badge(props: { user: { name: string } }) {\n"
+            "  const [label] = useState(props.user.name);\n"
+            "  // Load users\n"
+            "  // eslint-disable-next-line react-hooks/exhaustive-deps -- TODO\n"
+            "  return <p>{label}</p>;\n"
+            "}\n"
+        ))
+        self.commit()
+        result = self.collect()
+        candidates = result["snapshot"]["directives"]["nonSerialisablePropCandidates"]
+        self.assertEqual([(item["prop"], item["value"]) for item in candidates], [("data", "an instance of `FormData`")])
+        copied = {item["initialisedFrom"] for item in result["snapshot"]["state"]["stateInitialisedFromProps"]}
+        self.assertEqual(copied, {"user.name", "props.user.name"})
+        suppressions = self.check(result, "no-silenced-exhaustive-deps")
+        self.assertEqual(suppressions["status"], "partial")
+        self.assertEqual(len(suppressions["evidence"]), 2, "TODO markers and two-word headings are not reasons")
+
+    def test_the_well_built_fixture_keeps_one_order_total_and_reserves_refunds_atomically(self) -> None:
+        script = (ROOT / "evals" / "react-audit" / "well-built-ui" / "fixture.sh").read_text(encoding="utf-8")
+        self.assertNotIn("total_cents", script)
+        self.assertIn("WHERE id = $1 AND refunded_cents + $2 <= $3", script)
+        self.assertIn("{ idempotencyKey }", script)
+
+
 class EvaluationFixtureTests(unittest.TestCase):
     """The collector decides every tool check the evaluation graders expect, with the status they expect."""
 
@@ -926,6 +1109,71 @@ class EvaluationFixtureTests(unittest.TestCase):
                 self.assertIn(status, title.group(2).split("|"), f"{case}: {grader.stem}")
                 graded += 1
             self.assertGreaterEqual(graded, 6, case)
+
+
+class RenderedGraderTests(unittest.TestCase):
+    """A run published through the protocol renders findings.md rows that the evaluation graders match."""
+
+    MODEL_RESULTS = {
+        "tangled-ui": {
+            "no-state-synchronisation": ("violation", "src/components/OrderSummary.tsx", "setTotal(sum);"),
+            "cleanup-functions-present": ("violation", "src/components/OrderSearch.tsx", "fetch(`/api/orders"),
+            "effect-dependencies-honest": ("violation", "src/components/OrdersTable.tsx", "}, [selectedId]);"),
+            "memoization-for-correctness": ("present", "src/components/OrdersTable.tsx", "}, [selectedId]);"),
+            "custom-hook-design": None,
+            "no-state-synchronisation-between-sources-of-truth": ("violation", "src/components/OrdersTable.tsx", "const [selectedOrder, setSelectedOrder]"),
+            "status-enums-over-multiple-booleans": ("violation", "src/components/RefundForm.tsx", "const [isSubmitting, setIsSubmitting]"),
+            "state-at-the-right-level": ("present", "src/components/OrdersTable.tsx", "const [selectedId, setSelectedId]"),
+            "url-state-for-shareable-state": ("partial", "src/components/OrderSearch.tsx", 'const [query, setQuery] = useState("");'),
+            "forms-use-actions": ("partial", "src/components/RefundForm.tsx", "async function handleSubmit"),
+            "serialisable-props-cross-the-boundary": ("violation", "src/app/orders/page.tsx", "onExport={exportCsv}"),
+            "use-client-minimal-and-deliberate": ("present", "src/components/OrderSummary.tsx", '"use client";'),
+        },
+        "well-built-ui": {
+            "no-state-synchronisation": ("present", "src/components/OrderSummary.tsx", "const total = orderTotal(lines);"),
+            "cleanup-functions-present": ("present", "src/components/OrderStatusPoller.tsx", "return () => clearInterval(id);"),
+            "effect-dependencies-honest": ("present", "src/components/OrderViewTracker.tsx", "const onView = useEffectEvent("),
+            "memoization-for-correctness": ("present", "src/components/OrderStatusPoller.tsx", "}, [router, intervalMs]);"),
+            "custom-hook-design": None,
+            "no-state-synchronisation-between-sources-of-truth": ("present", "src/components/OrdersTable.tsx", "const selected = orders.find"),
+            "status-enums-over-multiple-booleans": ("present", "src/components/RefundForm.tsx", "useActionState(refundOrder, initialState)"),
+            "state-at-the-right-level": ("present", "src/components/OrdersTable.tsx", "const [selectedId, setSelectedId]"),
+            "url-state-for-shareable-state": ("present", "src/components/SearchBox.tsx", 'name="q"'),
+            "forms-use-actions": ("present", "src/components/RefundForm.tsx", "<form action={formAction}>"),
+            "serialisable-props-cross-the-boundary": ("present", "src/app/orders/page.tsx", "exportOrders={exportOrders}"),
+            "use-client-minimal-and-deliberate": ("present", "src/components/OrderViewTracker.tsx", '"use client";'),
+        },
+    }
+
+    def test_regex_graders_match_a_published_run(self) -> None:
+        for case, results in self.MODEL_RESULTS.items():
+            folder = ROOT / "evals" / "react-audit" / case
+            with tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory)
+                subprocess.run(["bash", str(folder / "fixture.sh")], cwd=repository, check=True, capture_output=True)
+
+                def run(*arguments: str) -> None:
+                    completed = subprocess.run([sys.executable, str(PROTOCOL), "--repository", str(repository), *arguments], capture_output=True, text=True)
+                    self.assertEqual(completed.returncode, 0, f"{case}: {arguments[:3]}: {completed.stdout[-400:]} {completed.stderr[-400:]}")
+
+                run("begin", "react-audit")
+                for name, result in results.items():
+                    if result is None:
+                        run("not-applicable", "react-audit", CHECK + name, "--reason", "The repository defines no custom hooks.")
+                        continue
+                    status, path, quote = result
+                    number = next(index for index, line in enumerate((repository / path).read_text().split("\n"), start=1) if quote in line)
+                    arguments = ["record", "react-audit", CHECK + name, "--status", status, "--evidence", f"{path}:{number} — `{quote}`"]
+                    if status != "present":
+                        judgement = "act-on" if name in ("no-state-synchronisation", "cleanup-functions-present", "no-state-synchronisation-between-sources-of-truth", "serialisable-props-cross-the-boundary") else "consider"
+                        arguments += ["--tier", "direct", "--gap", "planted problem", "--remediation", "fix it", "--judgement", judgement]
+                    run(*arguments)
+                run("finish", "react-audit")
+                findings = (repository / ".architect-audits" / "react-audit" / "findings.md").read_text(encoding="utf-8")
+            for grader in sorted((folder / "graders").glob("*.md")):
+                pattern = re.search(r'^pattern: (".*")$', grader.read_text(encoding="utf-8"), re.M)
+                if pattern:
+                    self.assertRegex(findings, json.loads(pattern.group(1)), f"{case}: {grader.stem}")
 
 
 class CommandLineAndProtocolTests(CollectorTestCase):

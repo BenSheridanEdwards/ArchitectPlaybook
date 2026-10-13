@@ -121,13 +121,13 @@
     {
       "checkId": "react-audit.memoization-for-correctness",
       "layer": "effects-and-custom-hooks",
-      "title": "Effect dependencies are stable without the compiler",
+      "title": "Effect dependencies are stable",
       "severity": "medium",
       "method": "model",
       "rationale": "An object or function created during render and listed as an effect dependency re-runs the effect on every render, re-subscribing or re-fetching in a loop.",
       "lastVerified": "2026-10-13",
-      "expectation": "Without the React Compiler, objects and functions an effect depends on are created inside the effect, moved out of the component, or memoized with `useMemo` or `useCallback`. Not applicable when the compiler compiles every component.",
-      "violationSignal": "An effect dependency that is an object, array, or function created fresh on each render."
+      "expectation": "Objects and functions an effect depends on are created inside the effect, moved out of the component, or memoized with `useMemo` or `useCallback`. Under the React Compiler this holds where the compiler compiles the component; components it skips or that opt out, and effects that rely on a value never changing, still need it, because React keeps `useMemo` as the escape hatch for effect dependencies.",
+      "violationSignal": "An effect dependency that is an object, array, or function created fresh on each render, in a component the compiler does not cover."
     },
     {
       "checkId": "react-audit.custom-hook-design",

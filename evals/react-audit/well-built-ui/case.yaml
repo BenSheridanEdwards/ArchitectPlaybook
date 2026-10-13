@@ -4,11 +4,11 @@ description: The same orders dashboard built well with the React Compiler, actio
 tags: [react, clean]
 runs: 3
 expected_outcome: >-
-  Publishes a complete run with every collector check present and the stable-dependencies check not
-  applicable because the React Compiler is on. No model check is a violation: totals are computed during
-  render, the poller cleans up, the view tracker uses useEffectEvent, the refund form uses useActionState,
-  and only a Server Function crosses into a client component. The act-on list is short or empty and
-  invents no problems.
+  Publishes a complete run with every collector check present. The React Compiler is on, and the
+  stable-dependencies check is still judged, and present. No model check is a violation: totals are
+  computed during render, the poller cleans up, the view tracker uses useEffectEvent, the refund form
+  uses useActionState, and only a Server Function crosses into a client component. Every present
+  verdict cites the code that earns it. The act-on list is short or empty and invents no problems.
 context:
   scaffold_script: fixture.sh
 execution:

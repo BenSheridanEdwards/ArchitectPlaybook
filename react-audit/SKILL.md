@@ -15,7 +15,7 @@ It has two sources:
 - a deterministic collector, which reads React versions per package, the framework, React Compiler adoption, the hooks lint rules that apply to component files, `react-scripts`, exhaustive-deps suppressions, forwardRef wrappers, default exports outside framework files, and the client module graph; it also lists effect and state candidates and ranks files by Git churn and import fan-in;
 - the judgement of the model, spent on the riskiest components first, within a discovery budget.
 
-Checks gate themselves on facts, not failures. A React 18 package gets "not applicable" for the React 19 checks, a project without server components gets it for the boundary checks, and the stable-dependencies check does not apply when the React Compiler compiles every component. The audit is static and read-only; it never runs the application, ESLint, or the compiler.
+Checks gate themselves on facts, not failures. A React 18 package gets "not applicable" for the React 19 checks, and a project without server components gets it for the boundary checks. React Compiler adoption is context for judging effect dependencies, never a gate: the compiler skips components it cannot compile, and React keeps `useMemo` and `useCallback` as the escape hatch for effect dependencies. The audit is static and read-only; it never runs the application, ESLint, or the compiler.
 
 [Detection notes](references/detection.md) explain each check, the collector's limits, and the sources verified for this baseline.
 
@@ -55,7 +55,7 @@ Statuses follow the shared taxonomy: `present`, `partial`, `missing`, or `violat
 The collector records:
 - React per package (declared, resolved from the lockfile, and the version that gates the React 19 checks, which is the lowest a peer range admits);
 - frameworks and routers (Next.js App or Pages Router, React Router framework mode, Remix 2, Expo Router, React Native, Gatsby, Vite, Create React App) and whether server components are in use;
-- React Compiler adoption per package, its compilation mode, and files that opt out with `'use no memo'`;
+- React Compiler adoption per package, read from the exported configuration for the installed Next.js version, its compilation mode, and file- or function-level `'use no memo'` opt-outs;
 - the hooks lint presets and rules that apply to the sampled component files;
 - `'use client'` and `'use server'` files, inline Server Functions, misplaced directives, and the client module graph;
 - forwardRef and ref-as-prop counts, and default exports inside and outside framework files;
@@ -77,7 +77,7 @@ The collector records:
 | Effects do not derive or mirror state | high | model | Derived values are computed during render; resets use a `key`; event logic and parent notifications run in handlers. | An effect that only sets state from props or state, an effect chain, or an effect that calls a parent callback when state changes. |
 | Effects clean up and ignore stale results | high | model | Effects that subscribe, listen, time, or fetch return a cleanup that unsubscribes, clears, aborts, or sets an ignore flag. | A fetch with no abort or ignore flag, or a listener, interval, or subscription with no cleanup. |
 | Effect dependencies are honest | medium | model | Effects list what they read; latest-value logic uses `useEffectEvent` (React 19.2) instead of a suppression. | An empty or partial dependency array, often suppressed, over values that change. |
-| Effect dependencies are stable without the compiler | medium | model | Without the compiler, objects and functions in effect dependencies are created inside the effect, hoisted, or memoized. Not applicable when the compiler compiles every component. | A dependency created fresh on every render. |
+| Effect dependencies are stable | medium | model | Objects and functions in effect dependencies are created inside the effect, hoisted, or memoized; under the React Compiler, only where it compiles the component, and `useMemo` stays the escape hatch an effect relies on. | A dependency created fresh on every render in code the compiler does not cover. |
 | Custom hooks encapsulate one concern | medium | model | One concern per hook, a consistent return shape, named for what it does. Soft check — mixed adherence is reported as partial. | Hooks mixing concerns, inconsistent shapes, or lifecycle wrappers such as `useMount`. |
 
 ### Layer 3 — State
@@ -130,7 +130,7 @@ Classify each candidate as **unneeded effect**, **missing cleanup**, **race**, *
    ```
 
    Pass `--since <ref>` for a diff-scoped run, and `--threshold months=<n>` for `--months`.
-2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/react-audit/.staging/run.json`: `packages`, `compiler`, `riskRanking`, `effects.candidates`, `state`, `exhaustiveDepsSuppressions`, and `directives`. Collector checks marked not applicable stay that way; do not re-record them.
+2. **Read the evidence the collector staged.** Read the `snapshot` in `.architect-audits/react-audit/.staging/run.json`: `packages`, `compiler`, `riskRanking`, `effects.candidates`, `state`, `exhaustiveDepsSuppressions`, and `directives`. Collector checks marked not applicable stay that way; do not re-record them. When the collector leaves a tool check not evaluated because configuration it could not read lives in the repository, such as a shared ESLint configuration it does not follow, read that configuration chain yourself and record the check with `path:line` evidence.
 3. **Read within the discovery budget.** Read the five highest-ranked components and hooks, then the first 25 effect candidates in ranked order, then every non-serialisable prop candidate and every module in `serverOnlyReachedFromClient`. Widen by 25 candidates only while more than a third of what you read is a real finding. Record what you sampled with `snapshot --set sampled=<json>`.
 4. **Evaluate every model check.**
    - Apply "Judging an effect" and the detection notes.
