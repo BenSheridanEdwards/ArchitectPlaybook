@@ -11,6 +11,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
 - **Code:** **[Architecture](architecture-audit/SKILL.md)** — structure and change risk · **[Testing](testing-audit/SKILL.md)** — behavior coverage · **[React](react-audit/SKILL.md)** — components and hooks · **[TypeScript](typescript-audit/SKILL.md)** — type safety · **[Linting](linting-audit/SKILL.md)** — rule coverage.
 - **Measure:** **[Repository Quality Score](repository-quality-score/SKILL.md)** — deterministic audit roll-up, category scores, and assessment coverage.
 - **Review:** **[Ben Architect Review](ben-architect-review/SKILL.md)** — principles-based architectural pull request reviews using Ben's judgement.
+- **Writing:** **[Clear Thinking](clear-thinking/SKILL.md)** for thinking a piece through, then writing it so the reader can act on it.
 - **Knowledge:** **[Documentation](documentation-audit/SKILL.md)** — docs and drift · **[Agentic Setup](agentic-audit/SKILL.md)** — agent instructions and safety rails.
 
 ## Table of contents
@@ -25,6 +26,7 @@ A self-contained, self-improving collection of Claude Code slash-command skills 
   - [Setup utilities](#setup-utilities)
   - [Audits](#audits)
   - [Review](#review)
+  - [Writing](#writing)
   - [Meta](#meta)
 - [Conventions](#conventions)
 - [Contributing](#contributing)
@@ -284,6 +286,12 @@ All audits support the universal `--worktree`, `--learn`, and `--teach` flags. U
 | Command | Purpose |
 | --- | --- |
 | [`/ben-architect-review`](ben-architect-review/SKILL.md) | Perform a principles-based architectural pull request review using Ben's judgement, then ask whether to post it as pending or submit it on GitHub. |
+
+### Writing
+
+| Command | Purpose |
+| --- | --- |
+| [`/clear-thinking`](clear-thinking/SKILL.md) | Think a piece of writing through before drafting it, then write and edit it so a busy reader can understand and act on it at once. |
 
 ### Meta
 

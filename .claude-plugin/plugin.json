@@ -25,6 +25,7 @@
     "./audit-protocol",
     "./ben-architect-review",
     "./bundle-build-audit",
+    "./clear-thinking",
     "./dependency-audit",
     "./documentation-audit",
     "./error-handling-audit",
