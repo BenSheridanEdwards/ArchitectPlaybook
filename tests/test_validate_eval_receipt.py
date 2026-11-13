@@ -18,6 +18,9 @@ class ReceiptTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         for name in ('testing-audit/SKILL.md', 'audit-protocol/SKILL.md',
                      'audit-protocol/references/run-protocol.md',
+                     'testing-audit/scripts/collect.py', 'testing-audit/checks.json',
+                     'testing-audit/references/detection.md',
+                     'audit-protocol/scripts/audit_run.py',
                      'evals/testing-audit/sound-suite/case.yaml',
                      'evals/testing-audit/sound-suite/fixture.sh',
                      'evals/testing-audit/sound-suite/graders/clean.md', 'report.json'):
@@ -41,7 +44,19 @@ class ReceiptTests(unittest.TestCase):
         (self.root / 'testing-audit/SKILL.md').write_text('changed')
         state, reasons = self.check()
         self.assertEqual(state, 'stale')
-        self.assertIn('skill', ' '.join(reasons))
+        self.assertIn('testing-audit/SKILL.md', ' '.join(reasons))
+
+    def test_changed_collector_is_stale(self):
+        (self.root / 'testing-audit/scripts/collect.py').write_text('changed')
+        state, reasons = self.check()
+        self.assertEqual(state, 'stale')
+        self.assertIn('testing-audit/scripts/collect.py', ' '.join(reasons))
+
+    def test_changed_catalogue_is_stale(self):
+        (self.root / 'testing-audit/checks.json').write_text('changed')
+        state, reasons = self.check()
+        self.assertEqual(state, 'stale')
+        self.assertIn('testing-audit/checks.json', ' '.join(reasons))
 
     def test_relabelled_sound_suite_result_is_rejected(self):
         self.data['results']['testing-audit/other'] = self.data['results'].pop('testing-audit/sound-suite')
