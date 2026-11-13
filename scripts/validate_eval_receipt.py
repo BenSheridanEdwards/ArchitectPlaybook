@@ -10,6 +10,8 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
+import tempfile
 
 EXIT_CODES = {'valid': 0, 'stale': 1, 'invalid': 2, 'failed': 3, 'no-receipt': 4}
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,8 +118,47 @@ def validate(path, root=ROOT):
         return 'invalid', [f'unverified: {exc}']
 
 
+
+def record(metadata, report, output, root=ROOT):
+    """Record explicit local results; reject malformed input before writing."""
+    data = json.loads(metadata.read_text())
+    if not isinstance(data, dict):
+        raise ValueError('metadata must be an object')
+    data = {key: data.get(key) for key in
+            ('tool', 'model', 'command', 'runs', 'results')}
+    report = report.resolve()
+    data['report'] = {'location': str(report.relative_to(root.resolve())),
+                      'sha256': digest(report)}
+    data['identities'] = {name: digest(root / name)
+                          for name in identity_paths(root)}
+    encoded = json.dumps(data, indent=2, sort_keys=True) + '\n'
+    # Reuse validation before replacing any existing receipt. Failed grader
+    # runs are evidence too; malformed or stale evidence must not be recorded.
+    with tempfile.TemporaryDirectory() as directory:
+        candidate = Path(directory) / 'receipt.json'
+        candidate.write_text(encoded)
+        state, reasons = validate(candidate, root)
+    if state not in ('valid', 'failed'):
+        raise ValueError('; '.join(reasons))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(encoded)
+    return state, reasons
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    if len(sys.argv) > 1 and sys.argv[1] == 'record':
+        parser.add_argument('--metadata', required=True, type=Path)
+        parser.add_argument('--report', required=True, type=Path)
+        parser.add_argument('--output', type=Path,
+                            default=ROOT / 'evals/receipts/testing-audit.json')
+        args = parser.parse_args(sys.argv[2:])
+        try:
+            state, reasons = record(args.metadata, args.report, args.output)
+        except (OSError, ValueError, TypeError) as exc:
+            state, reasons = 'invalid', [f'unverified: {exc}']
+        print(json.dumps({'state': state, 'reasons': reasons}))
+        return EXIT_CODES[state]
     parser.add_argument('receipt', nargs='?', type=Path,
                         default=ROOT / 'evals/receipts/testing-audit.json')
     args = parser.parse_args()

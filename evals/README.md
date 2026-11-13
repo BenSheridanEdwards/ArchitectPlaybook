@@ -89,3 +89,33 @@ over its runs.
 3. Write one grader per expected status, anchored to the "All checks" table, and an `llm` grader for the judgement
    the regexes cannot capture.
 4. Run the case at least three times before trusting its result.
+
+## Evidence receipts
+
+After a maintainer runs a local eval against the current revision, retain its
+report locally and prepare a JSON metadata file with these fields: nonempty
+strings `tool`, `model`, and `command` (the command actually run), a positive
+integer `runs`, and `results`. Results map every testing-audit case directory
+ID (for example `testing-audit/sound-suite`) to every grader's path relative
+to that case's `graders/` directory, then to one boolean per run, in run order.
+Include all cases and graders; false results are recorded as failed evidence.
+The synthetic example in `tests/fixtures/eval_receipt/results/metadata.json`
+illustrates this input contract. No undocumented HTML format is parsed.
+
+From the repository root, using your actual local paths:
+
+```bash
+python3 scripts/validate_eval_receipt.py record --metadata evals/results/<timestamp>/metadata.json --report evals/results/<timestamp>/report.html
+python3 scripts/validate_eval_receipt.py
+```
+
+The report must be a file inside this repository. The command writes
+`evals/receipts/testing-audit.json`; `--output` selects another receipt path.
+It hashes the report and the same skill, protocol, case, fixture, and grader
+files used by validation. Metadata and results are explicit maintainer input;
+hashes bind file bytes, not who ran the eval or whether they ran it.
+
+`evals/results/` is gitignored. Validation needs the report file present locally:
+a fresh clone or CI job will get `invalid: report unavailable` unless the report
+is there. This does not introduce report publishing or a CI validation gate.
+No real receipt is committed until a maintainer has run the eval.

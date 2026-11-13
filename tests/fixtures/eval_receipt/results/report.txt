@@ -1,0 +1,1 @@
+Synthetic report for receipt recording tests.

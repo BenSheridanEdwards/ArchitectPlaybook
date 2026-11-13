@@ -1,0 +1,15 @@
+{
+  "tool": "fixture-tool",
+  "model": "fixture-model",
+  "command": "fixture eval",
+  "runs": 3,
+  "results": {
+    "testing-audit/sound-suite": {
+      "clean.md": [
+        true,
+        true,
+        true
+      ]
+    }
+  }
+}
