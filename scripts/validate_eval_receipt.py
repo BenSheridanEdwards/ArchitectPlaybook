@@ -20,8 +20,11 @@ def digest(path):
 
 
 def identity_paths(root):
-    paths = ['testing-audit/SKILL.md', 'audit-protocol/SKILL.md',
-             'audit-protocol/references/run-protocol.md']
+    paths = [str(p.relative_to(root))
+             for directory in ('testing-audit', 'audit-protocol')
+             for p in (root / directory).rglob('*')
+             if p.is_file() and '__pycache__' not in p.relative_to(root).parts
+             and p.suffix != '.pyc']
     for case in sorted((root / 'evals/testing-audit').iterdir()):
         if not case.is_dir():
             continue
@@ -29,7 +32,7 @@ def identity_paths(root):
                      for name in ('case.yaml', 'fixture.sh'))
         paths.extend(str(p.relative_to(root)) for p in sorted((case / 'graders').rglob('*'))
                      if p.is_file())
-    return paths
+    return sorted(paths)
 
 
 def validate(path, root=ROOT):
