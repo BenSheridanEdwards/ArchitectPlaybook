@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import shutil
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,3 +91,15 @@ class ReceiptTests(unittest.TestCase):
     def test_malformed_receipt(self):
         self.path.write_text('[]')
         self.assertEqual(receipt.validate(self.path, self.root)[0], 'invalid')
+
+    def test_record_matches_validate(self):
+        source = ROOT / 'tests/fixtures/eval_receipt/results'
+        results = self.root / 'evals/results/fixture'
+        shutil.copytree(source, results)
+        receipt.record(results / 'metadata.json', results / 'report.txt',
+                       self.path, self.root)
+        self.assertEqual(receipt.validate(self.path, self.root), ('valid', []))
+        data = json.loads(self.path.read_text())
+        self.assertEqual(data['identities'], self.data['identities'])
+        self.assertEqual(data['results'], self.data['results'])
+        self.assertEqual(data['report']['sha256'], receipt.digest(results / 'report.txt'))
