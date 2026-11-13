@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import tempfile
 import shutil
+import subprocess
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,3 +105,29 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(data['identities'], self.data['identities'])
         self.assertEqual(data['results'], self.data['results'])
         self.assertEqual(data['report']['sha256'], receipt.digest(results / 'report.txt'))
+
+    def test_record_cli_rejects_missing_input(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / 'scripts/validate_eval_receipt.py'),
+             'record', '--metadata', str(self.root / 'missing.json'),
+             '--report', str(self.root / 'report.json'),
+             '--output', str(self.path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)['state'], 'invalid')
+        self.assertFalse(self.path.exists())
+
+    def test_record_preserves_failed_results(self):
+        metadata = self.root / 'metadata.json'
+        self.data['results']['testing-audit/sound-suite']['clean.md'][0] = False
+        metadata.write_text(json.dumps(self.data))
+        receipt.record(metadata, self.root / 'report.json', self.path, self.root)
+        self.assertEqual(receipt.validate(self.path, self.root)[0], 'failed')
+
+    def test_record_rejects_incomplete_results_without_overwriting(self):
+        metadata = self.root / 'metadata.json'
+        self.data['results'] = {}
+        metadata.write_text(json.dumps(self.data))
+        self.path.write_text('existing')
+        with self.assertRaises(ValueError):
+            receipt.record(metadata, self.root / 'report.json', self.path, self.root)
+        self.assertEqual(self.path.read_text(), 'existing')
