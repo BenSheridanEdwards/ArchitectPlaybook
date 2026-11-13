@@ -1,0 +1,6 @@
+{
+  "tool": "fixture-tool", "model": "fixture-model", "command": "fixture eval",
+  "runs": 3,
+  "report": {"location": "report.json", "sha256": "filled-by-test"},
+  "results": {"testing-audit/sound-suite": {"clean.md": [true, true, true]}}
+}
